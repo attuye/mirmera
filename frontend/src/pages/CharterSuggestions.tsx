@@ -27,11 +27,7 @@ export default function CharterSuggestions() {
     setBusy(true)
     setError(null)
     try {
-      const artifact = await fetch(`http://localhost:8000/products/${product.id}/artifacts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'diff', label: 'pasted diff', raw_content: diffText }),
-      }).then((r) => r.json())
+      const artifact = await api.createArtifact(product.id, { type: 'diff', label: 'pasted diff', raw_content: diffText })
 
       const result = await api.suggestCharters(product.id, [artifact.id])
       setSuggestions(result)
@@ -56,7 +52,7 @@ export default function CharterSuggestions() {
       risk_areas: s.risk_areas,
       priority: s.priority,
       source: 'ai-suggested',
-    } as any)
+    })
     setExistingCharters((prev) => [...prev, charter])
     setSuggestions((prev) => prev.filter((_, i) => i !== index))
   }

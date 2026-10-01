@@ -44,3 +44,6 @@ button {
 }
 
 .mono { font-family: var(--font-mono); }
+
+/* Visible keyboard focus everywhere (buttons have no border by default). */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

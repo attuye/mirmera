@@ -8,6 +8,7 @@ import ActiveSession from './pages/ActiveSession'
 import DebriefPage from './pages/Debrief'
 import DebriefsList from './pages/Debriefs'
 import Bugs from './pages/Bugs'
+import RisksPage from './pages/Risks'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -15,6 +16,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/risks" element={<RisksPage />} />
         <Route path="/charters/suggest" element={<CharterSuggestions />} />
         <Route path="/sessions/:sessionId" element={<ActiveSession />} />
         <Route path="/sessions/:sessionId/debrief" element={<DebriefPage />} />
