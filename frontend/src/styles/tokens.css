@@ -1,0 +1,46 @@
+/* Design tokens — matches the UX mockups so the built app doesn't drift from them. */
+:root {
+  --bg: #0C0D0F;
+  --panel: #131518;
+  --panel-alt: #101215;
+  --border: #23262C;
+  --border-soft: #1E2126;
+
+  --text: #E8EAED;
+  --text-secondary: #9AA1AC;
+  --text-tertiary: #6B7280;
+  --text-quiet: #5B6270;
+
+  --accent: #3ED598;
+  --accent-bg: #1B2620;
+  --danger: #F0625D;
+  --danger-bg: #241417;
+  --warning: #F2B84B;
+  --warning-bg: #201C14;
+  --info: #6FA8FF;
+  --question: #B98CF2;
+  --neutral-tag: #6B7280;
+
+  --font-ui: 'Space Grotesk', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: #6EE6B8; }
+
+button {
+  font-family: var(--font-ui);
+  cursor: pointer;
+  border: none;
+}
+
+.mono { font-family: var(--font-mono); }
