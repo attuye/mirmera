@@ -84,17 +84,27 @@ class MockProvider(LLMProvider):
     @staticmethod
     def _debrief(user: str) -> dict:
         charter = _between(user, "charter") or "the session charter"
-        notes = [line for line in _between(user, "notes").splitlines() if line.strip()]
-        note_count = 0 if notes == ["(no notes logged)"] else len(notes)
-        bugs = _between(user, "bugs") or "(none)"
+        lines = [line for line in _between(user, "notes").splitlines() if line.strip()]
+        lines = [] if lines == ["(no notes logged)"] else lines
+        tagged = [(re.search(r"\[(\w+)\]", l).group(1) if re.search(r"\[(\w+)\]", l) else "test",
+                   l.split("] ", 1)[-1]) for l in lines]
+        bugs = [b.lstrip("- ") for b in _between(user, "bugs").splitlines() if b.strip() and b.strip() != "(none)"]
+        bug_text = "; ".join(bugs) if bugs else "(none)"
         return {
-            "coverage_summary": (
-                f'Mock debrief for charter: "{charter}". '
-                f"{note_count} note(s) logged this session. Bugs found: {bugs}. "
-                "This is a placeholder summary; switch DEFAULT_AI_PROVIDER to a real "
-                "provider for a synthesized narrative."
+            "charter_status": "partially_fulfilled" if lines else "not_fulfilled",
+            "charter_status_rationale": f"Mock: {len(lines)} note(s) logged against the charter.",
+            "past": (
+                f'Mock debrief for charter: "{charter}". {len(lines)} note(s) logged this session. '
+                f"Bugs found: {bug_text}. Switch DEFAULT_AI_PROVIDER to a real provider for a synthesized narrative."
             ),
-            "open_questions": ["(mock provider: no AI-extracted open questions yet)"],
+            "results": [f"Logged: {b}" for b in bugs] or ["(mock) No bugs logged"],
+            "obstacles": [text for tag, text in tagged if tag in ("issue", "setup")],
+            "outlook": [{
+                "charter": f"Explore the edges of {charter[:60]} with unusual inputs to discover what the session missed",
+                "reason": "Mock follow-up: the session only covered part of the charter.",
+            }],
+            "risks_observed": [f"(mock) Problems like '{bugs[0][:60]}' may recur elsewhere"] if bugs else [],
+            "open_questions": [text for tag, text in tagged if tag == "question"],
         }
 
     @staticmethod

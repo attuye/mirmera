@@ -77,7 +77,7 @@ class CharterCreate(BaseModel):
     rationale: Optional[str] = None
     risk_areas: list[str] = []
     priority: Literal["high", "medium", "low"] = "medium"
-    source: Literal["ai-suggested", "risk-based", "manual"] = "manual"
+    source: Literal["ai-suggested", "risk-based", "follow-up", "manual"] = "manual"
     source_artifact_id: Optional[str] = None
     risk_ids: list[str] = []  # risks this charter investigates (must belong to the product)
     test_ideas: list[str] = []
@@ -199,6 +199,17 @@ class BugListItem(BugOut):
 
 # ---- Debrief ------------------------------------------------------------
 
+class OutlookItem(BaseModel):
+    charter: str
+    reason: str
+    charter_id: Optional[str] = None  # set once saved as a charter
+
+
+class ObservedRisk(BaseModel):
+    text: str
+    risk_id: Optional[str] = None  # set once promoted to a risk
+
+
 class DebriefOut(BaseModel):
     id: str
     session_id: str
@@ -207,8 +218,30 @@ class DebriefOut(BaseModel):
     open_questions: list
     ai_draft: Optional[str]
     final_text: Optional[str]
+    # PROOF
+    charter_status: Optional[str] = None
+    charter_status_rationale: Optional[str] = None
+    results: list[str] = []
+    obstacles: list[str] = []
+    outlook: list[OutlookItem] = []
+    risks_observed: list[ObservedRisk] = []
+    tester_feelings: Optional[str] = None
+    ai_provider: Optional[str] = None
+    ai_model: Optional[str] = None
+    prompt_version: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("open_questions", "results", "obstacles", "outlook", "risks_observed", mode="before")
+    @classmethod
+    def none_is_empty(cls, value):
+        # Debriefs written before the PROOF step have NULL here.
+        return value or []
+
+    @field_validator("time_breakdown", mode="before")
+    @classmethod
+    def none_is_empty_dict(cls, value):
+        return value or {}
 
 class DebriefListItem(BaseModel):
     id: str
@@ -219,7 +252,12 @@ class DebriefListItem(BaseModel):
     created_at: datetime
     
 class DebriefUpdate(BaseModel):
-    final_text: str
+    """The tester's edits. Only the fields sent are changed."""
+    final_text: Optional[str] = None
+    tester_feelings: Optional[str] = None
+    results: Optional[list[str]] = None
+    obstacles: Optional[list[str]] = None
+    open_questions: Optional[list[str]] = None
 
 
 # ---- Risk model ----------------------------------------------------------
@@ -434,3 +472,31 @@ class BugReview(BaseModel):
     reproducibility: Optional[Reproducibility] = None
     open_questions: Optional[list[str]] = None
     status: Optional[str] = None
+
+
+# ---- PROOF debrief ----------------------------------------------------------
+
+class FollowUpCharter(BaseModel):
+    charter: str
+    reason: str
+
+
+class LLMDebrief(BaseModel):
+    """AI contract for the session debrief. Feelings are deliberately absent:
+    only the tester can say how the session felt."""
+    charter_status: Literal["fulfilled", "partially_fulfilled", "not_fulfilled"]
+    charter_status_rationale: str
+    past: str
+    results: list[str]
+    obstacles: list[str]
+    outlook: list[FollowUpCharter]
+    risks_observed: list[str]
+    open_questions: list[str]
+
+
+class ObservedRiskPromotion(BaseModel):
+    """Turn a risk observed in a session into a real (accepted) risk."""
+    title: Optional[str] = Field(default=None, min_length=3)
+    quality_criterion: QualityCriterion = "capability"
+    impact: int = Field(default=3, ge=1, le=5)
+    likelihood: int = Field(default=3, ge=1, le=5)

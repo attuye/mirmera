@@ -24,12 +24,36 @@ export class Api {
     return this.json(await this.ctx.post('/products', { data: { name: 'AddisVerify KYC Platform', org_id: 'e2e' } }))
   }
 
+  /** A separate product, for specs whose data must not change the shared one
+   *  (risk refs like R1 are numbered per product). */
+  async newProduct(name: string): Promise<{ id: string; name: string }> {
+    // The app's pages work on the first product, so make sure that exists first.
+    await this.product()
+    return this.json(await this.ctx.post('/products', { data: { name, org_id: 'e2e' } }))
+  }
+
   async charter(productId: string, mission: string): Promise<{ id: string }> {
     return this.json(await this.ctx.post(`/products/${productId}/charters`, { data: { mission_statement: mission } }))
   }
 
   async session(charterId: string): Promise<{ id: string }> {
     return this.json(await this.ctx.post('/sessions', { data: { charter_id: charterId, tester_id: 'e2e' } }))
+  }
+
+  async note(sessionId: string, tag: 'test' | 'bug' | 'issue' | 'question' | 'setup', content: string): Promise<{ id: string }> {
+    return this.json(await this.ctx.post(`/sessions/${sessionId}/notes`, { data: { tag, content } }))
+  }
+
+  async bug(sessionId: string, title: string): Promise<{ id: string }> {
+    return this.json(await this.ctx.post(`/sessions/${sessionId}/bugs`, { data: { title } }))
+  }
+
+  async risks(productId: string): Promise<{ id: string; title: string; score: number; status: string; source: string }[]> {
+    return this.json(await this.ctx.get(`/products/${productId}/risks`))
+  }
+
+  async charters(productId: string): Promise<{ id: string; mission_statement: string; source: string }[]> {
+    return this.json(await this.ctx.get(`/products/${productId}/charters`))
   }
 
   async notes(sessionId: string): Promise<{ content: string }[]> {

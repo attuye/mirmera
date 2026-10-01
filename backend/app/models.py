@@ -92,7 +92,7 @@ class Risk(Base):
     rationale = Column(Text, nullable=True)
     evidence = Column(String, nullable=False)  # "stated" | "inferred" | "speculative" | "tester"
     status = Column(String, default="proposed")  # "proposed" | "accepted" | "retired"
-    source = Column(String, default="ai")  # "ai" | "manual"
+    source = Column(String, default="ai")  # "ai" | "manual" | "session" (promoted from a debrief)
     tester_notes = Column(Text, nullable=True)
     ai_provider = Column(String, nullable=True)
     ai_model = Column(String, nullable=True)
@@ -210,5 +210,19 @@ class Debrief(Base):
     ai_draft = Column(Text, nullable=True)  # raw AI-generated draft, kept for comparison
     final_text = Column(Text, nullable=True)  # tester-edited version actually saved
     created_at = Column(DateTime, default=utcnow)
+
+    # PROOF report (Past, Results, Obstacles, Outlook, Feelings), added in the debrief step.
+    # The AI drafts Past/Results/Obstacles/Outlook; Feelings only ever comes from the tester.
+    # coverage_summary above holds the Past narrative, so older screens keep working.
+    charter_status = Column(String, nullable=True)  # "fulfilled" | "partially_fulfilled" | "not_fulfilled"
+    charter_status_rationale = Column(Text, nullable=True)
+    results = Column(JSON, nullable=True)  # list[str]
+    obstacles = Column(JSON, nullable=True)  # list[str]
+    outlook = Column(JSON, nullable=True)  # [{"charter", "reason", "charter_id"}]; charter_id once saved
+    risks_observed = Column(JSON, nullable=True)  # [{"text", "risk_id"}]; risk_id once promoted
+    tester_feelings = Column(Text, nullable=True)
+    ai_provider = Column(String, nullable=True)
+    ai_model = Column(String, nullable=True)
+    prompt_version = Column(String, nullable=True)
 
     session = relationship("Session", back_populates="debrief")
