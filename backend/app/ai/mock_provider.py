@@ -90,6 +90,9 @@ class MockProvider(LLMProvider):
                    l.split("] ", 1)[-1]) for l in lines]
         bugs = [b.lstrip("- ") for b in _between(user, "bugs").splitlines() if b.strip() and b.strip() != "(none)"]
         bug_text = "; ".join(bugs) if bugs else "(none)"
+        browser = _between(user, "browser")
+        recorded = next((l for l in browser.splitlines() if l.startswith("Recorded:")), None)
+        unreachable = [l.split("] ", 1)[-1] for l in browser.splitlines() if "] Could not open " in l]
         return {
             "charter_status": "partially_fulfilled" if lines else "not_fulfilled",
             "charter_status_rationale": f"Mock: {len(lines)} note(s) logged against the charter.",
@@ -97,8 +100,9 @@ class MockProvider(LLMProvider):
                 f'Mock debrief for charter: "{charter}". {len(lines)} note(s) logged this session. '
                 f"Bugs found: {bug_text}. Switch DEFAULT_AI_PROVIDER to a real provider for a synthesized narrative."
             ),
-            "results": [f"Logged: {b}" for b in bugs] or ["(mock) No bugs logged"],
-            "obstacles": [text for tag, text in tagged if tag in ("issue", "setup")],
+            "results": ([f"Logged: {b}" for b in bugs] or ["(mock) No bugs logged"])
+                       + ([f"(mock) Browser {recorded[0].lower()}{recorded[1:]}"] if recorded else []),
+            "obstacles": [text for tag, text in tagged if tag in ("issue", "setup")] + unreachable,
             "outlook": [{
                 "charter": f"Explore the edges of {charter[:60]} with unusual inputs to discover what the session missed",
                 "reason": "Mock follow-up: the session only covered part of the charter.",
@@ -206,6 +210,11 @@ class MockProvider(LLMProvider):
         trail = [line.split("] ", 1)[-1].split(" ", 1)[-1] for line in _between(user, "trail").splitlines()
                  if line.startswith("[")]
         steps = trail[-4:] or ["(mock) Steps could not be recovered from the session notes"]
+        browser = _between(user, "browser")
+        problems = [l for l in browser.splitlines() if re.match(r"\+\d+ min \[(console error|page error|failed request)", l)]
+        pages = [l for l in browser.splitlines() if re.match(r"\+\d+ min \[page\]", l)]
+        if pages:
+            steps = [f"Open {pages[-1].split('] ', 1)[-1]}"] + [s for s in steps if not s.startswith("(mock)")]
         if title.rstrip().endswith("?"):  # a note phrased as a question stays a question
             return {
                 "kind": "question", "title": title, "summary": f"Mock: the tester asks: {title}",
@@ -217,9 +226,10 @@ class MockProvider(LLMProvider):
         return {
             "kind": "bug", "title": title, "summary": f"Mock report drafted from the note: {title}",
             "steps_to_reproduce": steps, "expected": "(mock) The behaviour described in the spec",
-            "actual": f"(mock) {title}",
+            "actual": f"(mock) {title}" + (f". The browser recorded: {problems[0].split('] ', 1)[-1]}" if problems else ""),
             "oracle": {"heuristic": "claims", "explanation": "Mock: the spec or product claims say otherwise."},
             "severity": "medium", "severity_rationale": "Mock: switch to a real provider for a risk-based rationale.",
             "reproducibility": "unknown",
             "open_questions": ["(mock) Does it happen every time?"],
+            "evidence_used": problems[:1],
         }

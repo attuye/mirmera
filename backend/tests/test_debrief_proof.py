@@ -66,7 +66,7 @@ def test_ending_a_session_drafts_a_proof_debrief(ended):
     assert d["risks_observed"] == [{"text": PROOF["risks_observed"][0], "risk_id": None}]
     assert d["open_questions"] == ["Is GBP in scope?"]
     assert d["tester_feelings"] is None  # never drafted by the AI
-    assert (d["ai_provider"], d["prompt_version"]) == ("scripted", "debrief-proof-v1")
+    assert (d["ai_provider"], d["prompt_version"]) == ("scripted", "debrief-proof-v2")
 
 
 def test_the_draft_sees_notes_with_minutes_bugs_risks_and_time_split(client, product, monkeypatch):
