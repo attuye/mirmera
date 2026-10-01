@@ -9,6 +9,7 @@ from app.ai import tasks
 from app.ai.base import ProviderError, get_provider
 from app.database import get_db
 from app.evidence_text import browser_context
+from app.session_text import bug_line, note_line, riskiest_first
 from app.routers import runner as runner_api
 
 logger = logging.getLogger(__name__)
@@ -199,14 +200,6 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
     notes = db.query(models.Note).filter(models.Note.session_id == session_id).order_by(models.Note.timestamp).all()
     bugs = db.query(models.Bug).filter(models.Bug.session_id == session_id).all()
 
-    def minute(ts) -> int:
-        return max(0, int((ts - session.started_at).total_seconds() // 60))
-
-    def bug_line(b: models.Bug) -> str:
-        kind = b.kind or "unreviewed"
-        oracle = f", oracle: {b.oracle_heuristic}" if b.oracle_heuristic else ""
-        return f"- [{kind}, {b.severity}{oracle}] {b.title}"
-
     time_breakdown = _compute_time_breakdown(notes, session.ended_at)
     duration_minutes = round(
         ((session.ended_at - session.started_at).total_seconds() - (session.total_paused_seconds or 0)) / 60
@@ -223,9 +216,9 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
         draft = await tasks.draft_debrief(
             provider,
             charter_mission=charter.mission_statement,
-            risks=[{"ref": r.ref, "title": r.title, "failure_mode": r.failure_mode} for r in charter.risks],
+            risks=[{"ref": r.ref, "title": r.title, "failure_mode": r.failure_mode} for r in riskiest_first(charter.risks)],
             duration_minutes=duration_minutes,
-            notes=[f"+{minute(n.timestamp)} min [{n.tag}] {n.content}" for n in notes],
+            notes=[note_line(n, session.started_at) for n in notes],
             bugs=[bug_line(b) for b in bugs],
             time_breakdown=time_breakdown,
             browser=browser,

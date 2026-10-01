@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from app.ai.base import ProviderError, ProviderNotConfigured, UnknownProvider
 from app.config import settings
 from app.database import Base, add_missing_columns, engine
-from app.routers import products, artifacts, bugs, charters, sessions, debriefs, risks, runner
+from app.routers import products, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback
 from app.runner import RunnerConflict, RunnerUnavailable, manager as runner_manager
 
 Base.metadata.create_all(bind=engine)  # creates new tables
@@ -67,6 +67,7 @@ app.include_router(sessions.bugs_list_router)
 app.include_router(risks.router)
 app.include_router(bugs.router)
 app.include_router(runner.router)
+app.include_router(risk_feedback.router)
 
 
 @app.get("/health")

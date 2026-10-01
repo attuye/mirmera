@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import RiskMatrix, { scoreBand } from '../components/RiskMatrix'
+import { RiskHistory } from '../components/RiskUpdates'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
 import {
   AI_PROVIDERS, api, Artifact, ChartersFromRisks, ModelElement, Product, ProductModel,
@@ -566,6 +567,7 @@ function RiskCard({ risk, selected, onChanged, refCallback }: {
           )}
         </div>
       </div>
+      <RiskHistory riskId={risk.id} version={risk.updated_at} />
       <ErrorLine message={error} />
     </article>
   )

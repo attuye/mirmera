@@ -13,7 +13,7 @@ from app.ai.llm_json import complete_json
 from app.evidence_text import NOT_USED
 from app.schemas import (
     CharterSuggestion, CharterSuggestionList, LLMDebrief,
-    LLMBugDraft, LLMProductModel, LLMRisk, LLMRiskCharter, LLMRiskCharterList, LLMRiskList,
+    LLMBugDraft, LLMProductModel, LLMRiskUpdateList, LLMRisk, LLMRiskCharter, LLMRiskCharterList, LLMRiskList,
 )
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -26,6 +26,7 @@ PROMPT_VERSIONS = {
     "risk_analysis": "risk-analysis-v1",
     "risk_charters": "risk-charters-v1",
     "bug_report": "bug-report-v2",
+    "risk_update": "risk-update-v1",
 }
 PLANNING_TOKENS = 4000
 MAX_ARTIFACT_CHARS = 15_000
@@ -164,4 +165,23 @@ async def draft_bug_report(
     )
     return await complete_json(
         provider, load_prompt("bug_report.md"), user, LLMBugDraft, task="bug_report",
+    )
+
+
+async def suggest_risk_updates(
+    provider: LLMProvider, *, charter_mission: str, risks: list[dict], notes: list[str],
+    bugs: list[str], browser: str = NOT_USED, debrief: dict | None = None,
+) -> LLMRiskUpdateList:
+    """After a session: suggested re-scores for the charter's risks, with evidence.
+    debrief: the tester's results and obstacles, if the debrief exists."""
+    user = (
+        f"<charter>{charter_mission}</charter>\n\n"
+        f"<risks>\n{json.dumps(risks, indent=2, ensure_ascii=False)}\n</risks>\n\n"
+        f"<notes>\n{chr(10).join(notes) or '(no notes logged)'}\n</notes>\n\n"
+        f"<bugs>\n{chr(10).join(bugs) or '(none)'}\n</bugs>\n\n"
+        f"<browser>\n{browser}\n</browser>\n\n"
+        f"<debrief>\n{json.dumps(debrief, indent=2, ensure_ascii=False) if debrief else '(no debrief yet)'}\n</debrief>"
+    )
+    return await complete_json(
+        provider, load_prompt("risk_update.md"), user, LLMRiskUpdateList, task="risk_update",
     )

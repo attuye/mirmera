@@ -114,8 +114,9 @@ This is the Phase 1 scaffold from the scoping discussion:
   onto each bug)
 - ✅ A runnable frontend covering the four core screens
 - ✅ Recorded browser: signals, screenshots on bugs, trace and HAR per session
+- ✅ Feedback loop: sessions suggest risk re-scores with evidence; the tester
+  decides, and each risk keeps its score history
 
 Not yet built (Phase 2/3 from the scoping doc):
 - Git/Jira/GitHub Issues integration for artifact ingestion (currently paste-only)
-- Recorded-browser signals feeding the AI bug and debrief drafts
 - Multi-user auth (the `org_id` field is there, but nothing enforces it yet)

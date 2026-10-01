@@ -45,6 +45,8 @@ class MockProvider(LLMProvider):
             return json.dumps(self._risk_charters(user))
         if task == "bug_report":
             return json.dumps(self._bug_report(user))
+        if task == "risk_update":
+            return json.dumps(self._risk_update(user))
         return json.dumps({"note": f"mock provider has no canned answer for task '{task}'"})
 
     @staticmethod
@@ -202,6 +204,25 @@ class MockProvider(LLMProvider):
         return {"charters": charters}
 
     # ---- bug reports ----
+
+    @staticmethod
+    def _risk_update(user: str) -> dict:
+        """Raises likelihood by 1 per risk when the session logged a bug
+        (questions don't count); everything else stays unchanged."""
+        risks = json.loads(_between(user, "risks") or "[]")
+        bugs = [b for b in _between(user, "bugs").splitlines() if b.startswith("- [") and not b.startswith("- [question")]
+        updates, unchanged = [], []
+        for r in risks:
+            if bugs and r["likelihood"] < 5:
+                updates.append({
+                    "risk_ref": r["ref"], "impact": r["impact"], "likelihood": r["likelihood"] + 1,
+                    "reason": f"(mock) The session logged {len(bugs)} bug(s) while exercising this charter.",
+                    "evidence": bugs[:2],
+                })
+            else:
+                unchanged.append({"risk_ref": r["ref"], "reason": "(mock) No bug logged in this session."
+                                  if not bugs else "(mock) Likelihood is already at the maximum."})
+        return {"updates": updates, "unchanged": unchanged}
 
     @staticmethod
     def _bug_report(user: str) -> dict:

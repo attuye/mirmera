@@ -6,6 +6,7 @@ import {
 import Sidebar from '../components/Sidebar'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
 import { RecordingFiles, SIGNAL_KINDS, countLine } from '../components/Evidence'
+import { SessionRiskUpdates } from '../components/RiskUpdates'
 import type { Evidence, EvidenceKind } from '../api/client'
 
 // PROOF debrief (Session-Based Test Management): Past, Results, Obstacles,
@@ -318,6 +319,11 @@ export default function DebriefPage() {
                     onPromote={async (p) => applyLinks(await api.promoteObservedRisk(sessionId!, i, p))} />
                 ))}
               </ul>}
+
+          <section aria-label="Risk scores" style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 8 }}>Risk scores after this session</div>
+            <SessionRiskUpdates sessionId={sessionId!} />
+          </section>
 
           <label style={{ display: 'block', marginTop: 16 }}>
             <span style={{ ...fieldLabel, fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>Open questions</span>

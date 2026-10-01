@@ -10,6 +10,7 @@ from app import models, schemas
 from app.ai import tasks
 from app.ai.base import get_provider
 from app.database import get_db
+from app.timeutil import utcnow
 
 router = APIRouter(tags=["risks"])
 
@@ -177,6 +178,16 @@ def update_risk(risk_id: str, payload: schemas.RiskUpdate, db: DBSession = Depen
         notes.append("Edited by tester")
     if "tester_notes" in changes and changes["tester_notes"] != risk.tester_notes:
         notes.append("Notes updated")
+
+    if (new_impact, new_likelihood) != (risk.impact, risk.likelihood):
+        # A manual re-score goes into the risk's history next to session suggestions.
+        db.add(models.RiskChange(
+            risk_id=risk.id, source="tester", status="accepted",
+            from_impact=risk.impact, from_likelihood=risk.likelihood,
+            to_impact=new_impact, to_likelihood=new_likelihood,
+            final_impact=new_impact, final_likelihood=new_likelihood,
+            reason="Re-scored by tester", tester_note=changes.get("tester_notes"), decided_at=utcnow(),
+        ))
 
     for field, value in changes.items():
         setattr(risk, field, value)
