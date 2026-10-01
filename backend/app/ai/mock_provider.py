@@ -37,6 +37,12 @@ class MockProvider(LLMProvider):
             return json.dumps(self._debrief(user))
         if task == "artifact_summary":
             return self._summary(user)
+        if task == "product_model":
+            return json.dumps(self._product_model(user))
+        if task == "risk_analysis":
+            return json.dumps(self._risks(user))
+        if task == "risk_charters":
+            return json.dumps(self._risk_charters(user))
         return json.dumps({"note": f"mock provider has no canned answer for task '{task}'"})
 
     @staticmethod
@@ -95,3 +101,86 @@ class MockProvider(LLMProvider):
         kind, content = (match.group(1), match.group(2)) if match else ("artifact", user)
         first = _first_line(content, "(empty artifact)")
         return f"Mock summary of this {kind}: starts with \u201c{first}\u201d ({len(content)} chars total)."
+    # ---- risk model ----
+
+    @staticmethod
+    def _product_model(user: str) -> dict:
+        artifacts = re.findall(r'<artifact type="([^"]+)" label="([^"]+)">\n?(.*?)\n?</artifact>', user, re.S)
+        labels = [label for _, label, _ in artifacts] or ["(no artifacts)"]
+        text = "\n".join(content for _, _, content in artifacts)
+        names = list(dict.fromkeys(re.findall(r"(?:def |class |\+\+\+ b/)([a-zA-Z_][\w./]*)", text)))[:3]
+        names = names or ["the changed area"]
+        elements = [
+            {"category": "function", "name": name, "description": f"Mock: behaviour of {name}", "sources": labels}
+            for name in names
+        ]
+        elements.append({
+            "category": "data", "name": "inputs and stored data",
+            "description": "Mock: values flowing through the changed code", "sources": labels,
+        })
+        return {
+            "summary": (
+                f"Mock product model built from {len(artifacts)} artifact(s). "
+                "Switch to a real provider for an SFDIPOT model grounded in the content."
+            ),
+            "elements": elements,
+            "unknowns": [f"(mock) What should happen when {names[0]} receives unexpected input?"],
+        }
+
+    @staticmethod
+    def _risks(user: str) -> dict:
+        try:
+            model = json.loads(_between(user, "product_model"))
+            names = [e["name"] for e in model.get("elements", [])] or ["the product"]
+        except (ValueError, TypeError):
+            names = ["the product"]
+        first, last = names[0], names[-1]
+        return {"risks": [
+            {
+                "title": f"Wrong results from {first}",
+                "failure_mode": f"Users get incorrect results when {first} handles edge-case input",
+                "quality_criterion": "capability", "elements": [first],
+                "impact": 4, "likelihood": 3,
+                "rationale": "Mock risk: recently changed logic with unclear edge cases.",
+                "evidence": "inferred",
+            },
+            {
+                "title": f"Data exposure through {last}",
+                "failure_mode": f"Sensitive data in {last} is visible to users who should not see it",
+                "quality_criterion": "security", "elements": [last],
+                "impact": 5, "likelihood": 2,
+                "rationale": "Mock risk: high harm if it happens, no evidence it does.",
+                "evidence": "speculative",
+            },
+            {
+                "title": f"Slow responses from {first} under load",
+                "failure_mode": f"{first} becomes slow when many users act at once",
+                "quality_criterion": "performance", "elements": [first],
+                "impact": 2, "likelihood": 2,
+                "rationale": "Mock risk: low priority placeholder.",
+                "evidence": "speculative",
+            },
+        ]}
+
+    @staticmethod
+    def _risk_charters(user: str) -> dict:
+        try:
+            risks = json.loads(_between(user, "risks"))
+        except (ValueError, TypeError):
+            risks = []
+        refs = [r["ref"] for r in risks] or ["R1"]
+        groups = [refs[:2], refs[2:]] if len(refs) > 2 else [refs]
+        charters = []
+        for group in groups:
+            titles = [r["title"] for r in risks if r["ref"] in group] or ["the riskiest area"]
+            charters.append({
+                "target": titles[0].lower(),
+                "resources": "boundary values and realistic test data",
+                "information": f"whether {', '.join(group)} can actually happen",
+                "rationale": f"Mock charter covering {', '.join(group)}.",
+                "risk_refs": group,
+                "test_ideas": ["Try the smallest and largest valid values", "Repeat the flow after a page reload"],
+                "oracles": ["claims", "user_expectations"],
+                "priority": "high" if group == groups[0] else "medium",
+            })
+        return {"charters": charters}

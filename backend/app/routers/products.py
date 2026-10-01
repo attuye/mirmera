@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DBSession
 
 from app import models, schemas
+from app.ai.base import PROVIDER_NAMES
 from app.database import get_db
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -26,4 +27,22 @@ def get_product(product_id: str, db: DBSession = Depends(get_db)):
     product = db.get(models.Product, product_id)
     if not product:
         raise HTTPException(404, "Product not found")
+    return product
+
+
+@router.patch("/{product_id}", response_model=schemas.ProductOut)
+def update_product(product_id: str, payload: schemas.ProductUpdate, db: DBSession = Depends(get_db)):
+    """Rename a product, set its testing mission, or switch its AI provider.
+    (A product keeps the provider it was created with until changed here.)"""
+    product = db.get(models.Product, product_id)
+    if not product:
+        raise HTTPException(404, "Product not found")
+    changes = payload.model_dump(exclude_unset=True)
+    provider = changes.get("default_ai_provider")
+    if provider is not None and provider not in PROVIDER_NAMES:
+        raise HTTPException(400, f"Unknown AI provider '{provider}'. Use one of: {', '.join(PROVIDER_NAMES)}")
+    for field, value in changes.items():
+        setattr(product, field, value)
+    db.commit()
+    db.refresh(product)
     return product
