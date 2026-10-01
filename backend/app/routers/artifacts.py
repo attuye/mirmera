@@ -1,9 +1,14 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DBSession
 
 from app import models, schemas
-from app.ai.base import get_provider
+from app.ai import tasks
+from app.ai.base import ProviderError, get_provider
 from app.database import get_db
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/products/{product_id}/artifacts", tags=["artifacts"])
 
@@ -20,17 +25,19 @@ async def add_artifact(product_id: str, payload: schemas.ArtifactCreate, db: DBS
     db.refresh(artifact)
 
     # Cache an AI summary up front so charter suggestion doesn't re-summarize every call.
-    # Never let a summary failure (missing API key, rate limit, network blip, unimplemented
-    # provider stub) block saving the artifact itself — summary just stays null and charter
-    # suggestion falls back to the raw content.
+    # A provider problem (missing key, model down) must never block saving the artifact:
+    # the summary stays empty and charter suggestion falls back to the raw content.
+    # The reason is logged, so a misconfiguration doesn't go unnoticed.
     if artifact.raw_content:
-        provider = get_provider(product.default_ai_provider)
         try:
-            artifact.ai_summary = await provider.summarize_artifact(artifact.raw_content, artifact.type)
+            provider = get_provider(product.default_ai_provider)
+            artifact.ai_summary = await tasks.summarize_artifact(
+                provider, raw_content=artifact.raw_content, artifact_type=artifact.type,
+            )
             db.commit()
             db.refresh(artifact)
-        except Exception:
-            pass
+        except ProviderError as err:
+            logger.warning("Artifact %s saved without AI summary: %s", artifact.id, err)
 
     return artifact
 

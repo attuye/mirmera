@@ -2,6 +2,14 @@
 import pytest
 
 from app.ai import base as ai_base
+from app.ai.base import LLMProvider, ProviderNotConfigured
+
+
+class BrokenProvider(LLMProvider):
+    name = "broken"
+
+    async def complete(self, system, user, **kwargs):
+        raise ProviderNotConfigured("Set ANTHROPIC_API_KEY")
 
 
 def test_health(client):
@@ -30,11 +38,12 @@ def test_artifact_gets_an_ai_summary(client, product):
 
 
 def test_artifact_is_saved_even_when_the_summary_fails(client, product, monkeypatch):
-    class Broken:
-        async def summarize_artifact(self, raw, kind):
-            raise RuntimeError("no API key")
+    # class Broken:
+    #     async def summarize_artifact(self, raw, kind):
+    #         raise RuntimeError("no API key")
 
-    monkeypatch.setattr("app.routers.artifacts.get_provider", lambda name: Broken())
+    # monkeypatch.setattr("app.routers.artifacts.get_provider", lambda name: Broken())
+    monkeypatch.setattr("app.routers.artifacts.get_provider", lambda name: BrokenProvider())
     r = client.post(f"/products/{product['id']}/artifacts",
                     json={"type": "spec", "label": "spec.md", "raw_content": "Coupons survive FX"})
     assert r.status_code == 200
@@ -69,17 +78,19 @@ def test_suggestions_need_artifacts_from_this_product(client, product):
     assert r.status_code == 400
 
 
-def test_unimplemented_provider_is_501(client, product):
+def test_provider_without_a_key_is_a_clear_503(client, product, monkeypatch):
+    monkeypatch.setattr("app.ai.openai_provider.settings.openai_api_key", None)
     r = client.post(f"/products/{product['id']}/charters/suggest",
                     json={"artifact_ids": [_artifact_id(client, product)], "provider": "openai"})
-    assert r.status_code == 501
+    assert r.status_code == 503
+    assert "OPENAI_API_KEY" in r.json()["detail"]
 
 
-@pytest.mark.xfail(strict=True, reason="Known bug: an unknown provider name crashes with 500. Fixed in the provider step.")
 def test_unknown_provider_is_a_clear_client_error(client, product):
     r = client.post(f"/products/{product['id']}/charters/suggest",
                     json={"artifact_ids": [_artifact_id(client, product)], "provider": "gpt"})
     assert r.status_code == 400
+    assert "gpt" in r.json()["detail"]
 
 
 # ---------- charters ----------
@@ -97,5 +108,5 @@ def test_charters_are_listed_per_product(client, product, charter):
 
 
 def test_provider_registry_rejects_unknown_names():
-    with pytest.raises(ValueError):
+    with pytest.raises(ai_base.UnknownProvider):
         ai_base.get_provider("nope")

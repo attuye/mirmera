@@ -1,81 +1,97 @@
 """
-A free, zero-latency provider for local development without API billing set up.
-Returns realistic, deterministic responses shaped by whatever context is passed
-in — not random lorem ipsum — so the rest of the app (charter review, session
-flow, debrief editing) can be built and tested end-to-end before you spend a
-cent on the real thing.
+A free, zero-latency provider for development and tests, no API key needed.
+It returns realistic, deterministic answers shaped by whatever was sent, not
+random lorem ipsum, so the whole app (charter review, session flow, debrief
+editing) can be built and tested end to end before spending anything.
 
-Swap it out for real: set DEFAULT_AI_PROVIDER=claude in backend/.env (or pass
-provider="claude" per request) once billing is set up. Nothing else changes —
-that's the point of the AIProvider interface.
+Switch to a real model by setting DEFAULT_AI_PROVIDER in backend/.env
+(claude, openai or local). Nothing else changes.
 """
+import json
 import re
 
-from app.ai.base import AIProvider, ProductContext
-from app.schemas import CharterSuggestion, DebriefDraft
+from app.ai.base import LLMProvider
+
+
+def _between(text: str, tag: str) -> str:
+    match = re.search(rf"<{tag}[^>]*>\n?(.*?)\n?</{tag}>", text, re.S)
+    return match.group(1).strip() if match else ""
 
 
 def _first_line(text: str, fallback: str) -> str:
     for line in text.splitlines():
         line = line.strip()
-        if line and not line.startswith(("+++", "---", "@@")):
+        if line and not line.startswith(("+++", "---", "@@", "[")):
             return line[:80]
     return fallback
 
 
-class MockProvider(AIProvider):
-    async def suggest_charters(self, context: ProductContext) -> list[CharterSuggestion]:
-        artifact_text = context.get("artifact_context", "")
-        project = context.get("project_name", "this product")
-        hook = _first_line(artifact_text, project)
+class MockProvider(LLMProvider):
+    name = "mock"
+    model = "mock"
 
-        # Pull out anything that looks like a changed function/file name to make
-        # the mock feel grounded in what was actually pasted, not generic filler.
-        touched = re.findall(r"(?:def |class |\+\+\+ b/|@@.*)([a-zA-Z_][\w./]*)", artifact_text)
+    async def complete(self, system, user, *, max_tokens=2000, schema=None, task=None) -> str:
+        if task == "charter_suggestions":
+            return json.dumps(self._charters(user))
+        if task == "debrief":
+            return json.dumps(self._debrief(user))
+        if task == "artifact_summary":
+            return self._summary(user)
+        return json.dumps({"note": f"mock provider has no canned answer for task '{task}'"})
+
+    @staticmethod
+    def _charters(user: str) -> dict:
+        artifacts = _between(user, "artifacts")
+        project = _between(user, "project") or "this product"
+        hook = _first_line(artifacts, project)
+        # Anything that looks like a changed function/file name keeps the mock
+        # grounded in what was actually pasted, not generic filler.
+        touched = re.findall(r"(?:def |class |\+\+\+ b/|@@.*)([a-zA-Z_][\w./]*)", artifacts)
         focus = touched[0] if touched else "the changed area"
-
-        return [
-            CharterSuggestion(
-                mission_statement=f"Explore {focus} for behavior changes implied by: {hook}",
-                rationale=(
-                    "Mock suggestion — stands in for the AI call so you can build and test "
-                    "the charter review flow without API billing set up. Real suggestions "
-                    "will read the full artifact content and reference specific risk patterns."
+        return {"suggestions": [
+            {
+                "mission_statement": f"Explore {focus} for behavior changes implied by: {hook}",
+                "rationale": (
+                    "Mock suggestion: stands in for the AI call so you can build and test "
+                    "the charter review flow without API billing. Real suggestions read the "
+                    "full artifact content and reference specific risk patterns."
                 ),
-                risk_areas=["needs review"],
-                priority="high",
-            ),
-            CharterSuggestion(
-                mission_statement=f"Regression-check areas adjacent to {focus}",
-                rationale="Mock suggestion — swap to the claude provider for real, context-grounded rationale.",
-                risk_areas=["regression"],
-                priority="medium",
-            ),
-            CharterSuggestion(
-                mission_statement=f"Probe edge cases and boundary conditions around {focus}",
-                rationale="Mock suggestion — placeholder priority/rationale until a real provider is wired in.",
-                risk_areas=["boundary value"],
-                priority="medium",
-            ),
-        ]
+                "risk_areas": ["needs review"],
+                "priority": "high",
+            },
+            {
+                "mission_statement": f"Regression-check areas adjacent to {focus}",
+                "rationale": "Mock suggestion: switch to a real provider for context-grounded rationale.",
+                "risk_areas": ["regression"],
+                "priority": "medium",
+            },
+            {
+                "mission_statement": f"Probe edge cases and boundary conditions around {focus}",
+                "rationale": "Mock suggestion: placeholder priority and rationale until a real provider is used.",
+                "risk_areas": ["boundary value"],
+                "priority": "medium",
+            },
+        ]}
 
-    async def draft_debrief(self, session_data: dict) -> DebriefDraft:
-        charter = session_data.get("charter_mission", "the session charter")
-        notes_text = session_data.get("notes_text", "")
-        note_count = len([l for l in notes_text.splitlines() if l.strip()])
-        bugs_text = session_data.get("bugs_text", "(none)")
+    @staticmethod
+    def _debrief(user: str) -> dict:
+        charter = _between(user, "charter") or "the session charter"
+        notes = [line for line in _between(user, "notes").splitlines() if line.strip()]
+        note_count = 0 if notes == ["(no notes logged)"] else len(notes)
+        bugs = _between(user, "bugs") or "(none)"
+        return {
+            "coverage_summary": (
+                f'Mock debrief for charter: "{charter}". '
+                f"{note_count} note(s) logged this session. Bugs found: {bugs}. "
+                "This is a placeholder summary; switch DEFAULT_AI_PROVIDER to a real "
+                "provider for a synthesized narrative."
+            ),
+            "open_questions": ["(mock provider: no AI-extracted open questions yet)"],
+        }
 
-        summary = (
-            f"Mock debrief for charter: \"{charter}\". "
-            f"{note_count} note(s) logged this session. Bugs found: {bugs_text}. "
-            "This is a placeholder summary — switch DEFAULT_AI_PROVIDER to 'claude' "
-            "once billing is set up for a real synthesized narrative."
-        )
-        return DebriefDraft(
-            coverage_summary=summary,
-            open_questions=["(mock provider — no AI-extracted open questions yet)"],
-        )
-
-    async def summarize_artifact(self, raw_content: str, artifact_type: str) -> str:
-        first = _first_line(raw_content, "(empty artifact)")
-        return f"Mock summary of this {artifact_type}: starts with \u201c{first}\u201d ({len(raw_content)} chars total)."
+    @staticmethod
+    def _summary(user: str) -> str:
+        match = re.search(r'<artifact type="([^"]+)">\n?(.*?)\n?</artifact>', user, re.S)
+        kind, content = (match.group(1), match.group(2)) if match else ("artifact", user)
+        first = _first_line(content, "(empty artifact)")
+        return f"Mock summary of this {kind}: starts with \u201c{first}\u201d ({len(content)} chars total)."

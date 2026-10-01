@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Optional, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 # ---- Products / Artifacts -------------------------------------------------
@@ -19,8 +19,7 @@ class ProductOut(BaseModel):
     default_ai_provider: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ArtifactCreate(BaseModel):
@@ -38,8 +37,7 @@ class ArtifactOut(BaseModel):
     ai_summary: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ---- AI provider contracts --------------------------------------------
@@ -52,6 +50,8 @@ class CharterSuggestion(BaseModel):
     risk_areas: list[str]
     priority: Literal["high", "medium", "low"]
 
+class CharterSuggestionList(BaseModel):
+    suggestions: list[CharterSuggestion]
 
 class DebriefDraft(BaseModel):
     coverage_summary: str
@@ -85,8 +85,7 @@ class CharterOut(BaseModel):
     status: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ---- Sessions / Notes / Bugs -------------------------------------------
@@ -107,8 +106,7 @@ class SessionOut(BaseModel):
     total_paused_seconds: float
     duration_target_minutes: float
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class NoteCreate(BaseModel):
@@ -123,8 +121,7 @@ class NoteOut(BaseModel):
     content: str
     timestamp: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BugCreate(BaseModel):
@@ -149,8 +146,7 @@ class BugOut(BaseModel):
     status: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class BugListItem(BaseModel):
     id: str
@@ -173,8 +169,7 @@ class DebriefOut(BaseModel):
     ai_draft: Optional[str]
     final_text: Optional[str]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class DebriefListItem(BaseModel):
     id: str

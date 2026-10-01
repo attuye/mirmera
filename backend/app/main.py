@@ -1,6 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from app.ai.base import ProviderError, ProviderNotConfigured, UnknownProvider
 from app.database import Base, engine
 from app.routers import products, artifacts, charters, sessions, debriefs
 
@@ -14,6 +16,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# AI provider problems become clear errors instead of a bare 500.
+# The most specific handler wins, so these three cover every ProviderError.
+@app.exception_handler(UnknownProvider)
+async def unknown_provider(_: Request, err: UnknownProvider):
+    return JSONResponse(status_code=400, content={"detail": str(err)})
+
+
+@app.exception_handler(ProviderNotConfigured)
+async def provider_not_configured(_: Request, err: ProviderNotConfigured):
+    return JSONResponse(status_code=503, content={"detail": str(err)})
+
+
+@app.exception_handler(ProviderError)
+async def provider_error(_: Request, err: ProviderError):
+    return JSONResponse(status_code=502, content={"detail": str(err)})
 
 app.include_router(products.router)
 app.include_router(artifacts.router)

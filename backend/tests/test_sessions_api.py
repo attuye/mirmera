@@ -1,7 +1,7 @@
 """Sessions, notes, bugs and debriefs: the testing side of the current API."""
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-
+from app.ai.base import LLMProvider, ProviderError
 from app.routers.sessions import _compute_time_breakdown
 
 T0 = datetime(2026, 10, 1, 9, 0, 0)
@@ -56,9 +56,9 @@ def test_session_cannot_be_ended_or_paused_twice(client, session):
 
 
 def test_debrief_is_still_saved_when_the_ai_fails(client, session, monkeypatch):
-    class Broken:
-        async def draft_debrief(self, data):
-            raise RuntimeError("provider down")
+    class Broken(LLMProvider):
+        async def complete(self, system, user, **kwargs):
+            raise ProviderError("provider down")
 
     monkeypatch.setattr("app.routers.sessions.get_provider", lambda name: Broken())
     r = client.post(f"/sessions/{session['id']}/end")

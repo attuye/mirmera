@@ -1,11 +1,15 @@
-from datetime import datetime
+import logging
+from app.timeutil import utcnow
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DBSession
 
 from app import models, schemas
-from app.ai.base import get_provider
+from app.ai import tasks
+from app.ai.base import ProviderError, get_provider
 from app.database import get_db
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 bugs_list_router = APIRouter(tags=["bugs"])
@@ -67,7 +71,7 @@ def pause_session(session_id: str, db: DBSession = Depends(get_db)):
         raise HTTPException(400, "Session already ended")
     if session.paused_at:
         raise HTTPException(400, "Session already paused")
-    session.paused_at = datetime.utcnow()
+    session.paused_at = utcnow()
     db.commit()
     db.refresh(session)
     return session
@@ -80,7 +84,7 @@ def resume_session(session_id: str, db: DBSession = Depends(get_db)):
         raise HTTPException(404, "Session not found")
     if not session.paused_at:
         raise HTTPException(400, "Session is not paused")
-    session.total_paused_seconds += (datetime.utcnow() - session.paused_at).total_seconds()
+    session.total_paused_seconds += (utcnow() - session.paused_at).total_seconds()
     session.paused_at = None
     db.commit()
     db.refresh(session)
@@ -177,7 +181,7 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
     if session.ended_at:
         raise HTTPException(400, "Session already ended")
 
-    session.ended_at = datetime.utcnow()
+    session.ended_at = utcnow()
     charter = db.get(models.Charter, session.charter_id)
     charter.status = "done"
     product = db.get(models.Product, charter.product_id)
@@ -197,20 +201,22 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
         time_breakdown=_compute_time_breakdown(notes, session.ended_at),
     )
 
-    provider = get_provider(product.default_ai_provider)
     try:
-        draft = await provider.draft_debrief({
-            "charter_mission": charter.mission_statement,
-            "notes_text": notes_text or "(no notes logged)",
-            "bugs_text": bugs_text,
-        })
+        provider = get_provider(product.default_ai_provider)
+        draft = await tasks.draft_debrief(
+            provider,
+            charter_mission=charter.mission_statement,
+            notes_text=notes_text or "(no notes logged)",
+            bugs_text=bugs_text,
+        )
         debrief.ai_draft = draft.coverage_summary
         debrief.coverage_summary = draft.coverage_summary
         debrief.open_questions = draft.open_questions
-    except Exception:
-        # Provider stub not implemented, no API key, or a transient failure —
-        # the session still ends and the debrief still saves; the tester
-        # just writes the coverage summary manually instead of editing an AI draft.
+    except ProviderError as err:
+        # No API key, model down, or an invalid reply: the session still ends
+        # and the debrief still saves; the tester writes the summary manually
+        # instead of editing an AI draft. The reason is logged.
+        logger.warning("Session %s ended without an AI debrief: %s", session_id, err)
         debrief.coverage_summary = None
 
     db.add(debrief)

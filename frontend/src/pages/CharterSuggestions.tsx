@@ -36,8 +36,12 @@ export default function CharterSuggestions() {
       const result = await api.suggestCharters(product.id, [artifact.id])
       setSuggestions(result)
     } catch (e) {
-      // A stub provider (openai/local) raises NotImplementedError server-side — surface it plainly.
-      setError('Could not generate suggestions. Is ANTHROPIC_API_KEY set, and the backend running?')
+      // The backend explains provider problems (missing key, Ollama not running...).
+      // A network error means the backend itself isn't reachable.
+      const message = e instanceof Error ? e.message : String(e)
+      setError(message === 'Failed to fetch'
+        ? 'Could not reach the backend. Is it running on http://localhost:8000?'
+        : `Could not generate suggestions: ${message}`)
       console.error(e)
     } finally {
       setBusy(false)

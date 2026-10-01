@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DBSession
 
 from app import models, schemas
-from app.ai.base import get_provider, ProductContext
+from app.ai import tasks
+from app.ai.base import get_provider
 from app.database import get_db
 
 router = APIRouter(tags=["charters"])
@@ -33,21 +34,16 @@ async def suggest_charters(product_id: str, payload: schemas.CharterSuggestReque
         .all()
     )
     recent_charters = "\n".join(f"- {c.mission_statement}" for c in recent) or "(none)"
-
-    provider_name = payload.provider or product.default_ai_provider
-    provider = get_provider(provider_name)
-
-    context = ProductContext(
-        project_name=product.name,
+    
+    # Provider problems (unknown name, missing key, model down) are turned into
+    # clear HTTP errors by the handlers in app/main.py
+    provider = get_provider(payload.provider or product.default_ai_provider)
+    return await tasks.suggest_charters(
+        provider,
+        project_name=product.name, 
         artifact_context=artifact_context,
         recent_charters=recent_charters,
     )
-    try:
-        return await provider.suggest_charters(context)
-    except NotImplementedError:
-        raise HTTPException(501, f"Provider '{provider_name}' isn't implemented yet")
-    except Exception as e:
-        raise HTTPException(502, f"AI provider call failed: {e}")
 
 
 @router.post("/products/{product_id}/charters", response_model=schemas.CharterOut)
