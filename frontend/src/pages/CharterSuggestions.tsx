@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
-import { api, Charter, CharterSuggestion, Product } from '../api/client'
+import { API_URL, api, Charter, CharterSuggestion, Product } from '../api/client'
 
 const PRIORITY_COLOR: Record<string, string> = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-tertiary)' }
 
@@ -36,7 +36,7 @@ export default function CharterSuggestions() {
       // A network error means the backend itself isn't reachable.
       const message = e instanceof Error ? e.message : String(e)
       setError(message === 'Failed to fetch'
-        ? 'Could not reach the backend. Is it running on http://localhost:8000?'
+        ? `Could not reach the backend. Is it running on ${API_URL}?`
         : `Could not generate suggestions: ${message}`)
       console.error(e)
     } finally {
