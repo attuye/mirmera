@@ -13,7 +13,7 @@ from app.ai.llm_json import complete_json
 from app.evidence_text import NOT_USED
 from app.schemas import (
     CharterSuggestion, CharterSuggestionList, LLMDebrief,
-    LLMBugDraft, LLMProductModel, LLMRiskUpdateList, LLMRisk, LLMRiskCharter, LLMRiskCharterList, LLMRiskList,
+    LLMBugDraft, LLMDuplicateList, LLMProductModel, LLMRiskUpdateList, LLMRisk, LLMRiskCharter, LLMRiskCharterList, LLMRiskList,
 )
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -27,6 +27,7 @@ PROMPT_VERSIONS = {
     "risk_charters": "risk-charters-v1",
     "bug_report": "bug-report-v2",
     "risk_update": "risk-update-v1",
+    "duplicate_check": "duplicate-check-v1",
 }
 PLANNING_TOKENS = 4000
 MAX_ARTIFACT_CHARS = 15_000
@@ -184,4 +185,16 @@ async def suggest_risk_updates(
     )
     return await complete_json(
         provider, load_prompt("risk_update.md"), user, LLMRiskUpdateList, task="risk_update",
+    )
+
+
+async def check_duplicates(provider: LLMProvider, *, report: dict, candidates: list[dict]) -> LLMDuplicateList:
+    """report: the reviewed bug (title, steps, expected, actual, kind).
+    candidates: issues from a tracker search (key, title, status, snippet)."""
+    user = (
+        f"<report>\n{json.dumps(report, indent=2, ensure_ascii=False)}\n</report>\n\n"
+        f"<candidates>\n{json.dumps(candidates, indent=2, ensure_ascii=False)}\n</candidates>"
+    )
+    return await complete_json(
+        provider, load_prompt("duplicate_check.md"), user, LLMDuplicateList, task="duplicate_check",
     )

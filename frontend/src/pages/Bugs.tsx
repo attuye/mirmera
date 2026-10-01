@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import Sidebar from '../components/Sidebar'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
-import { api, BugListItem, BugReview, Evidence, ORACLES, OracleHeuristic, Reproducibility } from '../api/client'
+import { api, BugFiling, BugListItem, BugReview, Evidence, ORACLES, OracleHeuristic, Product, Reproducibility } from '../api/client'
+import FileToTracker, { FilingLinks } from '../components/FileToTracker'
 import { Screenshot, SignalList } from '../components/Evidence'
 
 const SEVERITY_COLOR: Record<string, string> = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-tertiary)' }
@@ -22,10 +23,11 @@ export default function Bugs() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
+  const [product, setProduct] = useState<Product | null>(null)
 
   useEffect(() => {
     api.listProducts()
-      .then((ps) => (ps[0] ? api.listAllBugs(ps[0].id) : []))
+      .then((ps) => { setProduct(ps[0] ?? null); return ps[0] ? api.listAllBugs(ps[0].id) : [] })
       .then(setBugs)
       .catch((e) => setLoadError(errorText(e)))
       .finally(() => setLoading(false))
@@ -79,11 +81,12 @@ export default function Bugs() {
             const kind = KIND_STYLE[kindOf(b)]
             return (
               <article key={b.id} aria-label={b.title} style={{ border: '1px solid var(--border)', borderRadius: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
                 <button
                   onClick={() => setExpanded(isOpen ? null : b.id)}
                   aria-expanded={isOpen}
                   style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, width: '100%',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flex: 1, minWidth: 0,
                     background: 'transparent', color: 'inherit', textAlign: 'left', padding: '13px 16px',
                   }}
                 >
@@ -98,9 +101,11 @@ export default function Bugs() {
                     </span>
                   </span>
                 </button>
+                {b.filings.length > 0 && <span style={{ paddingRight: 16 }}><FilingLinks filings={b.filings} /></span>}
+                </div>
                 {isOpen && (
                   <div style={{ padding: '0 16px 16px', borderTop: '1px solid var(--border-soft)' }}>
-                    <BugDetail bug={b} onSaved={replace} />
+                    <BugDetail bug={b} onSaved={replace} product={product} onProduct={setProduct} />
                   </div>
                 )}
               </article>
@@ -114,7 +119,12 @@ export default function Bugs() {
 
 // ---------- detail: trail, report, review ----------
 
-function BugDetail({ bug, onSaved }: { bug: BugListItem; onSaved: (b: BugListItem) => void }) {
+function BugDetail({ bug, onSaved, product, onProduct }: {
+  bug: BugListItem
+  onSaved: (b: BugListItem) => void
+  product: Product | null
+  onProduct: (p: Product) => void
+}) {
   const [editing, setEditing] = useState(false)
   const [drafting, setDrafting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -141,7 +151,13 @@ function BugDetail({ bug, onSaved }: { bug: BugListItem; onSaved: (b: BugListIte
         <ReviewForm bug={bug} onCancel={() => setEditing(false)} onSaved={(b) => { onSaved(b); setEditing(false) }}
           onRedraft={draft} drafting={drafting} />
       ) : bug.kind ? (
-        <Report bug={bug} onEdit={() => setEditing(true)} />
+        <>
+          <Report bug={bug} onEdit={() => setEditing(true)} />
+          {product && (
+            <FileToTracker bug={bug} product={product} onProduct={onProduct}
+              onFiled={(f: BugFiling) => onSaved({ ...bug, filings: [...bug.filings, f] })} />
+          )}
+        </>
       ) : (
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
           <button onClick={draft} disabled={drafting} style={primaryButton(drafting)}>

@@ -32,7 +32,8 @@ def get_product(product_id: str, db: DBSession = Depends(get_db)):
 
 @router.patch("/{product_id}", response_model=schemas.ProductOut)
 def update_product(product_id: str, payload: schemas.ProductUpdate, db: DBSession = Depends(get_db)):
-    """Rename a product, set its testing mission, or switch its AI provider.
+    """Rename a product, set its testing mission, switch its AI provider, or
+    set where its bugs are filed (GitHub repo, Jira project).
     (A product keeps the provider it was created with until changed here.)"""
     product = db.get(models.Product, product_id)
     if not product:
@@ -41,6 +42,9 @@ def update_product(product_id: str, payload: schemas.ProductUpdate, db: DBSessio
     provider = changes.get("default_ai_provider")
     if provider is not None and provider not in PROVIDER_NAMES:
         raise HTTPException(400, f"Unknown AI provider '{provider}'. Use one of: {', '.join(PROVIDER_NAMES)}")
+    for field in ("github_repo", "jira_project_key"):
+        if field in changes:
+            changes[field] = (changes[field] or "").strip() or None  # "" clears the target
     for field, value in changes.items():
         setattr(product, field, value)
     db.commit()

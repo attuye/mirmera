@@ -8,8 +8,9 @@ from fastapi.responses import JSONResponse
 from app.ai.base import ProviderError, ProviderNotConfigured, UnknownProvider
 from app.config import settings
 from app.database import Base, add_missing_columns, engine
-from app.routers import products, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback
+from app.routers import products, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers
 from app.runner import RunnerConflict, RunnerUnavailable, manager as runner_manager
+from app.trackers import TrackerError, TrackerNotConfigured, UnknownTracker
 
 Base.metadata.create_all(bind=engine)  # creates new tables
 for column in add_missing_columns():  # adds new columns to existing tables
@@ -47,6 +48,22 @@ async def provider_not_configured(_: Request, err: ProviderNotConfigured):
 async def provider_error(_: Request, err: ProviderError):
     return JSONResponse(status_code=502, content={"detail": str(err)})
 
+# Issue tracker problems: the most specific handler wins, as for AI providers.
+@app.exception_handler(UnknownTracker)
+async def unknown_tracker(_: Request, err: UnknownTracker):
+    return JSONResponse(status_code=400, content={"detail": str(err)})
+
+
+@app.exception_handler(TrackerNotConfigured)
+async def tracker_not_configured(_: Request, err: TrackerNotConfigured):
+    return JSONResponse(status_code=503, content={"detail": str(err)})
+
+
+@app.exception_handler(TrackerError)
+async def tracker_error(_: Request, err: TrackerError):
+    return JSONResponse(status_code=502, content={"detail": str(err)})
+
+
 @app.exception_handler(RunnerUnavailable)
 async def runner_unavailable(_: Request, err: RunnerUnavailable):
     return JSONResponse(status_code=503, content={"detail": str(err)})
@@ -68,6 +85,7 @@ app.include_router(risks.router)
 app.include_router(bugs.router)
 app.include_router(runner.router)
 app.include_router(risk_feedback.router)
+app.include_router(trackers.router)
 
 
 @app.get("/health")

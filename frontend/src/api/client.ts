@@ -28,6 +28,9 @@ export interface Product {
   org_id: string
   default_ai_provider: string
   testing_mission: string | null
+  /** Where this product's bugs are filed; credentials live in backend/.env. */
+  github_repo: string | null
+  jira_project_key: string | null
   created_at: string
 }
 
@@ -103,7 +106,65 @@ export interface Bug {
   reviewed_at: string | null
   /** Screenshot the browser runner took when the bug was logged (empty without the runner). */
   evidence: Evidence[]
+  /** Where it was filed: GitHub and/or Jira. */
+  filings: BugFiling[]
 }
+
+// ---- Issue trackers ----------------------------------------------------------
+
+export type TrackerName = 'github' | 'jira'
+
+export interface TrackerStatus {
+  name: TrackerName
+  configured: boolean
+  target: string | null
+  /** What still has to be set, e.g. "GITHUB_TOKEN in backend/.env". */
+  missing: string[]
+  supports_attachments: boolean
+  is_mock: boolean
+}
+
+export interface DuplicateCandidate {
+  key: string
+  title: string
+  url: string
+  status: string
+  closed: boolean
+  snippet: string
+  verdict: 'likely_duplicate' | 'related' | 'different' | 'not_assessed'
+  reason: string
+}
+
+export interface DuplicateCheck {
+  tracker: TrackerName
+  target: string
+  searched_for: string[]
+  candidates: DuplicateCandidate[]
+  ai_provider: string | null
+  ai_model: string | null
+}
+
+export interface FilingPreview {
+  tracker: TrackerName
+  title: string
+  markdown: string
+  attachments: string[]
+  attachments_note: string | null
+}
+
+export interface BugFiling {
+  id: string
+  bug_id: string
+  tracker: TrackerName
+  target: string
+  mode: 'new' | 'comment'
+  issue_key: string
+  issue_url: string
+  attachments: string[]
+  created_at: string
+}
+
+export interface FileRequest { tracker: TrackerName; mode: 'new' | 'comment'; issue_key?: string; note?: string }
 
 // ---- Browser session runner ------------------------------------------------
 
@@ -406,6 +467,13 @@ export const api = {
   listEvidence: (sessionId: string, kinds?: EvidenceKind[]) =>
     request<Evidence[]>(`/sessions/${sessionId}/evidence${kinds ? `?kind=${kinds.join(',')}` : ''}`),
   bugEvidence: (bugId: string) => request<Evidence[]>(`/bugs/${bugId}/evidence`),
+  trackerStatus: (productId: string) => request<TrackerStatus[]>(`/products/${productId}/trackers`),
+  checkDuplicates: (bugId: string, tracker: TrackerName) =>
+    request<DuplicateCheck>(`/bugs/${bugId}/duplicates`, { method: 'POST', body: JSON.stringify({ tracker }) }),
+  filingPreview: (bugId: string, tracker: TrackerName) =>
+    request<FilingPreview>(`/bugs/${bugId}/filing-preview?tracker=${tracker}`),
+  fileBug: (bugId: string, req: FileRequest) =>
+    request<{ filing: BugFiling; warnings: string[] }>(`/bugs/${bugId}/file`, { method: 'POST', body: JSON.stringify(req) }),
   listAllBugs: (productId: string) => request<BugListItem[]>(`/products/${productId}/bugs`),
   getDebrief: (sessionId: string) => request<Debrief>(`/sessions/${sessionId}/debrief`),
   listDebriefs: (productId: string) => request<DebriefListItem[]>(`/products/${productId}/debriefs`),
@@ -416,7 +484,7 @@ export const api = {
   promoteObservedRisk: (sessionId: string, index: number, promotion: ObservedRiskPromotion) =>
     request<Debrief>(`/sessions/${sessionId}/debrief/risks-observed/${index}/risk`, { method: 'POST', body: JSON.stringify(promotion) }),
 
-  updateProduct: (productId: string, changes: Partial<Pick<Product, 'name' | 'testing_mission' | 'default_ai_provider'>>) =>
+  updateProduct: (productId: string, changes: Partial<Pick<Product, 'name' | 'testing_mission' | 'default_ai_provider' | 'github_repo' | 'jira_project_key'>>) =>
     request<Product>(`/products/${productId}`, { method: 'PATCH', body: JSON.stringify(changes) }),
 
   listArtifacts: (productId: string) => request<Artifact[]>(`/products/${productId}/artifacts`),

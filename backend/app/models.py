@@ -24,6 +24,9 @@ class Product(Base):
     # What this testing is for, e.g. "Find release blockers in multi-currency checkout".
     # Steers the product model, risk analysis and charters. Added in the risk-model step.
     testing_mission = Column(Text, nullable=True)
+    # Where this product's bugs are filed (credentials are in backend/.env)
+    github_repo = Column(String, nullable=True)  # "owner/repo"
+    jira_project_key = Column(String, nullable=True)  # e.g. "KYC"
 
     artifacts = relationship("Artifact", back_populates="product", cascade="all, delete-orphan")
     charters = relationship("Charter", back_populates="product", cascade="all, delete-orphan")
@@ -202,6 +205,8 @@ class Bug(Base):
 
     session = relationship("Session", back_populates="bugs")
     charter = relationship("Charter")
+    filings = relationship("BugFiling", back_populates="bug", cascade="all, delete-orphan",
+                           order_by="BugFiling.created_at")
     evidence = relationship("Evidence", back_populates="bug", order_by="Evidence.captured_at")
 
 
@@ -287,3 +292,21 @@ class RiskChange(Base):
 
     risk = relationship("Risk", back_populates="changes")
     session = relationship("Session")
+
+
+class BugFiling(Base):
+    """A bug sent to an issue tracker: as a new issue, or as a comment adding
+    a new occurrence to an existing one. At most one per tracker per bug."""
+    __tablename__ = "bug_filings"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    bug_id = Column(String, ForeignKey("bugs.id"), nullable=False, index=True)
+    tracker = Column(String, nullable=False)  # "github" | "jira"
+    target = Column(String, nullable=False)  # repo or project key at filing time
+    mode = Column(String, nullable=False)  # "new" | "comment"
+    issue_key = Column(String, nullable=False)  # "#42" or "KYC-42"
+    issue_url = Column(String, nullable=False)
+    attachments = Column(JSON, default=list)  # file names attached in the tracker
+    created_at = Column(DateTime, default=utcnow)
+
+    bug = relationship("Bug", back_populates="filings")

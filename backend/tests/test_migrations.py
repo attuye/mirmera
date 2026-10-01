@@ -39,7 +39,8 @@ def test_old_database_is_upgraded_in_place(tmp_path):
     Base.metadata.create_all(bind=engine)
     added = add_missing_columns(engine)
 
-    assert set(added) == {"products.testing_mission", "charters.test_ideas", "charters.oracles"}
+    assert set(added) == {"products.testing_mission", "products.github_repo", "products.jira_project_key",
+                          "charters.test_ideas", "charters.oracles"}
     tables = set(inspect(engine).get_table_names())
     assert {"risks", "product_models", "charter_risks"} <= tables
 

@@ -18,6 +18,8 @@ class ProductOut(BaseModel):
     org_id: str
     default_ai_provider: str
     testing_mission: Optional[str] = None
+    github_repo: Optional[str] = None
+    jira_project_key: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -27,6 +29,8 @@ class ProductUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1)
     testing_mission: Optional[str] = None
     default_ai_provider: Optional[str] = None  # validated against the registered providers
+    github_repo: Optional[str] = Field(default=None, pattern=r"^$|^[\w.-]+/[\w.-]+$")  # owner/repo; "" clears
+    jira_project_key: Optional[str] = Field(default=None, pattern=r"^$|^[A-Z][A-Z0-9_]+$")  # e.g. KYC; "" clears
 
 
 class ArtifactCreate(BaseModel):
@@ -208,6 +212,8 @@ class BugOut(BaseModel):
     reviewed_at: Optional[datetime] = None
     # Screenshot(s) the runner took when the bug was logged
     evidence: list[EvidenceOut] = []
+    # Where it was filed: GitHub and/or Jira
+    filings: list["BugFilingOut"] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -641,3 +647,98 @@ class SessionRiskFeedback(BaseModel):
     risk_count: int  # risks linked to the session's charter
     unreviewed_bugs: int  # suggestions are better once bugs are reviewed
     warnings: list[str] = []
+
+
+# ---------- issue trackers ----------
+
+DuplicateVerdict = Literal["likely_duplicate", "related", "different"]
+
+
+class LLMDuplicate(BaseModel):
+    key: str
+    verdict: DuplicateVerdict
+    reason: str
+
+
+class LLMDuplicateList(BaseModel):
+    """AI contract: one verdict per candidate issue."""
+    verdicts: list[LLMDuplicate] = []
+
+
+class TrackerStatus(BaseModel):
+    name: str
+    configured: bool
+    target: Optional[str] = None  # repo or project key
+    missing: list[str] = []
+    supports_attachments: bool = False
+    is_mock: bool = False
+
+
+class TrackerRequest(BaseModel):
+    tracker: Literal["github", "jira"]
+    provider: Optional[str] = None  # AI provider for the duplicate check
+
+
+class DuplicateCandidate(BaseModel):
+    key: str
+    title: str
+    url: str
+    status: str
+    closed: bool
+    snippet: str = ""
+    verdict: Literal["likely_duplicate", "related", "different", "not_assessed"]
+    reason: str
+
+
+class DuplicateCheckOut(BaseModel):
+    tracker: str
+    target: str
+    searched_for: list[str]  # the words used, so the tester can judge the search
+    candidates: list[DuplicateCandidate]
+    ai_provider: Optional[str] = None
+    ai_model: Optional[str] = None
+    prompt_version: Optional[str] = None
+
+
+class FilingPreview(BaseModel):
+    tracker: str
+    title: str
+    markdown: str
+    attachments: list[str]  # screenshot files that will be attached
+    attachments_note: Optional[str] = None  # why some won't be
+
+
+class FileRequest(BaseModel):
+    tracker: Literal["github", "jira"]
+    mode: Literal["new", "comment"] = "new"
+    issue_key: Optional[str] = Field(default=None, max_length=50)  # required for "comment"
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def comment_needs_issue(self):
+        if self.mode == "comment" and not (self.issue_key or "").strip():
+            raise ValueError("Adding to an existing issue needs its key, e.g. #42 or KYC-42")
+        return self
+
+
+class BugFilingOut(BaseModel):
+    id: str
+    bug_id: str
+    tracker: str
+    target: str
+    mode: str
+    issue_key: str
+    issue_url: str
+    attachments: list[str] = []
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FileResult(BaseModel):
+    filing: BugFilingOut
+    warnings: list[str] = []
+
+
+BugOut.model_rebuild()
+BugListItem.model_rebuild()

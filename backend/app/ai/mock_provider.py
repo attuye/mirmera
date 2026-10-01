@@ -47,6 +47,8 @@ class MockProvider(LLMProvider):
             return json.dumps(self._bug_report(user))
         if task == "risk_update":
             return json.dumps(self._risk_update(user))
+        if task == "duplicate_check":
+            return json.dumps(self._duplicates(user))
         return json.dumps({"note": f"mock provider has no canned answer for task '{task}'"})
 
     @staticmethod
@@ -204,6 +206,23 @@ class MockProvider(LLMProvider):
         return {"charters": charters}
 
     # ---- bug reports ----
+
+    @staticmethod
+    def _duplicates(user: str) -> dict:
+        """Word overlap between titles: half or more is a likely duplicate."""
+        from app.trackers.base import keywords
+        report = json.loads(_between(user, "report") or "{}")
+        mine = set(keywords(report.get("title", ""), limit=20))
+        verdicts = []
+        for c in json.loads(_between(user, "candidates") or "[]"):
+            theirs = set(keywords(c["title"], limit=20))
+            share = len(mine & theirs) / max(1, min(len(mine), len(theirs)))
+            verdict = "likely_duplicate" if share >= 0.5 else "related" if share > 0 else "different"
+            reason = f"(mock) {len(mine & theirs)} title word(s) in common: {', '.join(sorted(mine & theirs)) or 'none'}"
+            if verdict == "likely_duplicate" and c.get("status") == "closed":
+                reason += "; closed: possible regression"
+            verdicts.append({"key": c["key"], "verdict": verdict, "reason": reason})
+        return {"verdicts": verdicts}
 
     @staticmethod
     def _risk_update(user: str) -> dict:

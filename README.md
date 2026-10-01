@@ -61,6 +61,26 @@ npm run dev
 App at http://localhost:5173. On first load it creates a demo product
 ("AddisVerify KYC Platform") if none exists yet.
 
+### Filing bugs to GitHub and Jira
+
+Reviewed bugs and questions can be filed from the Bugs page. Put the
+credentials in `backend/.env` (see `.env.example`: a GitHub fine-grained
+token with Issues read/write, and/or your Jira Cloud site, email and API
+token), restart the backend, then set the product's GitHub repo or Jira
+project key in the filing panel.
+
+Before filing, **Check for duplicates** searches the tracker's open and closed
+issues for words from the bug title and has the AI rate each match (likely
+duplicate, related, different; a closed likely duplicate may be a
+regression). You then file a new issue, or add the bug as a new occurrence
+(a comment) to an existing one. The issue is built from your reviewed report,
+the oracle, and what the recorded browser captured. Jira gets the screenshot
+attached; GitHub's API cannot take attachments, so there the issue says the
+screenshot is kept in Mirmera. Each bug is filed at most once per tracker.
+
+Set `MOCK_TRACKERS=true` to try the flow without accounts (in-memory trackers,
+reset when the backend restarts).
+
 ## Tests
 
 CI runs all three on every pull request.
@@ -116,7 +136,8 @@ This is the Phase 1 scaffold from the scoping discussion:
 - ✅ Recorded browser: signals, screenshots on bugs, trace and HAR per session
 - ✅ Feedback loop: sessions suggest risk re-scores with evidence; the tester
   decides, and each risk keeps its score history
+- ✅ Filing to GitHub Issues and Jira Cloud, with an AI-rated duplicate check
 
 Not yet built (Phase 2/3 from the scoping doc):
-- Git/Jira/GitHub Issues integration for artifact ingestion (currently paste-only)
+- Importing specs, diffs and past bugs from Git, GitHub and Jira as artifacts (currently paste-only)
 - Multi-user auth (the `org_id` field is there, but nothing enforces it yet)
