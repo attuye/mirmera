@@ -1,0 +1,764 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
+import Sidebar from '../components/Sidebar'
+import RiskMatrix, { scoreBand } from '../components/RiskMatrix'
+import {
+  AI_PROVIDERS, api, Artifact, ChartersFromRisks, ModelElement, Product, ProductModel,
+  QUALITY_CRITERIA, Risk, RiskCharterDraft, RiskInput,
+} from '../api/client'
+
+// ---------- shared styles ----------
+
+const primaryButton = (disabled = false): React.CSSProperties => ({
+  background: disabled ? 'var(--border)' : 'var(--accent)', color: disabled ? 'var(--text-tertiary)' : '#0C0D0F',
+  fontSize: 12.5, fontWeight: 600, padding: '9px 16px', borderRadius: 8, cursor: disabled ? 'default' : 'pointer',
+})
+const quietButton: React.CSSProperties = {
+  background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border)',
+  fontSize: 12, fontWeight: 500, padding: '6px 11px', borderRadius: 7,
+}
+const input: React.CSSProperties = {
+  width: '100%', background: 'var(--panel-alt)', border: '1px solid var(--border)', borderRadius: 8,
+  color: 'var(--text)', padding: '8px 11px', fontSize: 13, fontFamily: 'var(--font-ui)',
+}
+const fieldLabel: React.CSSProperties = { fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 5, display: 'block' }
+
+const EVIDENCE_STYLE: Record<Risk['evidence'], { label: string; color: string; hint: string }> = {
+  stated: { label: 'Stated', color: 'var(--info)', hint: 'The product model says this directly' },
+  inferred: { label: 'Inferred', color: 'var(--text-secondary)', hint: 'Follows from the product model' },
+  speculative: { label: 'Speculative', color: 'var(--warning)', hint: 'A plausible guess; check it before relying on it' },
+  tester: { label: 'Tester', color: 'var(--question)', hint: 'Added by a tester' },
+}
+
+const CATEGORY_LABEL: Record<ModelElement['category'], string> = {
+  structure: 'Structure', function: 'Function', data: 'Data', interfaces: 'Interfaces',
+  platform: 'Platform', operations: 'Operations', time: 'Time',
+}
+
+function errorText(e: unknown): string {
+  const message = e instanceof Error ? e.message : String(e)
+  return message === 'Failed to fetch' ? 'Could not reach the backend. Is it running on http://localhost:8000?' : message
+}
+
+function ErrorLine({ message }: { message: string | null }) {
+  if (!message) return null
+  return <div role="alert" style={{ color: 'var(--danger)', fontSize: 12.5, marginTop: 10 }}>{message}</div>
+}
+
+function Section({ step, title, intro, children }: { step: number; title: string; intro: string; children: React.ReactNode }) {
+  return (
+    <section style={{ borderTop: '1px solid var(--border-soft)', padding: '26px 0' }} aria-labelledby={`step-${step}`}>
+      <div style={{ display: 'flex', gap: 14, alignItems: 'baseline', marginBottom: 16 }}>
+        <span className="mono" style={{ fontSize: 13, color: 'var(--accent)', fontWeight: 600 }}>{step}</span>
+        <div>
+          <h2 id={`step-${step}`} style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>{title}</h2>
+          <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: '4px 0 0', maxWidth: 640, lineHeight: 1.5 }}>{intro}</p>
+        </div>
+      </div>
+      <div style={{ paddingLeft: 27 }}>{children}</div>
+    </section>
+  )
+}
+
+// ---------- page ----------
+
+export default function RisksPage() {
+  const [product, setProduct] = useState<Product | null>(null)
+  const [artifacts, setArtifacts] = useState<Artifact[]>([])
+  const [model, setModel] = useState<ProductModel | null>(null)
+  const [risks, setRisks] = useState<Risk[]>([])
+  const [retired, setRetired] = useState<Risk[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  const refreshRisks = useCallback(async (productId: string) => {
+    const [active, gone] = await Promise.all([api.listRisks(productId), api.listRisks(productId, 'retired')])
+    setRisks(active)
+    setRetired(gone)
+  }, [])
+
+  useEffect(() => {
+    async function load() {
+      const products = await api.listProducts()
+      const p = products[0]
+      if (!p) return
+      setProduct(p)
+      const [a, m] = await Promise.all([api.listArtifacts(p.id), api.getProductModel(p.id)])
+      setArtifacts(a)
+      setModel(m)
+      await refreshRisks(p.id)
+    }
+    load().catch((e) => setLoadError(errorText(e))).finally(() => setLoading(false))
+  }, [refreshRisks])
+
+  function replaceRisk(updated: Risk) {
+    if (!product) return
+    refreshRisks(product.id).catch(console.error)
+    setRisks((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
+  }
+
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh' }}>
+      <Sidebar />
+      <main style={{ flex: 1, padding: '32px 40px', maxWidth: 1180, minWidth: 0 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0 }}>Risks</h1>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '6px 0 0', maxWidth: 640, lineHeight: 1.5 }}>
+          Decide what is worth testing first. The AI proposes a model of the product and risks to explore;
+          you decide which risks are real, how serious they are, and which ones become charters.
+        </p>
+
+        {loading && <div style={{ color: 'var(--text-secondary)', marginTop: 24 }}>Loading…</div>}
+        <ErrorLine message={loadError} />
+        {!loading && !product && !loadError && (
+          <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginTop: 24 }}>
+            No product yet. Open the <Link to="/dashboard">dashboard</Link> to create one.
+          </div>
+        )}
+
+        {product && (
+          <>
+            <ProductSettings product={product} onSaved={setProduct} />
+            <Section
+              step={1}
+              title="Model the product"
+              intro="Pick the specs, diffs or bug histories that describe what changed. The AI maps them to the product elements of the Heuristic Test Strategy Model and lists open questions for your team."
+            >
+              <ArtifactsAndModel
+                product={product}
+                artifacts={artifacts}
+                model={model}
+                onArtifactAdded={(a) => setArtifacts((prev) => [...prev, a])}
+                onModelBuilt={setModel}
+              />
+            </Section>
+            <Section
+              step={2}
+              title="Review the risks"
+              intro="AI-proposed risks stay in review until you accept them. Re-score anything that doesn't match what you know, retire what doesn't apply, and add risks the AI missed."
+            >
+              <RiskReview
+                product={product}
+                model={model}
+                risks={risks}
+                retired={retired}
+                onAnalyzed={() => refreshRisks(product.id)}
+                onChanged={replaceRisk}
+                onAdded={() => refreshRisks(product.id)}
+              />
+            </Section>
+            <Section
+              step={3}
+              title="Plan charters"
+              intro="Turn accepted risks into exploratory charters. Each draft says which risks it investigates, with starting ideas and the oracles to watch; save the ones you want to run."
+            >
+              <CharterPlanner product={product} accepted={risks.filter((r) => r.status === 'accepted')} />
+            </Section>
+          </>
+        )}
+      </main>
+    </div>
+  )
+}
+
+// ---------- product settings ----------
+
+function ProductSettings({ product, onSaved }: { product: Product; onSaved: (p: Product) => void }) {
+  const [mission, setMission] = useState(product.testing_mission ?? '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const dirty = mission.trim() !== (product.testing_mission ?? '')
+
+  async function save(changes: Parameters<typeof api.updateProduct>[1]) {
+    setSaving(true)
+    setError(null)
+    try {
+      onSaved(await api.updateProduct(product.id, changes))
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 20, alignItems: 'flex-end', flexWrap: 'wrap', margin: '24px 0 26px' }}>
+      <div style={{ flex: '1 1 420px' }}>
+        <label htmlFor="mission" style={fieldLabel}>Testing mission for {product.name}</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            id="mission"
+            value={mission}
+            onChange={(e) => setMission(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && dirty) save({ testing_mission: mission.trim() || null }) }}
+            placeholder="e.g. Find release blockers in the new document upload flow"
+            style={input}
+          />
+          <button onClick={() => save({ testing_mission: mission.trim() || null })} disabled={!dirty || saving} style={primaryButton(!dirty || saving)}>
+            Save
+          </button>
+        </div>
+      </div>
+      <div>
+        <label htmlFor="provider" style={fieldLabel}>AI provider</label>
+        <select
+          id="provider"
+          value={product.default_ai_provider}
+          onChange={(e) => save({ default_ai_provider: e.target.value })}
+          disabled={saving}
+          style={{ ...input, width: 140 }}
+        >
+          {AI_PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+      </div>
+      <div style={{ flexBasis: '100%' }}><ErrorLine message={error} /></div>
+    </div>
+  )
+}
+
+// ---------- step 1: artifacts and product model ----------
+
+function ArtifactsAndModel({ product, artifacts, model, onArtifactAdded, onModelBuilt }: {
+  product: Product
+  artifacts: Artifact[]
+  model: ProductModel | null
+  onArtifactAdded: (a: Artifact) => void
+  onModelBuilt: (m: ProductModel) => void
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set(model?.artifact_ids ?? []))
+  const [adding, setAdding] = useState(artifacts.length === 0)
+  const [draft, setDraft] = useState({ type: 'spec' as Artifact['type'], label: '', raw_content: '' })
+  const [busy, setBusy] = useState<'add' | 'build' | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function addArtifact() {
+    setBusy('add')
+    setError(null)
+    try {
+      const a = await api.createArtifact(product.id, { ...draft, label: draft.label.trim() })
+      onArtifactAdded(a)
+      setSelected((prev) => new Set(prev).add(a.id))
+      setDraft({ type: 'spec', label: '', raw_content: '' })
+      setAdding(false)
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function build() {
+    setBusy('build')
+    setError(null)
+    try {
+      onModelBuilt(await api.buildProductModel(product.id, [...selected]))
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const canAdd = draft.label.trim().length > 0 && draft.raw_content.trim().length > 0
+  const grouped = model
+    ? (Object.keys(CATEGORY_LABEL) as ModelElement['category'][])
+        .map((c) => [c, model.elements.filter((e) => e.category === c)] as const)
+        .filter(([, items]) => items.length > 0)
+    : []
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 380px) 1fr', gap: 28, alignItems: 'start' }}>
+      <div>
+        {artifacts.length > 0 && (
+          <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
+            <legend style={fieldLabel}>Artifacts to model</legend>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {artifacts.map((a) => (
+                <label key={a.id} style={{
+                  display: 'flex', gap: 10, alignItems: 'flex-start', padding: '9px 11px', borderRadius: 8, cursor: 'pointer',
+                  border: `1px solid ${selected.has(a.id) ? 'var(--accent)' : 'var(--border)'}`,
+                }}>
+                  <input type="checkbox" checked={selected.has(a.id)} onChange={() => toggle(a.id)} style={{ marginTop: 2 }} />
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ fontSize: 13, display: 'block' }}>{a.label}</span>
+                    <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+                      {{ spec: 'Spec', diff: 'Diff', bug_import: 'Bug history' }[a.type]}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
+
+        {adding ? (
+          <div style={{ marginTop: artifacts.length ? 14 : 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ width: 130 }}>
+                <label htmlFor="artifact-type" style={fieldLabel}>Type</label>
+                <select id="artifact-type" value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value as Artifact['type'] })} style={input}>
+                  <option value="spec">Spec</option>
+                  <option value="diff">Diff</option>
+                  <option value="bug_import">Bug history</option>
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label htmlFor="artifact-label" style={fieldLabel}>Name</label>
+                <input id="artifact-label" value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+                  placeholder="e.g. upload-spec-v3.md" style={input} />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="artifact-content" style={fieldLabel}>Content</label>
+              <textarea id="artifact-content" value={draft.raw_content} onChange={(e) => setDraft({ ...draft, raw_content: e.target.value })}
+                placeholder="Paste the spec text, git diff or bug list"
+                style={{ ...input, height: 140, fontFamily: 'var(--font-mono)', fontSize: 12, resize: 'vertical' }} />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={addArtifact} disabled={!canAdd || busy !== null} style={primaryButton(!canAdd || busy !== null)}>
+                {busy === 'add' ? 'Adding…' : 'Add artifact'}
+              </button>
+              {artifacts.length > 0 && <button onClick={() => setAdding(false)} style={quietButton}>Cancel</button>}
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setAdding(true)} style={{ ...quietButton, marginTop: 10 }}>Add an artifact</button>
+        )}
+
+        {artifacts.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <button onClick={build} disabled={selected.size === 0 || busy !== null} style={primaryButton(selected.size === 0 || busy !== null)}>
+              {busy === 'build' ? 'Building model…' : model ? 'Rebuild product model' : 'Build product model'}
+            </button>
+          </div>
+        )}
+        <ErrorLine message={error} />
+      </div>
+
+      <div style={{ minWidth: 0 }}>
+        {!model ? (
+          <div style={{ fontSize: 13, color: 'var(--text-tertiary)', border: '1px dashed var(--border)', borderRadius: 10, padding: 18 }}>
+            The product model will appear here: what the product is made of, what it does, and what nobody has written down yet.
+          </div>
+        ) : (
+          <div>
+            <p style={{ fontSize: 13.5, lineHeight: 1.6, margin: '0 0 16px', maxWidth: 680 }}>{model.summary}</p>
+            {model.truncated_artifacts.length > 0 && (
+              <p style={{ fontSize: 12, color: 'var(--warning)', margin: '0 0 12px' }}>
+                Cut to fit: {model.truncated_artifacts.join(', ')}. Split long artifacts for a fuller model.
+              </p>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {grouped.map(([category, items]) => (
+                <div key={category} style={{ display: 'flex', gap: 12 }}>
+                  <div style={{ width: 92, flexShrink: 0, fontSize: 12, color: 'var(--text-tertiary)', paddingTop: 4 }}>{CATEGORY_LABEL[category]}</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {items.map((e) => (
+                      <span key={e.name} title={e.description} style={{
+                        fontSize: 12, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 9px',
+                      }}>{e.name}</span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {model.unknowns.length > 0 && (
+              <div style={{ marginTop: 18 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Questions for the team</div>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                  {model.unknowns.map((q) => <li key={q}>{q}</li>)}
+                </ul>
+              </div>
+            )}
+            <p style={{ fontSize: 11, color: 'var(--text-quiet)', marginTop: 14 }}>
+              Drafted by {model.ai_provider}/{model.ai_model} with {model.prompt_version}, {new Date(model.created_at + 'Z').toLocaleString()}
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------- step 2: risk review ----------
+
+function RiskReview({ product, model, risks, retired, onAnalyzed, onChanged, onAdded }: {
+  product: Product
+  model: ProductModel | null
+  risks: Risk[]
+  retired: Risk[]
+  onAnalyzed: () => Promise<void>
+  onChanged: (r: Risk) => void
+  onAdded: () => Promise<void>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [showRetired, setShowRetired] = useState(false)
+  const [addingRisk, setAddingRisk] = useState(false)
+  const cards = useRef<Record<string, HTMLElement | null>>({})
+
+  async function analyze() {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.analyzeRisks(product.id)
+      await onAnalyzed()
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function select(r: Risk) {
+    setSelectedId(r.id)
+    cards.current[r.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+
+  const proposed = risks.filter((r) => r.status === 'proposed')
+  const accepted = risks.filter((r) => r.status === 'accepted')
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 18 }}>
+        <button onClick={analyze} disabled={!model || busy} style={primaryButton(!model || busy)}>
+          {busy ? 'Analysing…' : risks.length ? 'Find more risks' : 'Analyse risks'}
+        </button>
+        <button onClick={() => setAddingRisk((v) => !v)} style={quietButton}>{addingRisk ? 'Close' : 'Add a risk yourself'}</button>
+        {!model && <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Build a product model first.</span>}
+      </div>
+      <ErrorLine message={error} />
+      {addingRisk && (
+        <AddRiskForm product={product} onAdded={async () => { await onAdded(); setAddingRisk(false) }} />
+      )}
+
+      {risks.length === 0 && !addingRisk ? (
+        <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>No risks yet.</div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 28, alignItems: 'start' }}>
+          <div style={{ position: 'sticky', top: 20 }}>
+            <RiskMatrix risks={risks} selectedId={selectedId} onSelect={select} />
+          </div>
+          <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 22 }}>
+            <RiskGroup title={`Needs review (${proposed.length})`} empty="Nothing waiting for review.">
+              {proposed.map((r) => (
+                <RiskCard key={r.id} risk={r} selected={r.id === selectedId} onChanged={onChanged}
+                  refCallback={(el) => { cards.current[r.id] = el }} />
+              ))}
+            </RiskGroup>
+            <RiskGroup title={`Accepted (${accepted.length})`} empty="Accept the risks you agree with; only accepted risks become charters.">
+              {accepted.map((r) => (
+                <RiskCard key={r.id} risk={r} selected={r.id === selectedId} onChanged={onChanged}
+                  refCallback={(el) => { cards.current[r.id] = el }} />
+              ))}
+            </RiskGroup>
+            {retired.length > 0 && (
+              <div>
+                <button onClick={() => setShowRetired((v) => !v)} style={{ ...quietButton, border: 'none', padding: 0 }}>
+                  {showRetired ? 'Hide' : 'Show'} retired risks ({retired.length})
+                </button>
+                {showRetired && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+                    {retired.map((r) => <RiskCard key={r.id} risk={r} selected={false} onChanged={onChanged} />)}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RiskGroup({ title, empty, children }: { title: string; empty: string; children: React.ReactNode[] }) {
+  return (
+    <div>
+      <h3 style={{ fontSize: 13.5, fontWeight: 600, margin: '0 0 10px' }}>{title}</h3>
+      {children.length === 0
+        ? <div style={{ fontSize: 12.5, color: 'var(--text-tertiary)' }}>{empty}</div>
+        : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{children}</div>}
+    </div>
+  )
+}
+
+function ScoreSelect({ label, value, onChange, disabled }: { label: string; value: number; onChange: (v: number) => void; disabled: boolean }) {
+  return (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+      {label}
+      <select value={value} disabled={disabled} onChange={(e) => onChange(Number(e.target.value))}
+        style={{ ...input, width: 50, padding: '3px 6px', fontSize: 12 }}>
+        {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
+      </select>
+    </label>
+  )
+}
+
+function RiskCard({ risk, selected, onChanged, refCallback }: {
+  risk: Risk
+  selected: boolean
+  onChanged: (r: Risk) => void
+  refCallback?: (el: HTMLElement | null) => void
+}) {
+  const [notes, setNotes] = useState(risk.tester_notes ?? '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const band = scoreBand(risk.score)
+  const evidence = EVIDENCE_STYLE[risk.evidence]
+
+  async function update(changes: Parameters<typeof api.updateRisk>[1]) {
+    setSaving(true)
+    setError(null)
+    try {
+      onChanged(await api.updateRisk(risk.id, changes))
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <article
+      ref={refCallback}
+      aria-label={`${risk.ref} ${risk.title}`}
+      style={{
+        border: `1px solid ${selected ? 'var(--text-secondary)' : 'var(--border)'}`, borderRadius: 10, padding: '13px 15px',
+        background: risk.status === 'accepted' ? 'var(--panel)' : 'transparent',
+        opacity: risk.status === 'retired' ? 0.65 : 1,
+      }}
+    >
+      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        <span className="mono" style={{
+          fontSize: 11, fontWeight: 600, padding: '3px 7px', borderRadius: 5, flexShrink: 0,
+          color: band.fg, background: band.bg,
+        }} title={`${band.label} priority`}>{risk.ref} · {risk.score}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>{risk.title}</div>
+          <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 3, lineHeight: 1.5 }}>{risk.failure_mode}</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', marginTop: 11, paddingLeft: 2 }}>
+        <ScoreSelect label="Impact" value={risk.impact} disabled={saving} onChange={(v) => update({ impact: v })} />
+        <ScoreSelect label="Likelihood" value={risk.likelihood} disabled={saving} onChange={(v) => update({ likelihood: v })} />
+        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{risk.quality_criterion}</span>
+        <span title={evidence.hint} style={{ fontSize: 12, color: evidence.color }}>{evidence.label}</span>
+      </div>
+
+      {risk.rationale && (
+        <p style={{ fontSize: 12.5, color: 'var(--text-tertiary)', margin: '10px 0 0', lineHeight: 1.5 }}>{risk.rationale}</p>
+      )}
+
+      <div style={{ marginTop: 10 }}>
+        <label htmlFor={`notes-${risk.id}`} style={{ ...fieldLabel, marginBottom: 4 }}>Your notes (steer the charters)</label>
+        <textarea
+          id={`notes-${risk.id}`}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          onBlur={() => { if (notes !== (risk.tester_notes ?? '')) update({ tester_notes: notes || null }) }}
+          placeholder="e.g. Last release broke rounding here"
+          rows={1}
+          style={{ ...input, fontSize: 12.5, resize: 'vertical' }}
+        />
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 11, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-quiet)' }}>
+          {[
+            risk.last_change,
+            risk.source === 'ai' ? `Proposed by ${risk.ai_provider}/${risk.ai_model}` : risk.last_change ? null : 'Added by a tester',
+          ].filter(Boolean).join('. ')}
+        </span>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {risk.status === 'proposed' && (
+            <button onClick={() => update({ status: 'accepted' })} disabled={saving} style={{ ...primaryButton(saving), padding: '6px 13px' }}>Accept</button>
+          )}
+          {risk.status !== 'retired' && (
+            <button onClick={() => update({ status: 'retired' })} disabled={saving} style={quietButton}>Retire</button>
+          )}
+          {risk.status === 'retired' && (
+            <button onClick={() => update({ status: 'proposed' })} disabled={saving} style={quietButton}>Reopen</button>
+          )}
+        </div>
+      </div>
+      <ErrorLine message={error} />
+    </article>
+  )
+}
+
+function AddRiskForm({ product, onAdded }: { product: Product; onAdded: () => Promise<void> }) {
+  const [risk, setRisk] = useState<RiskInput>({ title: '', failure_mode: '', quality_criterion: 'capability', impact: 3, likelihood: 3 })
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const valid = risk.title.trim().length >= 3 && risk.failure_mode.trim().length >= 3
+
+  async function save() {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.createRisk(product.id, { ...risk, title: risk.title.trim(), failure_mode: risk.failure_mode.trim() })
+      await onAdded()
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, marginBottom: 20, maxWidth: 720 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div>
+          <label htmlFor="risk-title" style={fieldLabel}>Risk</label>
+          <input id="risk-title" value={risk.title} onChange={(e) => setRisk({ ...risk, title: e.target.value })}
+            placeholder="e.g. Coupon can be reused" style={input} />
+        </div>
+        <div>
+          <label htmlFor="risk-criterion" style={fieldLabel}>Quality criterion</label>
+          <select id="risk-criterion" value={risk.quality_criterion} onChange={(e) => setRisk({ ...risk, quality_criterion: e.target.value })} style={input}>
+            {QUALITY_CRITERIA.map((q) => <option key={q} value={q}>{q}</option>)}
+          </select>
+        </div>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <label htmlFor="risk-failure" style={fieldLabel}>What fails, for whom, and when</label>
+          <input id="risk-failure" value={risk.failure_mode} onChange={(e) => setRisk({ ...risk, failure_mode: e.target.value })}
+            placeholder="e.g. A one-time coupon still works on a second order from the same shopper" style={input} />
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginTop: 12 }}>
+        <ScoreSelect label="Impact" value={risk.impact} disabled={busy} onChange={(v) => setRisk({ ...risk, impact: v })} />
+        <ScoreSelect label="Likelihood" value={risk.likelihood} disabled={busy} onChange={(v) => setRisk({ ...risk, likelihood: v })} />
+        <button onClick={save} disabled={!valid || busy} style={{ ...primaryButton(!valid || busy), marginLeft: 'auto' }}>
+          {busy ? 'Adding…' : 'Add risk'}
+        </button>
+      </div>
+      <ErrorLine message={error} />
+    </div>
+  )
+}
+
+// ---------- step 3: charters from risks ----------
+
+function CharterPlanner({ product, accepted }: { product: Product; accepted: Risk[] }) {
+  const [excluded, setExcluded] = useState<Set<string>>(new Set())
+  const [result, setResult] = useState<ChartersFromRisks | null>(null)
+  const [saved, setSaved] = useState<Set<number>>(new Set())
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const chosen = accepted.filter((r) => !excluded.has(r.id))
+
+  function toggle(id: string) {
+    setExcluded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  async function draft() {
+    setBusy(true)
+    setError(null)
+    try {
+      setResult(await api.chartersFromRisks(product.id, chosen.map((r) => r.id)))
+      setSaved(new Set())
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function save(d: RiskCharterDraft, index: number) {
+    setError(null)
+    try {
+      await api.saveCharter(product.id, {
+        mission_statement: d.mission_statement, rationale: d.rationale, priority: d.priority,
+        source: 'risk-based', risk_ids: d.risk_ids, test_ideas: d.test_ideas, oracles: d.oracles,
+        risk_areas: accepted.filter((r) => d.risk_ids.includes(r.id)).map((r) => r.title),
+      })
+      setSaved((prev) => new Set(prev).add(index))
+    } catch (e) {
+      setError(errorText(e))
+    }
+  }
+
+  if (accepted.length === 0) {
+    return <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Accept at least one risk to plan charters from it.</div>
+  }
+
+  return (
+    <div>
+      <fieldset style={{ border: 'none', padding: 0, margin: '0 0 14px' }}>
+        <legend style={fieldLabel}>Plan charters for</legend>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {accepted.map((r) => (
+            <label key={r.id} style={{
+              display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, padding: '6px 10px', borderRadius: 7, cursor: 'pointer',
+              border: `1px solid ${excluded.has(r.id) ? 'var(--border)' : 'var(--accent)'}`,
+            }}>
+              <input type="checkbox" checked={!excluded.has(r.id)} onChange={() => toggle(r.id)} />
+              <span className="mono" style={{ fontSize: 11 }}>{r.ref}</span> {r.title}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <button onClick={draft} disabled={chosen.length === 0 || busy} style={primaryButton(chosen.length === 0 || busy)}>
+        {busy ? 'Drafting…' : 'Draft charters'}
+      </button>
+      <ErrorLine message={error} />
+
+      {result && (
+        <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 820 }}>
+          {result.warnings.map((w) => (
+            <div key={w} style={{ fontSize: 12, color: 'var(--warning)' }}>{w}</div>
+          ))}
+          {result.uncovered_risk_refs.length > 0 && (
+            <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>
+              No charter covers {result.uncovered_risk_refs.join(', ')} yet. Draft again with just those selected, or write one yourself.
+            </div>
+          )}
+          {result.charters.map((d, i) => (
+            <article key={i} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '15px 17px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.45 }}>{d.mission_statement}</div>
+                {saved.has(i) ? (
+                  <Link to="/charters/suggest" style={{ fontSize: 12.5, whiteSpace: 'nowrap' }}>Saved. Start it from Charters</Link>
+                ) : (
+                  <button onClick={() => save(d, i)} style={{ ...primaryButton(), padding: '6px 13px', whiteSpace: 'nowrap', height: 'fit-content' }}>
+                    Save charter
+                  </button>
+                )}
+              </div>
+              <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: '6px 0 0', lineHeight: 1.5 }}>{d.rationale}</p>
+              <div style={{ display: 'flex', gap: 24, marginTop: 12, flexWrap: 'wrap' }}>
+                <div style={{ flex: '1 1 320px' }}>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 4 }}>Starting ideas</div>
+                  <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.6 }}>
+                    {d.test_ideas.map((idea) => <li key={idea}>{idea}</li>)}
+                  </ul>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 4 }}>Covers</div>
+                  <div className="mono" style={{ fontSize: 12 }}>{d.risk_refs.join(', ')}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', margin: '10px 0 4px' }}>Oracles</div>
+                  <div style={{ fontSize: 12.5 }}>{d.oracles.map((o) => o.replace(/_/g, ' ')).join(', ')}</div>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}

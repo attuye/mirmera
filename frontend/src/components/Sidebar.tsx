@@ -2,6 +2,7 @@ import { Link, useLocation } from 'react-router-dom'
 
 const NAV = [
   { label: 'Dashboard', to: '/dashboard' },
+  { label: 'Risks', to: '/risks' },
   { label: 'Charters', to: '/charters/suggest' },
   { label: 'Bugs', to: '/bugs' },
   { label: 'Debriefs', to: '/debriefs' },
