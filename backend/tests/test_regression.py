@@ -22,6 +22,7 @@ APP = b"""<!doctype html><title>KYC verify</title>
   <label for=name>Full name</label><input id=name>
   <label>Password <input type=password name=password></label>
   <select aria-label="Document type"><option>National ID</option><option>Passport</option></select>
+  <label for=expiry>Expiry date</label><input id=expiry type=date>
   <input type=checkbox id=terms><label for=terms>I accept the terms</label>
   <button type=submit>Verify</button>
 </form>
@@ -97,12 +98,15 @@ def recorded_bug(client, session, app_url, chromium_available):  # noqa: F811
         await page.keyboard.press("Tab")
         await page.get_by_label("Document type").focus()
         await page.keyboard.press("ArrowDown")  # a real choice (trusted event), like a user
+        await page.get_by_label("Expiry date").focus()  # typing starts at the first segment
+        await page.keyboard.type("01012030")  # typed digit by digit, like a user
+        await page.keyboard.press("Tab")
         await page.get_by_text("I accept the terms").click()
         await page.get_by_role("button", name="Verify").click()
         await page.get_by_text("Something went wrong").wait_for()
 
     manager.loop.run(act(), timeout=30)
-    wait_for(client, session, lambda c: c.get("failed_request") and c.get("action", 0) >= 5)
+    wait_for(client, session, lambda c: c.get("failed_request") and c.get("action", 0) >= 6)
     bug = client.post(f"/sessions/{session['id']}/bugs", json={"title": "Passport verification fails"}).json()
     client.patch(f"/bugs/{bug['id']}", json={
         "kind": "bug", "steps_to_reproduce": ["Fill the form", "Choose Passport", "Click Verify"],
@@ -132,6 +136,7 @@ def test_the_testers_actions_are_recorded_with_locators_and_no_secrets(client, s
         'fill label "Full name" = "Abebe Kebede"',
         'fill label "Password" = (hidden: MIRMERA_SECRET_PASSWORD)',
         'select "Passport" in label "Document type"',
+        'fill label "Expiry date" = "2030-01-01"',  # once, not once per digit typed
         'check label "I accept the terms"',
         'click button "Verify"',
     ]

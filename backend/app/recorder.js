@@ -93,7 +93,11 @@
     const testId = el.getAttribute('data-testid')
     if (testId) return { method: 'testid', value: testId }
     const role = roleOf(el)
-    const isField = ['textbox', 'combobox', 'checkbox', 'radio'].includes(role)
+    // Any input that is not a button counts as a field (date, time, color, range…), not only text boxes.
+    const tag = el.tagName.toLowerCase()
+    const type = (el.getAttribute('type') || '').toLowerCase()
+    const isField = ['textbox', 'combobox', 'checkbox', 'radio'].includes(role) || tag === 'select' || tag === 'textarea' ||
+      (tag === 'input' && !['button', 'submit', 'reset', 'image', 'hidden'].includes(type))
     if (isField) {
       const label = labelText(el)
       if (label) return { method: 'label', value: label }
@@ -130,6 +134,11 @@
     }
   }
 
+  // Date and time fields fire a change for every segment typed (0002, 0020, 0202, 2020…),
+  // so they are recorded once, when the tester leaves the field or presses Enter.
+  const SEGMENTED = ['date', 'time', 'datetime-local', 'month', 'week']
+  const isSegmented = (el) => el.tagName.toLowerCase() === 'input' && SEGMENTED.includes((el.getAttribute('type') || '').toLowerCase())
+
   const FIELD = 'input, select, textarea, label, option'
   const CLICKABLE = 'button, a[href], [role], input[type=button], input[type=submit], input[type=reset], input[type=image], summary, [onclick], [tabindex]'
 
@@ -157,9 +166,16 @@
       send({ action: el.checked ? 'check' : 'uncheck', locator: locatorFor(el) })
     } else if (type === 'file') {
       send({ action: 'upload', locator: locatorFor(el), files: Array.from(el.files || []).map((f) => f.name) })
+    } else if (isSegmented(el)) {
+      // recorded on focusout, below
     } else if (tag === 'input' || tag === 'textarea') {
       recordFill(el)
     }
+  }, true)
+
+  document.addEventListener('focusout', (e) => {
+    if (!e.isTrusted || !(e.target instanceof Element) || !isSegmented(e.target)) return
+    if (e.target.value) recordFill(e.target)
   }, true)
 
   document.addEventListener('keydown', (e) => {

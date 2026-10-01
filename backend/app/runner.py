@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 import threading
 from collections.abc import Coroutine
 from dataclasses import dataclass
@@ -92,6 +93,16 @@ def _cut(text: str | None) -> str:
     return text if len(text) <= TEXT_LIMIT else text[: TEXT_LIMIT - 1] + "…"
 
 
+def _new_loop() -> asyncio.AbstractEventLoop:
+    """Playwright starts the browser as a subprocess. On Windows only the
+    Proactor loop can do that, but `uvicorn --reload` switches Windows to
+    selector loops, so Playwright would fail with NotImplementedError. This
+    loop is ours, so it always gets the Proactor loop there."""
+    if sys.platform == "win32":
+        return asyncio.ProactorEventLoop()
+    return asyncio.new_event_loop()
+
+
 class _BackgroundLoop:
     """One event loop on a daemon thread, started on first use."""
 
@@ -102,7 +113,7 @@ class _BackgroundLoop:
     def _get(self) -> asyncio.AbstractEventLoop:
         with self._lock:
             if self._loop is None:
-                loop = asyncio.new_event_loop()
+                loop = _new_loop()
                 threading.Thread(target=loop.run_forever, name="mirmera-runner", daemon=True).start()
                 self._loop = loop
             return self._loop
