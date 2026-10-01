@@ -8,6 +8,7 @@ from app import models, schemas
 from app.ai import tasks
 from app.ai.base import ProviderError, get_provider
 from app.database import get_db
+from app.routers import runner as runner_api
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,15 @@ def log_bug(session_id: str, payload: schemas.BugCreate, db: DBSession = Depends
     )
     db.add(bug)
     db.commit()
+
+    # With the browser running, the bug gets a screenshot of what was on screen.
+    # Best effort: the bug is already saved, and a failed screenshot must not lose it.
+    browser = runner_api.sync_signals(db, session_id)
+    if browser:
+        try:
+            runner_api.take_screenshot(db, session_id, browser, caption=f"When logged: {bug.title}", bug_id=bug.id)
+        except Exception as err:
+            logger.warning("Bug %s saved without a screenshot: %s", bug.id, err)
     db.refresh(bug)
     return bug
 
@@ -176,6 +186,9 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
         raise HTTPException(404, "Session not found")
     if session.ended_at:
         raise HTTPException(400, "Session already ended")
+
+    # Close the browser first, so its trace, HAR and last signals are saved.
+    await runner_api.stop_runner_async(db, session_id)
 
     session.ended_at = utcnow()
     charter = db.get(models.Charter, session.charter_id)

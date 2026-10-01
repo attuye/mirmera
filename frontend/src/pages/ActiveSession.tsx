@@ -3,6 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api, Note } from '../api/client'
 import Sidebar from '../components/Sidebar'
 import { errorText } from '../components/ui'
+import BrowserPanel, { useRunner } from '../components/BrowserPanel'
+import { Screenshot, clock } from '../components/Evidence'
 
 const TAGS: { key: Note['tag']; label: string; color: string }[] = [
   { key: 'test', label: 'Test', color: 'var(--info)' },
@@ -54,6 +56,7 @@ export default function ActiveSession() {
   const [totalPausedSeconds, setTotalPausedSeconds] = useState(0)
   const elapsed = useElapsed(startedAt, !ending, paused, pausedAt, totalPausedSeconds)
   const [charterMission, setCharterMission] = useState('')
+  const runner = useRunner(sessionId)
 
   useEffect(() => {
     if (!sessionId) return
@@ -82,6 +85,8 @@ export default function ActiveSession() {
       const note = await api.addNote(sessionId, tag, text)
       setNotes((prev) => [...prev, note])
       setDraft((current) => (current.trim() === text ? '' : current))
+      // A bug logged with the browser running gets a screenshot; show it now.
+      if (tag === 'bug' && runner.status?.running) runner.refresh().catch(console.error)
     } catch (e) {
       setLogError(`Not saved: ${errorText(e)} Your text is still in the box.`)
     } finally {
@@ -109,6 +114,13 @@ export default function ActiveSession() {
       setPausedAt(session.paused_at)
     }
   }
+
+  // Notes and screenshots in one timeline. Both timestamps are naive UTC ISO
+  // strings, so they sort correctly as text.
+  const timeline = [
+    ...notes.map((note) => ({ type: 'note' as const, at: note.timestamp, note })),
+    ...runner.evidence.filter((e) => e.kind === 'screenshot').map((shot) => ({ type: 'shot' as const, at: shot.captured_at, shot })),
+  ].sort((a, b) => a.at.localeCompare(b.at))
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex' }}>
@@ -178,20 +190,26 @@ export default function ActiveSession() {
               <div role="alert" style={{ color: 'var(--danger)', fontSize: 12.5, margin: '-6px 0 12px' }}>{logError}</div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, overflowY: 'auto' }}>
-              {notes.map((n) => {
-                const meta = TAGS.find((t) => t.key === n.tag)!
-                return (
-                  <div key={n.id} style={{ display: 'flex', gap: 12, padding: '10px 4px', borderBottom: '1px solid #17191D' }}>
-                    <div className="mono" style={{ fontSize: 11, color: 'var(--text-quiet)', width: 56, flexShrink: 0 }}>
-                      {new Date(n.timestamp).toLocaleTimeString()}
-                    </div>
-                    <div style={{ width: 7, height: 7, borderRadius: '50%', background: meta.color, marginTop: 6, flexShrink: 0 }} />
-                    <div style={{ fontSize: 13, lineHeight: 1.5 }}>{n.content}</div>
+              {timeline.map((item) => item.type === 'note' ? (
+                <div key={item.note.id} style={{ display: 'flex', gap: 12, padding: '10px 4px', borderBottom: '1px solid #17191D' }}>
+                  <div className="mono" style={{ fontSize: 11, color: 'var(--text-quiet)', width: 80, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                    {clock(item.note.timestamp)}
                   </div>
-                )
-              })}
+                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: TAGS.find((t) => t.key === item.note.tag)!.color, marginTop: 6, flexShrink: 0 }} />
+                  <div style={{ fontSize: 13, lineHeight: 1.5 }}>{item.note.content}</div>
+                </div>
+              ) : (
+                <div key={item.shot.id} style={{ display: 'flex', gap: 12, padding: '10px 4px', borderBottom: '1px solid #17191D' }}>
+                  <div className="mono" style={{ fontSize: 11, color: 'var(--text-quiet)', width: 80, flexShrink: 0, whiteSpace: 'nowrap' }}>
+                    {clock(item.shot.captured_at)}
+                  </div>
+                  <div style={{ width: 7, height: 7, borderRadius: 2, background: 'var(--accent)', marginTop: 6, flexShrink: 0 }} />
+                  <Screenshot e={item.shot} width={200} />
+                </div>
+              ))}
             </div>
           </div>
+          {sessionId && <BrowserPanel sessionId={sessionId} runner={runner} disabled={ending} />}
         </div>
       </div>
     </div>

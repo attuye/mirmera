@@ -9,6 +9,7 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const backend = path.resolve(here, '..', '..', 'backend')
 const dataDir = path.resolve(here, '..', '.e2e-data')
 const dbFile = path.join(dataDir, 'e2e.db')
+const evidenceDir = path.join(dataDir, 'evidence')
 
 const port = process.env.E2E_API_PORT ?? '8100'
 const webUrl = process.env.E2E_WEB_URL ?? 'http://localhost:5180'
@@ -22,6 +23,7 @@ const python = process.env.PYTHON ?? venvPython ?? 'python'
 
 mkdirSync(dataDir, { recursive: true })
 rmSync(dbFile, { force: true })
+rmSync(evidenceDir, { recursive: true, force: true })
 
 const child = spawn(python, ['-m', 'uvicorn', 'app.main:app', '--port', port], {
   cwd: backend,
@@ -32,6 +34,10 @@ const child = spawn(python, ['-m', 'uvicorn', 'app.main:app', '--port', port], {
     DATABASE_URL: `sqlite:///${dbFile.replace(/\\/g, '/')}`,
     DEFAULT_AI_PROVIDER: 'mock',
     CORS_ORIGINS: webUrl,
+    // The session runner's browser runs headless in tests; nobody is there to look at it.
+    RUNNER_HEADLESS: 'true',
+    EVIDENCE_DIR: evidenceDir,
+    ...(process.env.PW_CHROMIUM_PATH ? { RUNNER_CHROMIUM_PATH: process.env.PW_CHROMIUM_PATH } : {}),
   },
 })
 

@@ -153,6 +153,32 @@ class BugCreate(BaseModel):
     trail_window: int = 6
 
 
+class EvidenceOut(BaseModel):
+    """A screenshot, trace, HAR file or signal recorded by the session runner."""
+    id: str
+    session_id: str
+    bug_id: Optional[str] = None
+    kind: str
+    summary: str
+    url: Optional[str] = None
+    has_file: bool = False
+    count: int = 1
+    captured_at: datetime
+    last_seen_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def file_flag(cls, data):
+        # The file path stays on the server; the client only needs to know a file exists.
+        if hasattr(data, "file_path"):
+            return {**{c: getattr(data, c) for c in (
+                "id", "session_id", "bug_id", "kind", "summary", "url", "count", "captured_at", "last_seen_at")},
+                "has_file": bool(data.file_path)}
+        return data
+
+
 class BugOut(BaseModel):
     id: str
     session_id: str
@@ -180,6 +206,8 @@ class BugOut(BaseModel):
     prompt_version: Optional[str] = None
     last_change: Optional[str] = None
     reviewed_at: Optional[datetime] = None
+    # Screenshot(s) the runner took when the bug was logged
+    evidence: list[EvidenceOut] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -500,3 +528,34 @@ class ObservedRiskPromotion(BaseModel):
     quality_criterion: QualityCriterion = "capability"
     impact: int = Field(default=3, ge=1, le=5)
     likelihood: int = Field(default=3, ge=1, le=5)
+
+
+# ---------- browser session runner ----------
+
+class RunnerStart(BaseModel):
+    url: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("url")
+    @classmethod
+    def http_url(cls, value: str) -> str:
+        value = value.strip()
+        if "://" not in value:
+            value = "https://" + value  # "staging.example.com" is what testers type
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("Use an http:// or https:// address")
+        return value
+
+
+class ScreenshotRequest(BaseModel):
+    caption: Optional[str] = Field(default=None, max_length=500)
+
+
+class RunnerStatus(BaseModel):
+    running: bool
+    start_url: Optional[str] = None
+    url: Optional[str] = None  # page the tester is on now
+    title: Optional[str] = None
+    window_open: bool = False
+    started_at: Optional[datetime] = None
+    counts: dict[str, int] = {}  # signals and screenshots recorded so far, by kind
+    dropped: int = 0  # signals not recorded because the page produced too many

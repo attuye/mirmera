@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,13 +8,21 @@ from fastapi.responses import JSONResponse
 from app.ai.base import ProviderError, ProviderNotConfigured, UnknownProvider
 from app.config import settings
 from app.database import Base, add_missing_columns, engine
-from app.routers import products, artifacts, bugs, charters, sessions, debriefs, risks
+from app.routers import products, artifacts, bugs, charters, sessions, debriefs, risks, runner
+from app.runner import RunnerConflict, RunnerUnavailable, manager as runner_manager
 
 Base.metadata.create_all(bind=engine)  # creates new tables
 for column in add_missing_columns():  # adds new columns to existing tables
     logging.getLogger(__name__).warning("Database upgraded: added column %s", column)
 
-app = FastAPI(title="Mirmera API")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    yield
+    # Close any test browser still open, so no Chromium outlives the server.
+    runner_manager.stop_all()
+
+
+app = FastAPI(title="Mirmera API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,6 +47,16 @@ async def provider_not_configured(_: Request, err: ProviderNotConfigured):
 async def provider_error(_: Request, err: ProviderError):
     return JSONResponse(status_code=502, content={"detail": str(err)})
 
+@app.exception_handler(RunnerUnavailable)
+async def runner_unavailable(_: Request, err: RunnerUnavailable):
+    return JSONResponse(status_code=503, content={"detail": str(err)})
+
+
+@app.exception_handler(RunnerConflict)
+async def runner_conflict(_: Request, err: RunnerConflict):
+    return JSONResponse(status_code=409, content={"detail": str(err)})
+
+
 app.include_router(products.router)
 app.include_router(artifacts.router)
 app.include_router(charters.router)
@@ -47,6 +66,7 @@ app.include_router(debriefs.list_router)
 app.include_router(sessions.bugs_list_router)
 app.include_router(risks.router)
 app.include_router(bugs.router)
+app.include_router(runner.router)
 
 
 @app.get("/health")

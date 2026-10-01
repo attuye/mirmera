@@ -5,6 +5,8 @@ import {
 } from '../api/client'
 import Sidebar from '../components/Sidebar'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
+import { RecordingFiles, SIGNAL_KINDS, countLine } from '../components/Evidence'
+import type { Evidence, EvidenceKind } from '../api/client'
 
 // PROOF debrief (Session-Based Test Management): Past, Results, Obstacles,
 // Outlook, Feelings. The AI drafts the first four from the session log; the
@@ -163,12 +165,30 @@ function ObservedRiskRow({ risk, onPromote }: {
   )
 }
 
+/** What the browser runner recorded during the session, with the trace and HAR. */
+function RecordedEvidence({ items }: { items: Evidence[] }) {
+  const counts: Partial<Record<EvidenceKind, number>> = {}
+  for (const e of items) counts[e.kind] = (counts[e.kind] ?? 0) + e.count
+  return (
+    <section aria-label="Recorded evidence" style={{ ...panel, marginTop: 12, padding: '12px 18px' }}>
+      <div style={{ display: 'flex', gap: 14, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 6 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 600 }}>Recorded in the browser</span>
+        <span className="mono" style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
+          {countLine(counts, [...SIGNAL_KINDS, 'navigation', 'screenshot']) || 'No signals'}
+        </span>
+      </div>
+      <RecordingFiles items={items} />
+    </section>
+  )
+}
+
 export default function DebriefPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const [debrief, setDebrief] = useState<Debrief | null>(null)
   const [session, setSession] = useState<SessionRecord | null>(null)
   const [charter, setCharter] = useState<Charter | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [evidence, setEvidence] = useState<Evidence[]>([])
 
   // Editable copies of the tester's text; saved together with one button.
   const [past, setPast] = useState('')
@@ -195,6 +215,7 @@ export default function DebriefPage() {
       setSession(s)
       return api.getCharter(s.charter_id).then(setCharter)
     }).catch((e) => setLoadError(errorText(e)))
+    api.listEvidence(sessionId).then(setEvidence).catch(console.error)
   }, [sessionId])
 
   const edit = (set: (v: string) => void) => (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -265,6 +286,7 @@ export default function DebriefPage() {
           </div>
           <TimeSplit breakdown={debrief.time_breakdown} />
         </div>
+        {evidence.length > 0 && <RecordedEvidence items={evidence} />}
 
         <Section letter="P" title="Past" hint="What happened, in your words">
           <textarea aria-label="Past" value={past} onChange={edit(setPast)} rows={6} style={textarea} />

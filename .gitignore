@@ -10,6 +10,8 @@ __pycache__/
 # Local data (may contain test data and captured page content)
 *.db
 sessions/
+# Runner screenshots, traces and HAR files (can contain what the tested app shows)
+evidence/
 plan/out/
 
 # Browser test output
