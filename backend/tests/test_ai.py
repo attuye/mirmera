@@ -135,11 +135,12 @@ def test_mock_charter_suggestions_are_grounded_in_the_artifact():
 
 def test_mock_debrief_counts_notes():
     draft = run(tasks.draft_debrief(
-        MockProvider(), charter_mission="Explore checkout",
-        notes_text="[test] a\n[test] b", bugs_text="(none)",
+        MockProvider(), charter_mission="Explore checkout", risks=[], duration_minutes=30,
+        notes=["+1 min [test] a", "+5 min [question] Is GBP supported?"], bugs=[], time_breakdown={},
     ))
-    assert "2 note(s)" in draft.coverage_summary
-    assert "Explore checkout" in draft.coverage_summary
+    assert "2 note(s)" in draft.past
+    assert "Explore checkout" in draft.past
+    assert draft.open_questions == ["Is GBP supported?"]
 
 
 def test_data_is_sent_separately_from_the_instructions():

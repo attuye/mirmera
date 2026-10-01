@@ -40,7 +40,7 @@ export interface Charter {
   rationale: string | null
   risk_areas: string[]
   priority: 'high' | 'medium' | 'low'
-  source: 'ai-suggested' | 'manual'
+  source: 'ai-suggested' | 'manual' | 'follow-up'
   status: 'proposed' | 'active' | 'done'
   created_at: string
   risk_ids: string[]
@@ -140,14 +140,43 @@ export type BugReview = Partial<Pick<Bug,
   'oracle_explanation' | 'severity' | 'severity_rationale' | 'reproducibility' | 'open_questions' | 'status'
 >> & { kind?: 'bug' | 'question' }
 
+export type CharterStatus = 'fulfilled' | 'partially_fulfilled' | 'not_fulfilled'
+
+/** A follow-up charter the debrief suggests; charter_id is set once the tester saves it. */
+export interface OutlookItem { charter: string; reason: string; charter_id: string | null }
+/** A risk noticed during the session; risk_id is set once the tester adds it to the risk list. */
+export interface ObservedRisk { text: string; risk_id: string | null }
+
+/** PROOF debrief: Past (final_text / ai_draft), Results, Obstacles, Outlook, Feelings. */
 export interface Debrief {
   id: string
   session_id: string
   coverage_summary: string | null
+  /** Fractions of session time per phase (0–1): on_charter, opportunity, bug_investigation, setup. */
   time_breakdown: Record<string, number>
   open_questions: string[]
   ai_draft: string | null
   final_text: string | null
+  charter_status: CharterStatus | null
+  charter_status_rationale: string | null
+  results: string[]
+  obstacles: string[]
+  outlook: OutlookItem[]
+  risks_observed: ObservedRisk[]
+  /** Written by the tester only; the AI never drafts it. */
+  tester_feelings: string | null
+  ai_provider: string | null
+  ai_model: string | null
+  prompt_version: string | null
+}
+
+export type DebriefUpdate = Partial<Pick<Debrief, 'final_text' | 'tester_feelings' | 'results' | 'obstacles' | 'open_questions'>>
+
+export interface ObservedRiskPromotion {
+  title?: string
+  quality_criterion: string
+  impact: number
+  likelihood: number
 }
 
 export interface DebriefListItem {
@@ -295,8 +324,12 @@ export const api = {
   listAllBugs: (productId: string) => request<BugListItem[]>(`/products/${productId}/bugs`),
   getDebrief: (sessionId: string) => request<Debrief>(`/sessions/${sessionId}/debrief`),
   listDebriefs: (productId: string) => request<DebriefListItem[]>(`/products/${productId}/debriefs`),
-  updateDebrief: (sessionId: string, final_text: string) =>
-    request<Debrief>(`/sessions/${sessionId}/debrief`, { method: 'PATCH', body: JSON.stringify({ final_text }) }),
+  updateDebrief: (sessionId: string, changes: DebriefUpdate) =>
+    request<Debrief>(`/sessions/${sessionId}/debrief`, { method: 'PATCH', body: JSON.stringify(changes) }),
+  saveOutlookCharter: (sessionId: string, index: number) =>
+    request<Debrief>(`/sessions/${sessionId}/debrief/outlook/${index}/charter`, { method: 'POST' }),
+  promoteObservedRisk: (sessionId: string, index: number, promotion: ObservedRiskPromotion) =>
+    request<Debrief>(`/sessions/${sessionId}/debrief/risks-observed/${index}/risk`, { method: 'POST', body: JSON.stringify(promotion) }),
 
   updateProduct: (productId: string, changes: Partial<Pick<Product, 'name' | 'testing_mission' | 'default_ai_provider'>>) =>
     request<Product>(`/products/${productId}`, { method: 'PATCH', body: JSON.stringify(changes) }),

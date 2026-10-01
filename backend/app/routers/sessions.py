@@ -185,33 +185,47 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
     notes = db.query(models.Note).filter(models.Note.session_id == session_id).order_by(models.Note.timestamp).all()
     bugs = db.query(models.Bug).filter(models.Bug.session_id == session_id).all()
 
-    notes_text = "\n".join(f"[{n.tag}] {n.timestamp.isoformat()} — {n.content}" for n in notes)
-    bugs_text = "\n".join(f"- ({b.severity}) {b.title}" for b in bugs) or "(none)"
+    def minute(ts) -> int:
+        return max(0, int((ts - session.started_at).total_seconds() // 60))
 
-    tag_counts: dict[str, int] = {}
-    for n in notes:
-        tag_counts[n.tag] = tag_counts.get(n.tag, 0) + 1
+    def bug_line(b: models.Bug) -> str:
+        kind = b.kind or "unreviewed"
+        oracle = f", oracle: {b.oracle_heuristic}" if b.oracle_heuristic else ""
+        return f"- [{kind}, {b.severity}{oracle}] {b.title}"
 
-    debrief = models.Debrief(
-        session_id=session_id,
-        time_breakdown=_compute_time_breakdown(notes, session.ended_at),
+    time_breakdown = _compute_time_breakdown(notes, session.ended_at)
+    duration_minutes = round(
+        ((session.ended_at - session.started_at).total_seconds() - (session.total_paused_seconds or 0)) / 60
     )
+    debrief = models.Debrief(session_id=session_id, time_breakdown=time_breakdown)
 
     try:
         provider = get_provider(product.default_ai_provider)
         draft = await tasks.draft_debrief(
             provider,
             charter_mission=charter.mission_statement,
-            notes_text=notes_text or "(no notes logged)",
-            bugs_text=bugs_text,
+            risks=[{"ref": r.ref, "title": r.title, "failure_mode": r.failure_mode} for r in charter.risks],
+            duration_minutes=duration_minutes,
+            notes=[f"+{minute(n.timestamp)} min [{n.tag}] {n.content}" for n in notes],
+            bugs=[bug_line(b) for b in bugs],
+            time_breakdown=time_breakdown,
         )
-        debrief.ai_draft = draft.coverage_summary
-        debrief.coverage_summary = draft.coverage_summary
+        debrief.ai_draft = draft.past
+        debrief.coverage_summary = draft.past
         debrief.open_questions = draft.open_questions
+        debrief.charter_status = draft.charter_status
+        debrief.charter_status_rationale = draft.charter_status_rationale
+        debrief.results = draft.results
+        debrief.obstacles = draft.obstacles
+        debrief.outlook = [{**o.model_dump(), "charter_id": None} for o in draft.outlook]
+        debrief.risks_observed = [{"text": r, "risk_id": None} for r in draft.risks_observed]
+        debrief.ai_provider = provider.name
+        debrief.ai_model = provider.model
+        debrief.prompt_version = tasks.PROMPT_VERSIONS["debrief"]
     except ProviderError as err:
         # No API key, model down, or an invalid reply: the session still ends
-        # and the debrief still saves; the tester writes the summary manually
-        # instead of editing an AI draft. The reason is logged.
+        # and the debrief still saves; the tester writes it manually instead of
+        # editing an AI draft. The reason is logged.
         logger.warning("Session %s ended without an AI debrief: %s", session_id, err)
         debrief.coverage_summary = None
 

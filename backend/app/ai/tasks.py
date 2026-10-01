@@ -11,14 +11,14 @@ from pathlib import Path
 from app.ai.base import LLMProvider
 from app.ai.llm_json import complete_json
 from app.schemas import (
-    CharterSuggestion, CharterSuggestionList, DebriefDraft,
+    CharterSuggestion, CharterSuggestionList, LLMDebrief,
     LLMBugDraft, LLMProductModel, LLMRisk, LLMRiskCharter, LLMRiskCharterList, LLMRiskList,
 )
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 PROMPT_VERSIONS = {
     "charter_suggestions": "charter-suggestion-v2",
-    "debrief": "debrief-draft-v2",
+    "debrief": "debrief-proof-v1",
     "artifact_summary": "artifact-summary-v1",
     "product_model": "product-model-v1",
     "risk_analysis": "risk-analysis-v1",
@@ -50,15 +50,20 @@ async def suggest_charters(
 
 
 async def draft_debrief(
-    provider: LLMProvider, *, charter_mission: str, notes_text: str, bugs_text: str
-) -> DebriefDraft:
+    provider: LLMProvider, *, charter_mission: str, risks: list[dict], duration_minutes: int,
+    notes: list[str], bugs: list[str], time_breakdown: dict,
+) -> LLMDebrief:
+    """PROOF debrief. notes: "+12 min [tag] text" lines. bugs: one line each."""
+    split = ", ".join(f"{k.replace('_', ' ')} {round(v * 100)}%" for k, v in time_breakdown.items()) or "(not enough notes)"
     user = (
         f"<charter>{charter_mission}</charter>\n\n"
-        f"<notes>\n{notes_text}\n</notes>\n\n"
-        f"<bugs>\n{bugs_text}\n</bugs>"
+        f"<risks>\n{json.dumps(risks, indent=2, ensure_ascii=False) if risks else '(none linked)'}\n</risks>\n\n"
+        f"Session length: {duration_minutes} minutes. Time split: {split}.\n\n"
+        f"<notes>\n{chr(10).join(notes) or '(no notes logged)'}\n</notes>\n\n"
+        f"<bugs>\n{chr(10).join(bugs) or '(none)'}\n</bugs>"
     )
     return await complete_json(
-        provider, load_prompt("debrief_draft.md"), user, DebriefDraft, task="debrief",
+        provider, load_prompt("debrief_draft.md"), user, LLMDebrief, task="debrief",
     )
 
 
