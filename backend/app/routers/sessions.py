@@ -165,11 +165,7 @@ def list_all_bugs(product_id: str, db: DBSession = Depends(get_db)):
         .all()
     )
     return [
-        schemas.BugListItem(
-            id=b.id, session_id=b.session_id, charter_mission=c.mission_statement,
-            title=b.title, severity=b.severity, status=b.status,
-            reproduction_trail=b.reproduction_trail, created_at=b.created_at,
-        )
+        schemas.BugListItem(**schemas.BugOut.model_validate(b).model_dump(), charter_mission=c.mission_statement)
         for b, c in rows
     ]
 

@@ -176,7 +176,28 @@ class Bug(Base):
     status = Column(String, default="new")
     created_at = Column(DateTime, default=utcnow)
 
+    # The bug report, added in the bug-report step. Quick-logged bugs leave these
+    # empty until the tester reviews them. kind is None ("unreviewed") until then;
+    # a "bug" must name the oracle that makes it a problem, otherwise it's a "question".
+    kind = Column(String, nullable=True)  # None | "bug" | "question"
+    steps_to_reproduce = Column(JSON, nullable=True)  # list[str]
+    expected = Column(Text, nullable=True)
+    actual = Column(Text, nullable=True)
+    oracle_heuristic = Column(String, nullable=True)  # FEW HICCUPPS, e.g. "claims"
+    oracle_explanation = Column(Text, nullable=True)
+    severity_rationale = Column(Text, nullable=True)
+    reproducibility = Column(String, nullable=True)  # "always" | "intermittent" | "once" | "unknown"
+    open_questions = Column(JSON, nullable=True)  # list[str]
+    # The AI's latest draft, kept unchanged next to the tester's version (like Debrief.ai_draft).
+    ai_draft = Column(JSON, nullable=True)
+    ai_provider = Column(String, nullable=True)
+    ai_model = Column(String, nullable=True)
+    prompt_version = Column(String, nullable=True)
+    last_change = Column(Text, nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+
     session = relationship("Session", back_populates="bugs")
+    charter = relationship("Charter")
 
 
 class Debrief(Base):

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, Note } from '../api/client'
 import Sidebar from '../components/Sidebar'
+import { errorText } from '../components/ui'
 
 const TAGS: { key: Note['tag']; label: string; color: string }[] = [
   { key: 'test', label: 'Test', color: 'var(--info)' },
@@ -46,6 +47,8 @@ export default function ActiveSession() {
   const [startedAt, setStartedAt] = useState<string>()
   const navigate = useNavigate()
   const [ending, setEnding] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [logError, setLogError] = useState<string | null>(null)
   const [paused, setPaused] = useState(false)
   const [pausedAt, setPausedAt] = useState<string | null>(null)
   const [totalPausedSeconds, setTotalPausedSeconds] = useState(0)
@@ -66,19 +69,24 @@ export default function ActiveSession() {
     }).catch(console.error)
   }, [sessionId])
 
-  async function logNote() {
-    if (!sessionId || !draft.trim()) return
-    const note = await api.addNote(sessionId, tag, draft.trim())
-    setNotes((prev) => [...prev, note])
-    setDraft('')
-  }
-
-  async function logBug() {
-    if (!sessionId || !draft.trim()) return
-    await api.logBug(sessionId, { title: draft.trim(), severity: 'medium' })
-    const note = await api.addNote(sessionId, 'bug', draft.trim())
-    setNotes((prev) => [...prev, note])
-    setDraft('')
+  // Log the current text as a note, or as a bug (a bug also appears in the timeline).
+  // Guarded so a note can't be lost: one save at a time, only the saved text is
+  // cleared from the box, and a failed save keeps the text and says why.
+  async function logEntry() {
+    const text = draft.trim()
+    if (!sessionId || !text || saving) return
+    setSaving(true)
+    setLogError(null)
+    try {
+      if (tag === 'bug') await api.logBug(sessionId, { title: text, severity: 'medium' })
+      const note = await api.addNote(sessionId, tag, text)
+      setNotes((prev) => [...prev, note])
+      setDraft((current) => (current.trim() === text ? '' : current))
+    } catch (e) {
+      setLogError(`Not saved: ${errorText(e)} Your text is still in the box.`)
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function endSession() {
@@ -135,7 +143,9 @@ export default function ActiveSession() {
               <textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); logEntry() } }}
                 placeholder="What are you observing?"
+                aria-label="What are you observing?"
                 style={{
                   width: '100%', minHeight: 50, background: 'transparent', border: 'none', color: 'var(--text)',
                   fontSize: 13, resize: 'vertical', outline: 'none', fontFamily: 'var(--font-ui)',
@@ -155,14 +165,18 @@ export default function ActiveSession() {
                     </button>
                   ))}
                 </div>
-                <button onClick={tag === 'bug' ? logBug : logNote} style={{
-                  background: 'var(--accent)', color: '#0C0D0F', fontSize: 12, fontWeight: 600, padding: '7px 16px', borderRadius: 7,
+                <button onClick={logEntry} disabled={saving || !draft.trim()} title="Ctrl+Enter" style={{
+                  background: saving || !draft.trim() ? 'var(--border)' : 'var(--accent)', color: '#0C0D0F',
+                  fontSize: 12, fontWeight: 600, padding: '7px 16px', borderRadius: 7,
                 }}>
-                  {tag === 'bug' ? 'Log Bug' : 'Log Note'}
+                  {saving ? 'Saving…' : tag === 'bug' ? 'Log Bug' : 'Log Note'}
                 </button>
               </div>
             </div>
 
+            {logError && (
+              <div role="alert" style={{ color: 'var(--danger)', fontSize: 12.5, margin: '-6px 0 12px' }}>{logError}</div>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, overflowY: 'auto' }}>
               {notes.map((n) => {
                 const meta = TAGS.find((t) => t.key === n.tag)!
