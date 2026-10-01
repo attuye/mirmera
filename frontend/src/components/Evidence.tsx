@@ -8,6 +8,7 @@ export const KIND_META: Record<EvidenceKind, { one: string; plural: string; colo
   page_error: { one: 'page error', plural: 'page errors', color: 'var(--danger)' },
   failed_request: { one: 'failed request', plural: 'failed requests', color: 'var(--warning)' },
   navigation: { one: 'page visited', plural: 'pages visited', color: 'var(--info)' },
+  action: { one: 'action recorded', plural: 'actions recorded', color: 'var(--question)' },
   screenshot: { one: 'screenshot', plural: 'screenshots', color: 'var(--accent)' },
   trace: { one: 'trace', plural: 'traces', color: 'var(--text-tertiary)' },
   har: { one: 'network log', plural: 'network logs', color: 'var(--text-tertiary)' },

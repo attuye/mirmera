@@ -61,6 +61,31 @@ npm run dev
 App at http://localhost:5173. On first load it creates a demo product
 ("AddisVerify KYC Platform") if none exists yet.
 
+### Regression tests from a bug
+
+The recorded browser also records your actions: clicks, typing, selects,
+checkboxes, Enter and uploads, each with a Playwright locator (test id, label,
+placeholder, role and name, text, then CSS). Passwords, one-time codes and
+card-like fields are never recorded; the test reads them from environment
+variables such as `MIRMERA_SECRET_PASSWORD`.
+
+On a reviewed bug, **Generate regression test** asks the AI for a plan: which
+recorded actions lead to the bug, and what should happen instead (assertions
+from your oracle). Mirmera renders the Playwright Test code from that plan
+itself, so the code is always valid and uses only recorded or checked
+locators. Assumptions the AI made are listed for you to check.
+
+With **Mark as a known bug** the test starts with `test.fail()`: CI stays
+green while the bug exists and fails the day it is fixed, which is your cue
+to remove that line.
+
+**Replay test** runs the plan headless against the app (or another base URL,
+such as staging) and says whether it **reproduces the bug**, **did not
+reproduce**, is **broken** (a step could not run) or **incomplete** (a secret
+or file was missing). Set the `MIRMERA_SECRET_*` variables in the backend's
+environment to replay steps that need them. Download the `.spec.ts`, review
+it, and add it to your test suite.
+
 ### Filing bugs to GitHub and Jira
 
 Reviewed bugs and questions can be filed from the Bugs page. Put the
@@ -137,6 +162,7 @@ This is the Phase 1 scaffold from the scoping discussion:
 - ✅ Feedback loop: sessions suggest risk re-scores with evidence; the tester
   decides, and each risk keeps its score history
 - ✅ Filing to GitHub Issues and Jira Cloud, with an AI-rated duplicate check
+- ✅ Regression tests: recorded actions -> AI plan -> rendered Playwright test, verified by replay
 
 Not yet built (Phase 2/3 from the scoping doc):
 - Importing specs, diffs and past bugs from Git, GitHub and Jira as artifacts (currently paste-only)

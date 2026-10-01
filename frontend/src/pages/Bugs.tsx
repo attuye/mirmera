@@ -3,6 +3,7 @@ import Sidebar from '../components/Sidebar'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
 import { api, BugFiling, BugListItem, BugReview, Evidence, ORACLES, OracleHeuristic, Product, Reproducibility } from '../api/client'
 import FileToTracker, { FilingLinks } from '../components/FileToTracker'
+import RegressionTestPanel from '../components/RegressionTestPanel'
 import { Screenshot, SignalList } from '../components/Evidence'
 
 const SEVERITY_COLOR: Record<string, string> = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-tertiary)' }
@@ -157,6 +158,7 @@ function BugDetail({ bug, onSaved, product, onProduct }: {
             <FileToTracker bug={bug} product={product} onProduct={onProduct}
               onFiled={(f: BugFiling) => onSaved({ ...bug, filings: [...bug.filings, f] })} />
           )}
+          {bug.kind === 'bug' && <RegressionTestPanel bug={bug} />}
         </>
       ) : (
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>

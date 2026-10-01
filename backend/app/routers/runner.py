@@ -26,6 +26,8 @@ router = APIRouter(tags=["runner"])
 
 # Signals this long before a bug was logged are shown with the bug.
 BUG_SIGNAL_WINDOW = timedelta(minutes=2)
+# Kept one row each, in order: the tester's trail. Other signals are counted on one row.
+ORDERED_KINDS = ("navigation", "action")
 FILE_KINDS = {"screenshot": "image/png", "trace": "application/zip", "har": "application/json"}
 
 
@@ -48,10 +50,10 @@ def _session_or_404(db: DBSession, session_id: str) -> models.Session:
 
 def store_signals(db: DBSession, session_id: str, signals: list[Signal]) -> None:
     """Save signals; a repeat of the same signal bumps the count on its row.
-    Pages visited are all kept, in order: they are the tester's trail."""
+    Pages visited and actions are all kept, in order: they are the tester's trail."""
     seen: dict[tuple[str, str], models.Evidence] = {}  # rows added in this batch aren't queryable yet
     for s in signals:
-        if s.kind != "navigation":
+        if s.kind not in ORDERED_KINDS:
             key = (s.kind, s.summary)
             existing = seen.get(key) or (
                 db.query(models.Evidence)
@@ -64,9 +66,9 @@ def store_signals(db: DBSession, session_id: str, signals: list[Signal]) -> None
                 seen[key] = existing
                 continue
         row = models.Evidence(session_id=session_id, kind=s.kind, summary=s.summary, url=s.url,
-                              captured_at=s.at, last_seen_at=s.at, count=1)
+                              captured_at=s.at, last_seen_at=s.at, count=1, data=s.data)
         db.add(row)
-        if s.kind != "navigation":
+        if s.kind not in ORDERED_KINDS:
             seen[(s.kind, s.summary)] = row
     db.commit()
 

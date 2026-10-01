@@ -49,6 +49,8 @@ class MockProvider(LLMProvider):
             return json.dumps(self._risk_update(user))
         if task == "duplicate_check":
             return json.dumps(self._duplicates(user))
+        if task == "regression_test":
+            return json.dumps(self._regression(user))
         return json.dumps({"note": f"mock provider has no canned answer for task '{task}'"})
 
     @staticmethod
@@ -206,6 +208,31 @@ class MockProvider(LLMProvider):
         return {"charters": charters}
 
     # ---- bug reports ----
+
+    @staticmethod
+    def _regression(user: str) -> dict:
+        """Replays every recorded action; asserts no failed request (or no
+        console error) when the page reported one, else the expected text."""
+        report = json.loads(_between(user, "report") or "{}")
+        actions = [l for l in _between(user, "actions").splitlines() if l.startswith("[")]
+        pages = [l for l in _between(user, "pages").splitlines() if l.startswith("http")]
+        browser = _between(user, "browser")
+        failed = re.search(r"\[failed request[^\]]*\] \w+ (\S+) →", browser)
+        steps = ([{"kind": "goto", "url": pages[0], "why": "(mock) Open the first page visited"}] if pages else [])
+        steps += [{"kind": "recorded", "action_index": i, "why": ""} for i in range(len(actions))]
+        if not steps:
+            steps = [{"kind": "goto", "url": "http://localhost:3000/", "why": "(mock) No pages were recorded"}]
+        if failed:
+            path = re.sub(r"^https?://[^/]+", "", failed.group(1)) or failed.group(1)
+            assertion = {"kind": "no_failed_requests", "url_contains": path,
+                         "why": f"(mock) The page reported {path} failing; it should succeed"}
+        elif "[console error" in browser or "[page error" in browser:
+            assertion = {"kind": "no_console_errors", "why": "(mock) The page logged errors; it should not"}
+        else:
+            assertion = {"kind": "text", "locator": {"method": "role", "role": "status"},
+                         "expected": report.get("expected") or "OK", "why": "(mock) The expected result from the report"}
+        return {"test_title": report.get("title") or "regression", "steps": steps, "assertions": [assertion],
+                "assumptions": ["(mock) Every recorded action was kept; remove the ones that do not lead to the bug."]}
 
     @staticmethod
     def _duplicates(user: str) -> dict:
