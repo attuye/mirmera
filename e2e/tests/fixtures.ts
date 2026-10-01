@@ -63,6 +63,11 @@ export class Api {
     return this.json(await this.ctx.get(`/products/${productId}/charters`))
   }
 
+  /** Saves the tester's review, so the bug can be filed. */
+  async reviewBug(bugId: string, review: Record<string, unknown>): Promise<{ id: string }> {
+    return this.json(await this.ctx.patch(`/bugs/${bugId}`, { data: review }))
+  }
+
   async notes(sessionId: string): Promise<{ content: string }[]> {
     return this.json(await this.ctx.get(`/sessions/${sessionId}/notes`))
   }

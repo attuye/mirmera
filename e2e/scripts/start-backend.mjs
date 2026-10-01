@@ -37,6 +37,8 @@ const child = spawn(python, ['-m', 'uvicorn', 'app.main:app', '--port', port], {
     // The session runner's browser runs headless in tests; nobody is there to look at it.
     RUNNER_HEADLESS: 'true',
     EVIDENCE_DIR: evidenceDir,
+    // In-memory GitHub and Jira: the tests never touch a real tracker.
+    MOCK_TRACKERS: 'true',
     ...(process.env.PW_CHROMIUM_PATH ? { RUNNER_CHROMIUM_PATH: process.env.PW_CHROMIUM_PATH } : {}),
   },
 })

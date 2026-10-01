@@ -31,5 +31,19 @@ class Settings(BaseSettings):
     # They can contain whatever the tested app shows, so keep them out of git.
     evidence_dir: str = "./evidence"
 
+    # Issue trackers. Secrets live here only; which repo / project a product
+    # files to is set per product in the app.
+    github_token: str | None = None  # fine-grained token with Issues: read and write
+    github_api_url: str = "https://api.github.com"
+    github_labels: str = ""  # comma-separated labels to add, e.g. "bug,from-mirmera" (must exist in the repo)
+    jira_base_url: str | None = None  # e.g. https://addisverify.atlassian.net
+    jira_email: str | None = None
+    jira_api_token: str | None = None
+    jira_issue_type: str = "Bug"
+    # Fake GitHub and Jira kept in memory: for tests, demos and trying the flow.
+    mock_trackers: bool = False
+    # Where testers open Mirmera; when set, filed issues link back to the bug.
+    public_app_url: str | None = None
+
 
 settings = Settings()
