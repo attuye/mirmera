@@ -9,7 +9,7 @@ from app.ai import tasks
 from app.ai.base import ProviderError, get_provider
 from app.database import get_db
 from app.evidence_text import browser_context
-from app.session_text import bug_line, note_line
+from app.session_text import bug_line, note_line, riskiest_first
 from app.routers import runner as runner_api
 
 logger = logging.getLogger(__name__)
@@ -216,7 +216,7 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
         draft = await tasks.draft_debrief(
             provider,
             charter_mission=charter.mission_statement,
-            risks=[{"ref": r.ref, "title": r.title, "failure_mode": r.failure_mode} for r in charter.risks],
+            risks=[{"ref": r.ref, "title": r.title, "failure_mode": r.failure_mode} for r in riskiest_first(charter.risks)],
             duration_minutes=duration_minutes,
             notes=[note_line(n, session.started_at) for n in notes],
             bugs=[bug_line(b) for b in bugs],

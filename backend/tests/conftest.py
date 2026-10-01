@@ -48,3 +48,14 @@ def charter(client, product):
 @pytest.fixture
 def session(client, charter):
     return client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+
+def pytest_runtest_logreport(report):
+    """On GitHub Actions, show each failure as an annotation on the PR, so it
+    can be read without opening the raw log."""
+    if not (os.environ.get("GITHUB_ACTIONS") and report.failed):
+        return
+    path, line, _ = report.location
+    lines = (report.longreprtext or "failed").strip().splitlines()
+    errors = [l for l in lines if l.startswith("E ")][-12:] or lines[-3:]
+    message = "%0A".join(l.replace("%", "%25").replace("\r", "") for l in errors)
+    print(f"\n::error file=backend/{path},line={(line or 0) + 1},title={report.nodeid} ({report.when})::{message}")

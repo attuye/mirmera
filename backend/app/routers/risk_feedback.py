@@ -14,7 +14,7 @@ from app.ai.base import get_provider
 from app.database import get_db
 from app.evidence_text import browser_context
 from app.routers import runner as runner_api
-from app.session_text import bug_line, note_line
+from app.session_text import bug_line, note_line, riskiest_first
 from app.timeutil import utcnow
 
 router = APIRouter(tags=["risk feedback"])
@@ -80,7 +80,7 @@ async def suggest(session_id: str, payload: schemas.RiskSuggestRequest, db: DBSe
     for c in previous:
         if c.status in ("proposed", "no_change"):
             db.delete(c)
-    risks = [r for r in charter.risks if r.id not in decided]
+    risks = [r for r in riskiest_first(charter.risks) if r.id not in decided]
     if not risks:
         db.commit()
         return _feedback(db, session, ["Every risk already has a decision for this session."])

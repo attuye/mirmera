@@ -18,3 +18,10 @@ def bug_line(bug: models.Bug) -> str:
     kind = bug.kind or "unreviewed"
     oracle = f", oracle: {bug.oracle_heuristic}" if bug.oracle_heuristic else ""
     return f"- [{kind}, {bug.severity}{oracle}] {bug.title}"
+
+
+def riskiest_first(risks: list[models.Risk]) -> list[models.Risk]:
+    """A charter's linked risks come back in no fixed order; prompts and
+    screens need a stable one: highest score first, then by ref (R2 before R10)."""
+    return sorted(risks, key=lambda r: (-(r.impact * r.likelihood),
+                                        int(r.ref[1:]) if r.ref[1:].isdigit() else 0, r.ref))
