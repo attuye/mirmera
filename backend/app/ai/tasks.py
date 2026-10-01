@@ -10,20 +10,22 @@ from pathlib import Path
 
 from app.ai.base import LLMProvider
 from app.ai.llm_json import complete_json
+from app.evidence_text import NOT_USED
 from app.schemas import (
     CharterSuggestion, CharterSuggestionList, LLMDebrief,
     LLMBugDraft, LLMProductModel, LLMRisk, LLMRiskCharter, LLMRiskCharterList, LLMRiskList,
 )
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
+
 PROMPT_VERSIONS = {
     "charter_suggestions": "charter-suggestion-v2",
-    "debrief": "debrief-proof-v1",
+    "debrief": "debrief-proof-v2",
     "artifact_summary": "artifact-summary-v1",
     "product_model": "product-model-v1",
     "risk_analysis": "risk-analysis-v1",
     "risk_charters": "risk-charters-v1",
-    "bug_report": "bug-report-v1",
+    "bug_report": "bug-report-v2",
 }
 PLANNING_TOKENS = 4000
 MAX_ARTIFACT_CHARS = 15_000
@@ -51,16 +53,18 @@ async def suggest_charters(
 
 async def draft_debrief(
     provider: LLMProvider, *, charter_mission: str, risks: list[dict], duration_minutes: int,
-    notes: list[str], bugs: list[str], time_breakdown: dict,
+    notes: list[str], bugs: list[str], time_breakdown: dict, browser: str = NOT_USED,
 ) -> LLMDebrief:
-    """PROOF debrief. notes: "+12 min [tag] text" lines. bugs: one line each."""
+    """PROOF debrief. notes: "+12 min [tag] text" lines. bugs: one line each.
+    browser: what the recorded browser captured (app.evidence_text.browser_context)."""
     split = ", ".join(f"{k.replace('_', ' ')} {round(v * 100)}%" for k, v in time_breakdown.items()) or "(not enough notes)"
     user = (
         f"<charter>{charter_mission}</charter>\n\n"
         f"<risks>\n{json.dumps(risks, indent=2, ensure_ascii=False) if risks else '(none linked)'}\n</risks>\n\n"
         f"Session length: {duration_minutes} minutes. Time split: {split}.\n\n"
         f"<notes>\n{chr(10).join(notes) or '(no notes logged)'}\n</notes>\n\n"
-        f"<bugs>\n{chr(10).join(bugs) or '(none)'}\n</bugs>"
+        f"<bugs>\n{chr(10).join(bugs) or '(none)'}\n</bugs>\n\n"
+        f"<browser>\n{browser}\n</browser>"
     )
     return await complete_json(
         provider, load_prompt("debrief_draft.md"), user, LLMDebrief, task="debrief",
@@ -144,17 +148,19 @@ async def charters_from_risks(
 
 async def draft_bug_report(
     provider: LLMProvider, *, charter_mission: str, risks: list[dict],
-    note: str, trail: list[dict], environment: dict,
+    note: str, trail: list[dict], environment: dict, browser: str = NOT_USED,
 ) -> LLMBugDraft:
     """note: the tester's quick bug title and description. trail: the session
-    notes logged just before it. risks: the risks behind the session's charter."""
+    notes logged just before it. risks: the risks behind the session's charter.
+    browser: what the recorded browser captured just before the bug."""
     trail_text = "\n".join(f"[{n.get('tag')}] {n.get('timestamp', '')} {n.get('content')}" for n in trail)
     user = (
         f"<charter>{charter_mission}</charter>\n\n"
         f"<risks>\n{json.dumps(risks, indent=2, ensure_ascii=False) if risks else '(none linked)'}\n</risks>\n\n"
         f"<note>\n{note}\n</note>\n\n"
         f"<trail>\n{trail_text or '(no notes before this bug)'}\n</trail>\n\n"
-        f"<environment>\n{json.dumps(environment, ensure_ascii=False) if environment else '(not recorded)'}\n</environment>"
+        f"<environment>\n{json.dumps(environment, ensure_ascii=False) if environment else '(not recorded)'}\n</environment>\n\n"
+        f"<browser>\n{browser}\n</browser>"
     )
     return await complete_json(
         provider, load_prompt("bug_report.md"), user, LLMBugDraft, task="bug_report",

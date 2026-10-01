@@ -473,6 +473,9 @@ class LLMBugDraft(BaseModel):
     severity_rationale: str
     reproducibility: Reproducibility
     open_questions: list[str] = []
+    # Recorded-browser signals the draft relied on, quoted, so the tester can
+    # check them. Empty when the browser wasn't used or nothing was relevant.
+    evidence_used: list[str] = []
 
     @model_validator(mode="after")
     def bug_needs_oracle(self):

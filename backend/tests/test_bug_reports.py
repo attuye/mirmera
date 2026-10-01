@@ -62,7 +62,7 @@ def test_draft_is_stored_separately_and_records_provenance(client, bug):
     assert drafted["ai_draft"]["kind"] == "bug"
     assert drafted["ai_draft"]["oracle"]["heuristic"] == "claims"
     assert drafted["ai_draft"]["steps_to_reproduce"] == ["Opened checkout", "Applied SAVE10", "Switched to EUR"]
-    assert (drafted["ai_provider"], drafted["prompt_version"]) == ("mock", "bug-report-v1")
+    assert (drafted["ai_provider"], drafted["prompt_version"]) == ("mock", "bug-report-v2")
     # Nothing the tester owns has changed:
     assert drafted["kind"] is None
     assert drafted["steps_to_reproduce"] == []

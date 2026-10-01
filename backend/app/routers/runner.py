@@ -191,6 +191,13 @@ def bug_evidence(bug_id: str, db: DBSession = Depends(get_db)):
     if not bug:
         raise HTTPException(404, "Bug not found")
     sync_signals(db, bug.session_id)
+    return evidence_for_bug(db, bug)
+
+
+def evidence_for_bug(db: DBSession, bug: models.Bug) -> list[models.Evidence]:
+    """Screenshots taken with the bug, then signals from the window before it.
+    If no page was visited inside the window, the last page before it is
+    included: it is the page the tester was on when the bug happened."""
     window_start = bug.created_at - BUG_SIGNAL_WINDOW
     signals = (
         db.query(models.Evidence)
@@ -201,7 +208,21 @@ def bug_evidence(bug_id: str, db: DBSession = Depends(get_db)):
         .order_by(models.Evidence.captured_at)
         .all()
     )
+    if not any(e.kind == "navigation" for e in signals):
+        last_page = (
+            db.query(models.Evidence)
+            .filter(models.Evidence.session_id == bug.session_id, models.Evidence.kind == "navigation",
+                    models.Evidence.captured_at < window_start)
+            .order_by(models.Evidence.captured_at.desc())
+            .first()
+        )
+        if last_page:
+            signals.insert(0, last_page)
     return list(bug.evidence) + signals
+
+
+def browser_used(db: DBSession, session_id: str) -> bool:
+    return db.query(models.Evidence.id).filter(models.Evidence.session_id == session_id).first() is not None
 
 
 @router.get("/evidence/{evidence_id}/file")

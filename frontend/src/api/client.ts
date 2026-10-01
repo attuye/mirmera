@@ -168,6 +168,8 @@ export interface BugDraft {
   severity_rationale: string
   reproducibility: Reproducibility
   open_questions: string[]
+  /** Recorded-browser signal lines the draft relied on, quoted exactly (absent in older drafts). */
+  evidence_used?: string[]
 }
 
 export type BugReview = Partial<Pick<Bug,

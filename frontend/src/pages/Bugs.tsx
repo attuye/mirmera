@@ -305,9 +305,21 @@ function ReviewForm({ bug, onCancel, onSaved, onRedraft, drafting }: {
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
           <span>
             {fromDraft ? 'Pre-filled from the AI draft' : 'An AI draft exists'} ({bug.ai_provider}/{bug.ai_model}).
-            Check every field against what you saw; it only knows your notes.
+            Check every field against what you saw; it only knows your notes{bug.evidence.length || d.evidence_used?.length ? ' and what the browser recorded' : ''}.
           </span>
           <button onClick={onRedraft} disabled={drafting} style={quietButton}>{drafting ? 'Drafting…' : 'Redraft'}</button>
+        </div>
+      )}
+      {d?.evidence_used && d.evidence_used.length > 0 && (
+        <div role="note" aria-label="Browser evidence the draft used" style={{
+          fontSize: 12, background: 'var(--panel-alt)', border: '1px solid var(--border)', borderRadius: 8, padding: '9px 12px',
+        }}>
+          <div style={{ color: 'var(--text-tertiary)', marginBottom: 4 }}>
+            The draft relied on this browser evidence. Is it really connected to this bug?
+          </div>
+          {d.evidence_used.map((line, i) => (
+            <div key={i} className="mono" style={{ fontSize: 11.5, color: 'var(--text-secondary)', wordBreak: 'break-word' }}>{line}</div>
+          ))}
         </div>
       )}
 

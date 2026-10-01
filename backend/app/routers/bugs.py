@@ -11,6 +11,8 @@ from app import models, schemas
 from app.ai import tasks
 from app.ai.base import get_provider
 from app.database import get_db
+from app.evidence_text import browser_context
+from app.routers import runner as runner_api
 from app.timeutil import utcnow
 
 router = APIRouter(prefix="/bugs", tags=["bugs"])
@@ -37,6 +39,11 @@ async def draft_report(bug_id: str, payload: schemas.BugDraftRequest, db: DBSess
     product = db.get(models.Product, charter.product_id)
 
     provider = get_provider(payload.provider or product.default_ai_provider)
+    runner_api.sync_signals(db, bug.session_id)  # include anything the open browser saw since the last poll
+    browser = browser_context(
+        runner_api.evidence_for_bug(db, bug), bug.session.started_at,
+        used=runner_api.browser_used(db, bug.session_id),
+    )
     draft = await tasks.draft_bug_report(
         provider,
         charter_mission=charter.mission_statement,
@@ -48,6 +55,7 @@ async def draft_report(bug_id: str, payload: schemas.BugDraftRequest, db: DBSess
         note=bug.title + (f"\n{bug.description}" if bug.description else ""),
         trail=bug.reproduction_trail or [],
         environment=bug.environment or {},
+        browser=browser,
     )
     bug.ai_draft = draft.model_dump()
     bug.ai_provider = provider.name

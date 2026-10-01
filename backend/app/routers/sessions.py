@@ -8,6 +8,7 @@ from app import models, schemas
 from app.ai import tasks
 from app.ai.base import ProviderError, get_provider
 from app.database import get_db
+from app.evidence_text import browser_context
 from app.routers import runner as runner_api
 
 logger = logging.getLogger(__name__)
@@ -211,6 +212,11 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
         ((session.ended_at - session.started_at).total_seconds() - (session.total_paused_seconds or 0)) / 60
     )
     debrief = models.Debrief(session_id=session_id, time_breakdown=time_breakdown)
+    recorded = (
+        db.query(models.Evidence).filter(models.Evidence.session_id == session_id)
+        .order_by(models.Evidence.captured_at).all()
+    )
+    browser = browser_context(recorded, session.started_at, used=bool(recorded))
 
     try:
         provider = get_provider(product.default_ai_provider)
@@ -222,6 +228,7 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
             notes=[f"+{minute(n.timestamp)} min [{n.tag}] {n.content}" for n in notes],
             bugs=[bug_line(b) for b in bugs],
             time_breakdown=time_breakdown,
+            browser=browser,
         )
         debrief.ai_draft = draft.past
         debrief.coverage_summary = draft.past
