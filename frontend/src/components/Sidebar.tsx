@@ -18,10 +18,10 @@ export default function Sidebar() {
         <div style={{
           width: 28, height: 28, borderRadius: 7, background: 'var(--accent)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: '#0C0D0F', fontSize: 15,
-        }}>A</div>
+        }}>M</div>
         <div>
           <div style={{ fontWeight: 600, fontSize: 14 }}>AddisVerify</div>
-          <div className="mono" style={{ fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Explore</div>
+          <div className="mono" style={{ fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Mirmera</div>
         </div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

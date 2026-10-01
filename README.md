@@ -1,6 +1,7 @@
-# Exploratory Testing Tool
+# Mirmera
 
-A context-driven, exploratory testing tool: session-based test management
+*Mirmera* (ምርመራ, Amharic for "investigation") is AddisVerify's context-driven,
+exploratory testing tool: session-based test management
 (charters, time-boxed sessions, tagged notes) combined with AI-assisted
 charter/risk suggestions and an evidence-trail bug logger that drafts a
 debrief report when a session ends.

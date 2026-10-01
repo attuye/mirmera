@@ -6,9 +6,9 @@ services:
   db:
     image: postgres:16
     environment:
-      POSTGRES_USER: explore
-      POSTGRES_PASSWORD: explore
-      POSTGRES_DB: explore
+      POSTGRES_USER: mirmera
+      POSTGRES_PASSWORD: mirmera
+      POSTGRES_DB: mirmera
     ports:
       - "5432:5432"
     volumes:

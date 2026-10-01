@@ -1,4 +1,17 @@
+# Dependencies
 node_modules/
-.venv
+.venv/
+venv/
+__pycache__/
+
+# Secrets
 .env
-__pycache__
+
+# Local data (may contain test data and captured page content)
+*.db
+sessions/
+plan/out/
+
+# Build output
+dist/
+*.tsbuildinfo

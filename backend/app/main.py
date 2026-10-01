@@ -6,7 +6,7 @@ from app.routers import products, artifacts, charters, sessions, debriefs
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Exploratory Testing Tool API")
+app = FastAPI(title="Mirmera API")
 
 app.add_middleware(
     CORSMiddleware,

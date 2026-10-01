@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    database_url: str = "sqlite:///./explore.db"
+    database_url: str = "sqlite:///./mirmera.db"
     # "mock" needs no API key or billing — swap to "claude" once billing is set up
     # (backend/.env or per-request override), nothing else in the app changes.
     default_ai_provider: str = "mock"
