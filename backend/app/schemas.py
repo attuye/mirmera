@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Optional, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ---- Products / Artifacts -------------------------------------------------
@@ -164,18 +164,38 @@ class BugOut(BaseModel):
     severity: str
     status: str
     created_at: datetime
+    # The bug report (empty until reviewed)
+    kind: Optional[str] = None  # None = unreviewed
+    steps_to_reproduce: list[str] = []
+    expected: Optional[str] = None
+    actual: Optional[str] = None
+    oracle_heuristic: Optional[str] = None
+    oracle_explanation: Optional[str] = None
+    severity_rationale: Optional[str] = None
+    reproducibility: Optional[str] = None
+    open_questions: list[str] = []
+    ai_draft: Optional[dict] = None
+    ai_provider: Optional[str] = None
+    ai_model: Optional[str] = None
+    prompt_version: Optional[str] = None
+    last_change: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
-class BugListItem(BaseModel):
-    id: str
-    session_id: str
+    @field_validator("steps_to_reproduce", "open_questions", "reproduction_trail", mode="before")
+    @classmethod
+    def none_is_empty_list(cls, value):
+        return value or []
+
+    @field_validator("environment", mode="before")
+    @classmethod
+    def none_is_empty_dict(cls, value):
+        return value or {}
+
+
+class BugListItem(BugOut):
     charter_mission: str
-    title: str
-    severity: str
-    status: str
-    reproduction_trail: list
-    created_at: datetime
 
 # ---- Debrief ------------------------------------------------------------
 
@@ -360,3 +380,57 @@ class ChartersFromRisksOut(BaseModel):
     charters: list[RiskCharterDraft]
     uncovered_risk_refs: list[str]  # accepted risks no charter covers
     warnings: list[str]
+
+
+# ---- Bug reports -----------------------------------------------------------
+# Quick-logged bug -> AI draft (kept for comparison) -> tester review as bug or question.
+
+BugSeverity = Literal["high", "medium", "low"]
+Reproducibility = Literal["always", "intermittent", "once", "unknown"]
+
+
+class Oracle(BaseModel):
+    heuristic: OracleHeuristic
+    explanation: str
+
+
+class LLMBugDraft(BaseModel):
+    """AI contract. A bug must name its oracle; without one it is a question."""
+    kind: Literal["bug", "question"]
+    title: str
+    summary: str
+    steps_to_reproduce: list[str]
+    expected: str
+    actual: str
+    oracle: Optional[Oracle] = None
+    severity: BugSeverity
+    severity_rationale: str
+    reproducibility: Reproducibility
+    open_questions: list[str] = []
+
+    @model_validator(mode="after")
+    def bug_needs_oracle(self):
+        if self.kind == "bug" and self.oracle is None:
+            raise ValueError("A 'bug' must name an oracle; otherwise use kind='question'")
+        return self
+
+
+class BugDraftRequest(BaseModel):
+    provider: Optional[str] = None
+
+
+class BugReview(BaseModel):
+    """The tester's version of the report. Only the fields sent are changed."""
+    title: Optional[str] = Field(default=None, min_length=3)
+    description: Optional[str] = None
+    kind: Optional[Literal["bug", "question"]] = None
+    steps_to_reproduce: Optional[list[str]] = None
+    expected: Optional[str] = None
+    actual: Optional[str] = None
+    oracle_heuristic: Optional[OracleHeuristic] = None
+    oracle_explanation: Optional[str] = None
+    severity: Optional[BugSeverity] = None
+    severity_rationale: Optional[str] = None
+    reproducibility: Optional[Reproducibility] = None
+    open_questions: Optional[list[str]] = None
+    status: Optional[str] = None

@@ -43,6 +43,8 @@ class MockProvider(LLMProvider):
             return json.dumps(self._risks(user))
         if task == "risk_charters":
             return json.dumps(self._risk_charters(user))
+        if task == "bug_report":
+            return json.dumps(self._bug_report(user))
         return json.dumps({"note": f"mock provider has no canned answer for task '{task}'"})
 
     @staticmethod
@@ -184,3 +186,30 @@ class MockProvider(LLMProvider):
                 "priority": "high" if group == groups[0] else "medium",
             })
         return {"charters": charters}
+
+    # ---- bug reports ----
+
+    @staticmethod
+    def _bug_report(user: str) -> dict:
+        note = _between(user, "note") or "(empty note)"
+        title = note.splitlines()[0][:120]
+        trail = [line.split("] ", 1)[-1].split(" ", 1)[-1] for line in _between(user, "trail").splitlines()
+                 if line.startswith("[")]
+        steps = trail[-4:] or ["(mock) Steps could not be recovered from the session notes"]
+        if title.rstrip().endswith("?"):  # a note phrased as a question stays a question
+            return {
+                "kind": "question", "title": title, "summary": f"Mock: the tester asks: {title}",
+                "steps_to_reproduce": steps, "expected": "(unclear: no oracle identified)",
+                "actual": "(mock) as described in the note", "oracle": None,
+                "severity": "low", "severity_rationale": "Mock: unknown until the question is answered.",
+                "reproducibility": "unknown", "open_questions": [title],
+            }
+        return {
+            "kind": "bug", "title": title, "summary": f"Mock report drafted from the note: {title}",
+            "steps_to_reproduce": steps, "expected": "(mock) The behaviour described in the spec",
+            "actual": f"(mock) {title}",
+            "oracle": {"heuristic": "claims", "explanation": "Mock: the spec or product claims say otherwise."},
+            "severity": "medium", "severity_rationale": "Mock: switch to a real provider for a risk-based rationale.",
+            "reproducibility": "unknown",
+            "open_questions": ["(mock) Does it happen every time?"],
+        }

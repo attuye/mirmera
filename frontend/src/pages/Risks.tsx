@@ -2,26 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import RiskMatrix, { scoreBand } from '../components/RiskMatrix'
+import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
 import {
   AI_PROVIDERS, api, Artifact, ChartersFromRisks, ModelElement, Product, ProductModel,
   QUALITY_CRITERIA, Risk, RiskCharterDraft, RiskInput,
 } from '../api/client'
-
-// ---------- shared styles ----------
-
-const primaryButton = (disabled = false): React.CSSProperties => ({
-  background: disabled ? 'var(--border)' : 'var(--accent)', color: disabled ? 'var(--text-tertiary)' : '#0C0D0F',
-  fontSize: 12.5, fontWeight: 600, padding: '9px 16px', borderRadius: 8, cursor: disabled ? 'default' : 'pointer',
-})
-const quietButton: React.CSSProperties = {
-  background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border)',
-  fontSize: 12, fontWeight: 500, padding: '6px 11px', borderRadius: 7,
-}
-const input: React.CSSProperties = {
-  width: '100%', background: 'var(--panel-alt)', border: '1px solid var(--border)', borderRadius: 8,
-  color: 'var(--text)', padding: '8px 11px', fontSize: 13, fontFamily: 'var(--font-ui)',
-}
-const fieldLabel: React.CSSProperties = { fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 5, display: 'block' }
 
 const EVIDENCE_STYLE: Record<Risk['evidence'], { label: string; color: string; hint: string }> = {
   stated: { label: 'Stated', color: 'var(--info)', hint: 'The product model says this directly' },
@@ -33,16 +18,6 @@ const EVIDENCE_STYLE: Record<Risk['evidence'], { label: string; color: string; h
 const CATEGORY_LABEL: Record<ModelElement['category'], string> = {
   structure: 'Structure', function: 'Function', data: 'Data', interfaces: 'Interfaces',
   platform: 'Platform', operations: 'Operations', time: 'Time',
-}
-
-function errorText(e: unknown): string {
-  const message = e instanceof Error ? e.message : String(e)
-  return message === 'Failed to fetch' ? 'Could not reach the backend. Is it running on http://localhost:8000?' : message
-}
-
-function ErrorLine({ message }: { message: string | null }) {
-  if (!message) return null
-  return <div role="alert" style={{ color: 'var(--danger)', fontSize: 12.5, marginTop: 10 }}>{message}</div>
 }
 
 function Section({ step, title, intro, children }: { step: number; title: string; intro: string; children: React.ReactNode }) {

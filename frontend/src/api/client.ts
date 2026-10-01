@@ -83,7 +83,60 @@ export interface Bug {
   severity: 'high' | 'medium' | 'low'
   status: string
   created_at: string
+  // The bug report; empty until reviewed. kind null = unreviewed.
+  kind: 'bug' | 'question' | null
+  steps_to_reproduce: string[]
+  expected: string | null
+  actual: string | null
+  oracle_heuristic: OracleHeuristic | null
+  oracle_explanation: string | null
+  severity_rationale: string | null
+  reproducibility: Reproducibility | null
+  open_questions: string[]
+  ai_draft: BugDraft | null
+  ai_provider: string | null
+  ai_model: string | null
+  prompt_version: string | null
+  last_change: string | null
+  reviewed_at: string | null
 }
+
+export type Reproducibility = 'always' | 'intermittent' | 'once' | 'unknown'
+
+// FEW HICCUPPS consistency oracles: what makes an observation a problem.
+export const ORACLES = {
+  claims: 'Inconsistent with specs, docs or other claims',
+  user_expectations: 'Inconsistent with what users reasonably expect',
+  product: 'Inconsistent with the product elsewhere',
+  purpose: "Inconsistent with the product's purpose",
+  history: 'Inconsistent with earlier versions',
+  comparable_products: 'Inconsistent with comparable products',
+  image: "Inconsistent with the company's image",
+  statutes: 'Inconsistent with laws, regulations or standards',
+  world: 'Inconsistent with how the world works',
+  familiarity: 'Matches a familiar problem pattern',
+  explainability: "Behaviour that can't be explained",
+} as const
+export type OracleHeuristic = keyof typeof ORACLES
+
+export interface BugDraft {
+  kind: 'bug' | 'question'
+  title: string
+  summary: string
+  steps_to_reproduce: string[]
+  expected: string
+  actual: string
+  oracle: { heuristic: OracleHeuristic; explanation: string } | null
+  severity: 'high' | 'medium' | 'low'
+  severity_rationale: string
+  reproducibility: Reproducibility
+  open_questions: string[]
+}
+
+export type BugReview = Partial<Pick<Bug,
+  'title' | 'description' | 'steps_to_reproduce' | 'expected' | 'actual' | 'oracle_heuristic' |
+  'oracle_explanation' | 'severity' | 'severity_rationale' | 'reproducibility' | 'open_questions' | 'status'
+>> & { kind?: 'bug' | 'question' }
 
 export interface Debrief {
   id: string
@@ -104,15 +157,8 @@ export interface DebriefListItem {
   created_at: string
 }
 
-export interface BugListItem {
-  id: string
-  session_id: string
+export interface BugListItem extends Bug {
   charter_mission: string
-  title: string
-  severity: 'high' | 'medium' | 'low'
-  status: string
-  reproduction_trail: { tag: string; content: string; timestamp: string }[]
-  created_at: string
 }
 
 // ---- Risk model -------------------------------------------------------------
@@ -276,6 +322,11 @@ export const api = {
     request<Risk>(`/products/${productId}/risks`, { method: 'POST', body: JSON.stringify(risk) }),
   updateRisk: (riskId: string, changes: RiskUpdate) =>
     request<Risk>(`/risks/${riskId}`, { method: 'PATCH', body: JSON.stringify(changes) }),
+
+  draftBugReport: (bugId: string) =>
+    request<Bug>(`/bugs/${bugId}/draft`, { method: 'POST', body: JSON.stringify({}) }),
+  reviewBug: (bugId: string, review: BugReview) =>
+    request<Bug>(`/bugs/${bugId}`, { method: 'PATCH', body: JSON.stringify(review) }),
 
   chartersFromRisks: (productId: string, riskIds?: string[]) =>
     request<ChartersFromRisks>(`/products/${productId}/charters/from-risks`, {

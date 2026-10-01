@@ -12,7 +12,7 @@ from app.ai.base import LLMProvider
 from app.ai.llm_json import complete_json
 from app.schemas import (
     CharterSuggestion, CharterSuggestionList, DebriefDraft,
-    LLMProductModel, LLMRisk, LLMRiskCharter, LLMRiskCharterList, LLMRiskList,
+    LLMBugDraft, LLMProductModel, LLMRisk, LLMRiskCharter, LLMRiskCharterList, LLMRiskList,
 )
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -23,6 +23,7 @@ PROMPT_VERSIONS = {
     "product_model": "product-model-v1",
     "risk_analysis": "risk-analysis-v1",
     "risk_charters": "risk-charters-v1",
+    "bug_report": "bug-report-v1",
 }
 PLANNING_TOKENS = 4000
 MAX_ARTIFACT_CHARS = 15_000
@@ -132,3 +133,24 @@ async def charters_from_risks(
         task="risk_charters", max_tokens=PLANNING_TOKENS,
     )
     return result.charters[:max_charters]
+
+
+# ---- Bug reports -----------------------------------------------------------
+
+async def draft_bug_report(
+    provider: LLMProvider, *, charter_mission: str, risks: list[dict],
+    note: str, trail: list[dict], environment: dict,
+) -> LLMBugDraft:
+    """note: the tester's quick bug title and description. trail: the session
+    notes logged just before it. risks: the risks behind the session's charter."""
+    trail_text = "\n".join(f"[{n.get('tag')}] {n.get('timestamp', '')} {n.get('content')}" for n in trail)
+    user = (
+        f"<charter>{charter_mission}</charter>\n\n"
+        f"<risks>\n{json.dumps(risks, indent=2, ensure_ascii=False) if risks else '(none linked)'}\n</risks>\n\n"
+        f"<note>\n{note}\n</note>\n\n"
+        f"<trail>\n{trail_text or '(no notes before this bug)'}\n</trail>\n\n"
+        f"<environment>\n{json.dumps(environment, ensure_ascii=False) if environment else '(not recorded)'}\n</environment>"
+    )
+    return await complete_json(
+        provider, load_prompt("bug_report.md"), user, LLMBugDraft, task="bug_report",
+    )

@@ -1,73 +1,385 @@
 import { useEffect, useState } from 'react'
 import Sidebar from '../components/Sidebar'
-import { api, BugListItem } from '../api/client'
+import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
+import { api, BugListItem, BugReview, ORACLES, OracleHeuristic, Reproducibility } from '../api/client'
 
 const SEVERITY_COLOR: Record<string, string> = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-tertiary)' }
+
+const KIND_STYLE = {
+  unreviewed: { label: 'Needs review', fg: 'var(--warning)', bg: 'var(--warning-bg)' },
+  bug: { label: 'Bug', fg: 'var(--danger)', bg: 'var(--danger-bg)' },
+  question: { label: 'Question', fg: 'var(--question)', bg: '#221C2B' },
+}
+type Filter = 'all' | 'unreviewed' | 'bug' | 'question'
+
+const kindOf = (b: BugListItem): keyof typeof KIND_STYLE => b.kind ?? 'unreviewed'
+const lines = (text: string) => text.split('\n').map((l) => l.trim()).filter(Boolean)
 
 export default function Bugs() {
   const [bugs, setBugs] = useState<BugListItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [filter, setFilter] = useState<Filter>('all')
 
   useEffect(() => {
-    api.listProducts().then((ps) => {
-      const p = ps[0]
-      if (!p) return setLoading(false)
-      api.listAllBugs(p.id).then((b) => { setBugs(b); setLoading(false) }).catch(console.error)
-    }).catch(console.error)
+    api.listProducts()
+      .then((ps) => (ps[0] ? api.listAllBugs(ps[0].id) : []))
+      .then(setBugs)
+      .catch((e) => setLoadError(errorText(e)))
+      .finally(() => setLoading(false))
   }, [])
+
+  function replace(updated: BugListItem) {
+    setBugs((prev) => prev.map((b) => (b.id === updated.id ? updated : b)))
+  }
+
+  const counts: Record<Filter, number> = {
+    all: bugs.length,
+    unreviewed: bugs.filter((b) => !b.kind).length,
+    bug: bugs.filter((b) => b.kind === 'bug').length,
+    question: bugs.filter((b) => b.kind === 'question').length,
+  }
+  const shown = filter === 'all' ? bugs : bugs.filter((b) => kindOf(b) === filter)
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
       <Sidebar />
-      <div style={{ flex: 1, padding: '32px 40px', maxWidth: 800 }}>
-        <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 20 }}>Bugs</div>
+      <main style={{ flex: 1, padding: '32px 40px', maxWidth: 900, minWidth: 0 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0 }}>Bugs</h1>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '6px 0 18px', maxWidth: 640, lineHeight: 1.5 }}>
+          Bugs logged during sessions wait here for review. Draft a report with AI or write it yourself,
+          then save it as a bug, which needs the oracle that makes it a problem, or as a question for the team.
+        </p>
+
+        <div role="tablist" aria-label="Filter bugs" style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+          {(['all', 'unreviewed', 'bug', 'question'] as Filter[]).map((f) => (
+            <button key={f} role="tab" aria-selected={filter === f} onClick={() => setFilter(f)} style={{
+              ...quietButton,
+              color: filter === f ? 'var(--text)' : 'var(--text-secondary)',
+              borderColor: filter === f ? 'var(--text-secondary)' : 'var(--border)',
+            }}>
+              {{ all: 'All', unreviewed: 'Needs review', bug: 'Bugs', question: 'Questions' }[f]} ({counts[f]})
+            </button>
+          ))}
+        </div>
 
         {loading && <div style={{ color: 'var(--text-secondary)' }}>Loading…</div>}
-        {!loading && bugs.length === 0 && (
-          <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>No bugs logged yet.</div>
+        <ErrorLine message={loadError} />
+        {!loading && !loadError && shown.length === 0 && (
+          <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+            {bugs.length === 0 ? 'No bugs logged yet. Log one from an active session.' : 'Nothing here.'}
+          </div>
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {bugs.map((b) => {
+          {shown.map((b) => {
             const isOpen = expanded === b.id
+            const kind = KIND_STYLE[kindOf(b)]
             return (
-              <div key={b.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '13px 16px' }}>
-                <div
+              <article key={b.id} aria-label={b.title} style={{ border: '1px solid var(--border)', borderRadius: 10 }}>
+                <button
                   onClick={() => setExpanded(isOpen ? null : b.id)}
-                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', cursor: 'pointer' }}
+                  aria-expanded={isOpen}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, width: '100%',
+                    background: 'transparent', color: 'inherit', textAlign: 'left', padding: '13px 16px',
+                  }}
                 >
-                  <div>
-                    <div style={{ fontSize: 13.5, fontWeight: 500 }}>{b.title}</div>
-                    <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 4 }}>{b.charter_mission}</div>
-                  </div>
-                  <span className="mono" style={{ fontSize: 9.5, color: SEVERITY_COLOR[b.severity], flexShrink: 0, marginLeft: 12 }}>
-                    {b.severity.toUpperCase()}
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 500, display: 'block' }}>{b.title}</span>
+                    <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 4, display: 'block' }}>{b.charter_mission}</span>
                   </span>
-                </div>
+                  <span style={{ display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
+                    <span style={{ fontSize: 11.5, color: SEVERITY_COLOR[b.severity] }}>{b.severity}</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: kind.fg, background: kind.bg, padding: '3px 8px', borderRadius: 5 }}>
+                      {kind.label}
+                    </span>
+                  </span>
+                </button>
                 {isOpen && (
-                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-soft)' }}>
-                    <div className="mono" style={{ fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 8 }}>
-                      Reproduction trail
-                    </div>
-                    {b.reproduction_trail.length === 0 && (
-                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>No preceding notes captured.</div>
-                    )}
-                    {b.reproduction_trail.map((n, i) => (
-                      <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12, marginBottom: 4 }}>
-                        <span className="mono" style={{ color: 'var(--text-quiet)', width: 70, flexShrink: 0 }}>
-                          {new Date(n.timestamp).toLocaleTimeString()}
-                        </span>
-                        <span style={{ color: 'var(--text-secondary)' }}>[{n.tag}] {n.content}</span>
-                      </div>
-                    ))}
+                  <div style={{ padding: '0 16px 16px', borderTop: '1px solid var(--border-soft)' }}>
+                    <BugDetail bug={b} onSaved={replace} />
                   </div>
                 )}
-              </div>
+              </article>
             )
           })}
         </div>
+      </main>
+    </div>
+  )
+}
+
+// ---------- detail: trail, report, review ----------
+
+function BugDetail({ bug, onSaved }: { bug: BugListItem; onSaved: (b: BugListItem) => void }) {
+  const [editing, setEditing] = useState(false)
+  const [drafting, setDrafting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function draft() {
+    setDrafting(true)
+    setError(null)
+    try {
+      const updated = await api.draftBugReport(bug.id)
+      onSaved({ ...updated, charter_mission: bug.charter_mission })
+      setEditing(true)
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setDrafting(false)
+    }
+  }
+
+  return (
+    <div>
+      <Trail bug={bug} />
+      {editing ? (
+        <ReviewForm bug={bug} onCancel={() => setEditing(false)} onSaved={(b) => { onSaved(b); setEditing(false) }}
+          onRedraft={draft} drafting={drafting} />
+      ) : bug.kind ? (
+        <Report bug={bug} onEdit={() => setEditing(true)} />
+      ) : (
+        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+          <button onClick={draft} disabled={drafting} style={primaryButton(drafting)}>
+            {drafting ? 'Drafting…' : 'Draft report with AI'}
+          </button>
+          <button onClick={() => setEditing(true)} style={quietButton}>Write it myself</button>
+        </div>
+      )}
+      <ErrorLine message={error} />
+    </div>
+  )
+}
+
+function Trail({ bug }: { bug: BugListItem }) {
+  const env = Object.entries(bug.environment)
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 6 }}>What happened before it (session notes)</div>
+      {bug.reproduction_trail.length === 0 && (
+        <div style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>No notes were logged before this bug.</div>
+      )}
+      {bug.reproduction_trail.map((n, i) => (
+        <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12.5, marginBottom: 3 }}>
+          <span className="mono" style={{ color: 'var(--text-quiet)', width: 72, flexShrink: 0, fontSize: 11.5 }}>
+            {new Date(n.timestamp.endsWith('Z') ? n.timestamp : n.timestamp + 'Z').toLocaleTimeString()}
+          </span>
+          <span style={{ color: 'var(--text-secondary)' }}>{n.content}</span>
+        </div>
+      ))}
+      {env.length > 0 && (
+        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 8 }}>
+          Environment: {env.map(([k, v]) => `${k} ${v}`).join(', ')}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ReportBlock({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 13, lineHeight: 1.55 }}>{children}</div>
+    </div>
+  )
+}
+
+function Report({ bug, onEdit }: { bug: BugListItem; onEdit: () => void }) {
+  return (
+    <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {bug.description && <ReportBlock label="Summary">{bug.description}</ReportBlock>}
+      {bug.steps_to_reproduce.length > 0 && (
+        <ReportBlock label="Steps to reproduce">
+          <ol style={{ margin: 0, paddingLeft: 20 }}>{bug.steps_to_reproduce.map((s, i) => <li key={i}>{s}</li>)}</ol>
+        </ReportBlock>
+      )}
+      {(bug.expected || bug.actual) && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <ReportBlock label="Expected">{bug.expected || '—'}</ReportBlock>
+          <ReportBlock label="Actual">{bug.actual || '—'}</ReportBlock>
+        </div>
+      )}
+      {bug.oracle_heuristic && (
+        <ReportBlock label={`Why it's a problem: ${bug.oracle_heuristic.replace(/_/g, ' ')}`}>{bug.oracle_explanation}</ReportBlock>
+      )}
+      {bug.severity_rationale && <ReportBlock label={`Severity: ${bug.severity}`}>{bug.severity_rationale}</ReportBlock>}
+      {bug.open_questions.length > 0 && (
+        <ReportBlock label="Open questions">
+          <ul style={{ margin: 0, paddingLeft: 20 }}>{bug.open_questions.map((q, i) => <li key={i}>{q}</li>)}</ul>
+        </ReportBlock>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 11, color: 'var(--text-quiet)' }}>
+          {[bug.last_change, bug.ai_draft ? `AI draft by ${bug.ai_provider}/${bug.ai_model} kept for comparison` : null]
+            .filter(Boolean).join('. ')}
+        </span>
+        <button onClick={onEdit} style={quietButton}>Edit report</button>
       </div>
+    </div>
+  )
+}
+
+function ReviewForm({ bug, onCancel, onSaved, onRedraft, drafting }: {
+  bug: BugListItem
+  onCancel: () => void
+  onSaved: (b: BugListItem) => void
+  onRedraft: () => void
+  drafting: boolean
+}) {
+  // Start from the tester's saved report if there is one, otherwise from the AI draft.
+  const d = bug.ai_draft
+  const fromDraft = !bug.kind && d
+  const [kind, setKind] = useState<'bug' | 'question'>(bug.kind ?? d?.kind ?? 'bug')
+  const [title, setTitle] = useState(fromDraft ? d.title : bug.title)
+  const [summary, setSummary] = useState((fromDraft ? d.summary : bug.description) ?? '')
+  const [steps, setSteps] = useState((fromDraft ? d.steps_to_reproduce : bug.steps_to_reproduce).join('\n'))
+  const [expected, setExpected] = useState((fromDraft ? d.expected : bug.expected) ?? '')
+  const [actual, setActual] = useState((fromDraft ? d.actual : bug.actual) ?? '')
+  const [oracle, setOracle] = useState<OracleHeuristic | ''>((fromDraft ? d.oracle?.heuristic : bug.oracle_heuristic) ?? '')
+  const [oracleWhy, setOracleWhy] = useState((fromDraft ? d.oracle?.explanation : bug.oracle_explanation) ?? '')
+  const [severity, setSeverity] = useState(fromDraft ? d.severity : bug.severity)
+  const [severityWhy, setSeverityWhy] = useState((fromDraft ? d.severity_rationale : bug.severity_rationale) ?? '')
+  const [repro, setRepro] = useState<Reproducibility>((fromDraft ? d.reproducibility : bug.reproducibility) ?? 'unknown')
+  const [questions, setQuestions] = useState((fromDraft ? d.open_questions : bug.open_questions).join('\n'))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const missingOracle = kind === 'bug' && (!oracle || !oracleWhy.trim())
+  const canSave = title.trim().length >= 3 && !missingOracle && !saving
+
+  async function save() {
+    setSaving(true)
+    setError(null)
+    const review: BugReview = {
+      kind, title: title.trim(), description: summary.trim() || null,
+      steps_to_reproduce: lines(steps), expected: expected.trim() || null, actual: actual.trim() || null,
+      oracle_heuristic: oracle || null,
+      oracle_explanation: oracleWhy.trim() || null,
+      severity, severity_rationale: severityWhy.trim() || null, reproducibility: repro,
+      open_questions: lines(questions),
+    }
+    try {
+      const updated = await api.reviewBug(bug.id, review)
+      onSaved({ ...updated, charter_mission: bug.charter_mission })
+    } catch (e) {
+      setError(errorText(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const id = (name: string) => `${name}-${bug.id}`
+
+  return (
+    <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {d && (
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+          <span>
+            {fromDraft ? 'Pre-filled from the AI draft' : 'An AI draft exists'} ({bug.ai_provider}/{bug.ai_model}).
+            Check every field against what you saw; it only knows your notes.
+          </span>
+          <button onClick={onRedraft} disabled={drafting} style={quietButton}>{drafting ? 'Drafting…' : 'Redraft'}</button>
+        </div>
+      )}
+
+      <fieldset style={{ border: 'none', padding: 0, margin: 0, display: 'flex', gap: 8 }}>
+        <legend style={fieldLabel}>Save as</legend>
+        {(['bug', 'question'] as const).map((k) => (
+          <label key={k} style={{
+            display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5, padding: '6px 11px', borderRadius: 7, cursor: 'pointer',
+            border: `1px solid ${kind === k ? 'var(--accent)' : 'var(--border)'}`,
+          }}>
+            <input type="radio" name={id('kind')} checked={kind === k} onChange={() => setKind(k)} />
+            {k === 'bug' ? 'Bug: something is wrong' : 'Question: not sure it is wrong'}
+          </label>
+        ))}
+      </fieldset>
+
+      <div>
+        <label htmlFor={id('title')} style={fieldLabel}>Title</label>
+        <input id={id('title')} value={title} onChange={(e) => setTitle(e.target.value)} style={input} />
+      </div>
+      <div>
+        <label htmlFor={id('summary')} style={fieldLabel}>Summary</label>
+        <textarea id={id('summary')} value={summary} onChange={(e) => setSummary(e.target.value)} rows={2} style={{ ...input, resize: 'vertical' }} />
+      </div>
+      <div>
+        <label htmlFor={id('steps')} style={fieldLabel}>Steps to reproduce (one per line)</label>
+        <textarea id={id('steps')} value={steps} onChange={(e) => setSteps(e.target.value)} rows={4} style={{ ...input, resize: 'vertical' }} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div>
+          <label htmlFor={id('expected')} style={fieldLabel}>Expected</label>
+          <textarea id={id('expected')} value={expected} onChange={(e) => setExpected(e.target.value)} rows={2} style={{ ...input, resize: 'vertical' }} />
+        </div>
+        <div>
+          <label htmlFor={id('actual')} style={fieldLabel}>Actual</label>
+          <textarea id={id('actual')} value={actual} onChange={(e) => setActual(e.target.value)} rows={2} style={{ ...input, resize: 'vertical' }} />
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 12 }}>
+        <div>
+          <label htmlFor={id('oracle')} style={fieldLabel}>Oracle{kind === 'bug' ? ' (required for a bug)' : ''}</label>
+          <select id={id('oracle')} value={oracle} onChange={(e) => setOracle(e.target.value as OracleHeuristic | '')} style={input}>
+            <option value="">None yet</option>
+            {(Object.keys(ORACLES) as OracleHeuristic[]).map((o) => (
+              <option key={o} value={o}>{o.replace(/_/g, ' ')}: {ORACLES[o]}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor={id('oracle-why')} style={fieldLabel}>Why it's a problem</label>
+          <input id={id('oracle-why')} value={oracleWhy} onChange={(e) => setOracleWhy(e.target.value)}
+            placeholder="e.g. The pricing spec says coupons survive currency changes" style={input} />
+        </div>
+      </div>
+      {missingOracle && (
+        <div style={{ fontSize: 12, color: 'var(--warning)' }}>
+          A bug needs an oracle and a reason. If you can't say why it's wrong yet, save it as a question.
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '130px 160px 1fr', gap: 12 }}>
+        <div>
+          <label htmlFor={id('severity')} style={fieldLabel}>Severity</label>
+          <select id={id('severity')} value={severity} onChange={(e) => setSeverity(e.target.value as typeof severity)} style={input}>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </div>
+        <div>
+          <label htmlFor={id('repro')} style={fieldLabel}>Reproducibility</label>
+          <select id={id('repro')} value={repro} onChange={(e) => setRepro(e.target.value as Reproducibility)} style={input}>
+            <option value="always">Always</option>
+            <option value="intermittent">Intermittent</option>
+            <option value="once">Seen once</option>
+            <option value="unknown">Unknown</option>
+          </select>
+        </div>
+        <div>
+          <label htmlFor={id('severity-why')} style={fieldLabel}>Why this severity</label>
+          <input id={id('severity-why')} value={severityWhy} onChange={(e) => setSeverityWhy(e.target.value)}
+            placeholder="Who is affected, how badly, how often" style={input} />
+        </div>
+      </div>
+
+      <div>
+        <label htmlFor={id('questions')} style={fieldLabel}>Open questions (one per line)</label>
+        <textarea id={id('questions')} value={questions} onChange={(e) => setQuestions(e.target.value)} rows={2} style={{ ...input, resize: 'vertical' }} />
+      </div>
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button onClick={save} disabled={!canSave} style={primaryButton(!canSave)}>
+          {saving ? 'Saving…' : kind === 'bug' ? 'Save as bug' : 'Save as question'}
+        </button>
+        <button onClick={onCancel} style={quietButton}>Cancel</button>
+      </div>
+      <ErrorLine message={error} />
     </div>
   )
 }

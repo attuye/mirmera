@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 from app.ai.base import ProviderError, ProviderNotConfigured, UnknownProvider
 from app.database import Base, add_missing_columns, engine
-from app.routers import products, artifacts, charters, sessions, debriefs, risks
+from app.routers import products, artifacts, bugs, charters, sessions, debriefs, risks
 
 Base.metadata.create_all(bind=engine)  # creates new tables
 for column in add_missing_columns():  # adds new columns to existing tables
@@ -45,6 +45,7 @@ app.include_router(debriefs.router)
 app.include_router(debriefs.list_router)
 app.include_router(sessions.bugs_list_router)
 app.include_router(risks.router)
+app.include_router(bugs.router)
 
 
 @app.get("/health")
