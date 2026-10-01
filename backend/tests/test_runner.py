@@ -210,3 +210,17 @@ def test_evidence_files_outside_the_evidence_folder_are_never_served(client, ses
         db.commit()
         evidence_id = row.id
     assert client.get(f"/evidence/{evidence_id}/file").status_code == 404
+
+
+def test_windows_gets_an_event_loop_that_can_start_the_browser(monkeypatch):
+    """uvicorn --reload switches Windows to selector loops, which cannot start
+    subprocesses (Playwright's browser). The runner's own loop must not follow."""
+    import asyncio
+    from app import runner
+
+    class FakeProactor:
+        pass
+
+    monkeypatch.setattr(runner.sys, "platform", "win32")
+    monkeypatch.setattr(asyncio, "ProactorEventLoop", FakeProactor, raising=False)
+    assert isinstance(runner._new_loop(), FakeProactor)
