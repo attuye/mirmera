@@ -101,7 +101,42 @@ export interface Bug {
   prompt_version: string | null
   last_change: string | null
   reviewed_at: string | null
+  /** Screenshot the browser runner took when the bug was logged (empty without the runner). */
+  evidence: Evidence[]
 }
+
+// ---- Browser session runner ------------------------------------------------
+
+export type EvidenceKind =
+  | 'screenshot' | 'trace' | 'har' | 'console_error' | 'page_error' | 'failed_request' | 'navigation'
+
+/** Something the runner recorded. Files are fetched with evidenceFileUrl(). */
+export interface Evidence {
+  id: string
+  session_id: string
+  bug_id: string | null
+  kind: EvidenceKind
+  summary: string
+  url: string | null
+  has_file: boolean
+  /** How many times this same signal was seen. */
+  count: number
+  captured_at: string
+  last_seen_at: string | null
+}
+
+export interface RunnerStatus {
+  running: boolean
+  start_url: string | null
+  url: string | null
+  title: string | null
+  window_open: boolean
+  started_at: string | null
+  counts: Partial<Record<EvidenceKind, number>>
+  dropped: number
+}
+
+export const evidenceFileUrl = (evidenceId: string) => `${BASE_URL}/evidence/${evidenceId}/file`
 
 export type Reproducibility = 'always' | 'intermittent' | 'once' | 'unknown'
 
@@ -321,6 +356,16 @@ export const api = {
   listBugs: (sessionId: string) => request<Bug[]>(`/sessions/${sessionId}/bugs`),
   logBug: (sessionId: string, bug: { title: string; description?: string; severity: Bug['severity'] }) =>
     request<Bug>(`/sessions/${sessionId}/bugs`, { method: 'POST', body: JSON.stringify(bug) }),
+  startRunner: (sessionId: string, url: string) =>
+    request<RunnerStatus>(`/sessions/${sessionId}/runner`, { method: 'POST', body: JSON.stringify({ url }) }),
+  runnerStatus: (sessionId: string) => request<RunnerStatus>(`/sessions/${sessionId}/runner`),
+  takeScreenshot: (sessionId: string, caption?: string) =>
+    request<Evidence>(`/sessions/${sessionId}/runner/screenshot`, { method: 'POST', body: JSON.stringify({ caption }) }),
+  stopRunner: (sessionId: string) =>
+    request<RunnerStatus>(`/sessions/${sessionId}/runner/stop`, { method: 'POST' }),
+  listEvidence: (sessionId: string, kinds?: EvidenceKind[]) =>
+    request<Evidence[]>(`/sessions/${sessionId}/evidence${kinds ? `?kind=${kinds.join(',')}` : ''}`),
+  bugEvidence: (bugId: string) => request<Evidence[]>(`/bugs/${bugId}/evidence`),
   listAllBugs: (productId: string) => request<BugListItem[]>(`/products/${productId}/bugs`),
   getDebrief: (sessionId: string) => request<Debrief>(`/sessions/${sessionId}/debrief`),
   listDebriefs: (productId: string) => request<DebriefListItem[]>(`/products/${productId}/debriefs`),

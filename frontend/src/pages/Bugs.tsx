@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import Sidebar from '../components/Sidebar'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
-import { api, BugListItem, BugReview, ORACLES, OracleHeuristic, Reproducibility } from '../api/client'
+import { api, BugListItem, BugReview, Evidence, ORACLES, OracleHeuristic, Reproducibility } from '../api/client'
+import { Screenshot, SignalList } from '../components/Evidence'
 
 const SEVERITY_COLOR: Record<string, string> = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-tertiary)' }
 
@@ -135,6 +136,7 @@ function BugDetail({ bug, onSaved }: { bug: BugListItem; onSaved: (b: BugListIte
   return (
     <div>
       <Trail bug={bug} />
+      <BugEvidence bug={bug} />
       {editing ? (
         <ReviewForm bug={bug} onCancel={() => setEditing(false)} onSaved={(b) => { onSaved(b); setEditing(false) }}
           onRedraft={draft} drafting={drafting} />
@@ -150,6 +152,30 @@ function BugDetail({ bug, onSaved }: { bug: BugListItem; onSaved: (b: BugListIte
       )}
       <ErrorLine message={error} />
     </div>
+  )
+}
+
+/** The screenshot taken when the bug was logged, and what the page reported
+ *  in the two minutes before. Only shown when the browser runner was on. */
+function BugEvidence({ bug }: { bug: BugListItem }) {
+  const [items, setItems] = useState<Evidence[] | null>(null)
+  useEffect(() => { api.bugEvidence(bug.id).then(setItems).catch(() => setItems([])) }, [bug.id])
+  if (!items?.length) return null
+  const shots = items.filter((e) => e.kind === 'screenshot')
+  const signals = items.filter((e) => e.kind !== 'screenshot')
+  return (
+    <section aria-label="Recorded evidence" style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 6 }}>Recorded by the browser</div>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        {shots.map((e) => <Screenshot key={e.id} e={e} width={260} />)}
+        {signals.length > 0 && (
+          <div style={{ flex: 1, minWidth: 260 }}>
+            <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 2 }}>In the 2 minutes before it was logged</div>
+            <SignalList items={signals} />
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 

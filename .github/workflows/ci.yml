@@ -19,6 +19,8 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements*.txt
       - run: pip install -r requirements-dev.txt
+      # Chromium for the recorded-browser tests (they fail rather than skip in CI)
+      - run: python -m playwright install --with-deps chromium
       - run: python -m pytest -v
 
   frontend:
@@ -59,6 +61,8 @@ jobs:
         working-directory: e2e
       - run: npx playwright install --with-deps chromium
         working-directory: e2e
+      # The backend's recorded browser uses Python Playwright, which has its own Chromium build
+      - run: python -m playwright install chromium
       - run: npx playwright test
         working-directory: e2e
       - uses: actions/upload-artifact@v4

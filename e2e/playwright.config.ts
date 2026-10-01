@@ -4,6 +4,7 @@ import { defineConfig, devices } from '@playwright/test'
 // touch your dev servers or your real database.
 const API_PORT = 8100
 const WEB_PORT = 5180
+const TARGET_PORT = 5190 // the misbehaving "app under test" for the browser-runner spec
 export const API_URL = `http://localhost:${API_PORT}`
 const WEB_URL = `http://localhost:${WEB_PORT}`
 
@@ -30,6 +31,13 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 1000 } } }],
   webServer: [
+    {
+      command: 'node scripts/serve-target.mjs',
+      url: `http://localhost:${TARGET_PORT}`,
+      env: { E2E_TARGET_PORT: String(TARGET_PORT) },
+      reuseExistingServer: false,
+      timeout: 15_000,
+    },
     {
       command: 'node scripts/start-backend.mjs',
       url: `${API_URL}/health`,

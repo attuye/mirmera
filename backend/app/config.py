@@ -23,5 +23,13 @@ class Settings(BaseSettings):
     local_model_base_url: str = "http://localhost:11434"
     local_model_name: str = "qwen3:8b"
 
+    # Browser session runner (Playwright). Headed by default: the tester tests in
+    # that window. Headless is for automated tests and CI.
+    runner_headless: bool = False
+    runner_chromium_path: str | None = None  # use a specific Chromium instead of Playwright's
+    # Where screenshots, traces and HAR files are kept, one folder per session.
+    # They can contain whatever the tested app shows, so keep them out of git.
+    evidence_dir: str = "./evidence"
+
 
 settings = Settings()

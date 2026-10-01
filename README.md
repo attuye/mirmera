@@ -23,11 +23,32 @@ debrief report when a session ends.
 cd backend
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
+python -m playwright install chromium   # browser for the recorded browser, first time only
 cp .env.example .env   # then set ANTHROPIC_API_KEY
 uvicorn app.main:app --reload
 ```
 
 API docs at http://localhost:8000/docs once it's running.
+
+### Recorded browser
+
+On the session screen, enter the address of the app you are testing and click
+**Open browser**. Mirmera opens a Chromium window; test in it as usual. While
+you do, it records console errors, uncaught page errors, failed requests
+(4xx/5xx or no response) and the pages you visit, and shows them beside your
+notes. **Screenshot** adds the current page to the timeline, and every bug you
+log while the browser runs gets a screenshot automatically. On the Bugs page a
+bug shows that screenshot and what the page reported in the two minutes before.
+
+When you stop the browser or end the session, a Playwright trace and a HAR
+network log are saved; download them from the debrief and open the trace at
+https://trace.playwright.dev to replay the session step by step. Signals are
+evidence, not verdicts: a 404 can be the right answer, and you decide.
+
+Files go to `backend/evidence/<session id>/` (set `EVIDENCE_DIR` to change it).
+They contain whatever the tested app showed, so they are git-ignored. Set
+`RUNNER_HEADLESS=true` to run without a window (CI), or `RUNNER_CHROMIUM_PATH`
+to use a specific Chromium.
 
 ### Frontend
 
@@ -49,10 +70,13 @@ CI runs all three on every pull request.
 ```bash
 cd backend
 pip install -r requirements-dev.txt
+python -m playwright install chromium   # first time only, for the recorded-browser tests
 python -m pytest
 ```
 
-Uses a throwaway database and the mock AI provider; no API key needed.
+Uses a throwaway database and the mock AI provider; no API key needed. The
+recorded-browser tests run a headless Chromium against a small local site;
+without Chromium installed they are skipped locally (and fail in CI).
 
 ### Frontend (type check and build)
 
@@ -89,10 +113,9 @@ This is the Phase 1 scaffold from the scoping discussion:
 - ✅ Evidence-trail bug logging (preceding session notes auto-snapshotted
   onto each bug)
 - ✅ A runnable frontend covering the four core screens
+- ✅ Recorded browser: signals, screenshots on bugs, trace and HAR per session
 
 Not yet built (Phase 2/3 from the scoping doc):
-- OpenAI / local-model providers (stubbed in `app/ai/`, same interface)
 - Git/Jira/GitHub Issues integration for artifact ingestion (currently paste-only)
-- Playwright fixture / CLI to auto-log evidence into a running session
+- Recorded-browser signals feeding the AI bug and debrief drafts
 - Multi-user auth (the `org_id` field is there, but nothing enforces it yet)
-- Time-breakdown bucketing for the debrief (the field exists, nothing fills it in)

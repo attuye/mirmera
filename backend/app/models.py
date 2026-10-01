@@ -149,6 +149,8 @@ class Session(Base):
     notes = relationship("Note", back_populates="session", cascade="all, delete-orphan")
     bugs = relationship("Bug", back_populates="session", cascade="all, delete-orphan")
     debrief = relationship("Debrief", back_populates="session", uselist=False, cascade="all, delete-orphan")
+    evidence = relationship("Evidence", back_populates="session", cascade="all, delete-orphan",
+                            order_by="Evidence.captured_at")
 
 
 class Note(Base):
@@ -198,6 +200,7 @@ class Bug(Base):
 
     session = relationship("Session", back_populates="bugs")
     charter = relationship("Charter")
+    evidence = relationship("Evidence", back_populates="bug", order_by="Evidence.captured_at")
 
 
 class Debrief(Base):
@@ -226,3 +229,26 @@ class Debrief(Base):
     prompt_version = Column(String, nullable=True)
 
     session = relationship("Session", back_populates="debrief")
+
+
+class Evidence(Base):
+    """Something the session runner recorded: a file (screenshot, trace, HAR)
+    or a signal (console error, page error, failed request, page visited).
+
+    Repeats of the same signal are counted on one row instead of one row each,
+    so a page that logs an error every second stays readable."""
+    __tablename__ = "evidence"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    session_id = Column(String, ForeignKey("sessions.id"), nullable=False, index=True)
+    bug_id = Column(String, ForeignKey("bugs.id"), nullable=True, index=True)  # screenshot taken when the bug was logged
+    kind = Column(String, nullable=False)  # screenshot | trace | har | console_error | page_error | failed_request | navigation
+    summary = Column(Text, nullable=False)
+    url = Column(Text, nullable=True)
+    file_path = Column(String, nullable=True)  # under settings.evidence_dir
+    count = Column(Integer, default=1)
+    captured_at = Column(DateTime, default=utcnow)
+    last_seen_at = Column(DateTime, default=utcnow)
+
+    session = relationship("Session", back_populates="evidence")
+    bug = relationship("Bug", back_populates="evidence")
