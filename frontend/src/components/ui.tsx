@@ -1,4 +1,6 @@
 /** Shared form controls and error display, matching the app's design tokens. */
+import { API_URL } from '../api/client'
+
 export const primaryButton = (disabled = false): React.CSSProperties => ({
   background: disabled ? 'var(--border)' : 'var(--accent)', color: disabled ? 'var(--text-tertiary)' : '#0C0D0F',
   fontSize: 12.5, fontWeight: 600, padding: '9px 16px', borderRadius: 8, cursor: disabled ? 'default' : 'pointer',
@@ -15,7 +17,7 @@ export const fieldLabel: React.CSSProperties = { fontSize: 11.5, color: 'var(--t
 
 export function errorText(e: unknown): string {
   const message = e instanceof Error ? e.message : String(e)
-  return message === 'Failed to fetch' ? 'Could not reach the backend. Is it running on http://localhost:8000?' : message.endsWith('.') ? message : `${message}.`
+  return message === 'Failed to fetch' ? `Could not reach the backend. Is it running on ${API_URL}?` : message.endsWith('.') ? message : `${message}.`
 }
 
 export function ErrorLine({ message }: { message: string | null }) {

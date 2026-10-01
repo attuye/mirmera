@@ -6,6 +6,9 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./mirmera.db"
 
+    # Frontend origins allowed to call the API, comma-separated.
+    cors_origins: str = "http://localhost:5173"
+
     # Which provider backs AI features: mock | claude | openai | local
     # "mock" needs no API key or billing; switch in backend/.env when ready.
     default_ai_provider: str = "mock"

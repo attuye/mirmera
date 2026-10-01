@@ -40,6 +40,45 @@ npm run dev
 App at http://localhost:5173. On first load it creates a demo product
 ("AddisVerify KYC Platform") if none exists yet.
 
+## Tests
+
+CI runs all three on every pull request.
+
+### Backend (pytest)
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+Uses a throwaway database and the mock AI provider; no API key needed.
+
+### Frontend (type check and build)
+
+```bash
+cd frontend
+npm run build
+```
+
+### Browser tests (Playwright)
+
+```bash
+cd e2e
+npm install
+npx playwright install chromium   # first time only
+npx playwright test               # or: npm run test:headed to watch it
+```
+
+The tests start their own backend (port 8100, fresh database, mock AI) and
+frontend (port 5180), so they never touch your real `mirmera.db` and can run
+while your dev servers are up. The backend is started with `backend/.venv` if
+it exists, otherwise `python`; set `PYTHON` to use another interpreter.
+
+Every test fails on an uncaught page error or an unexpected failed API call,
+even if it isn't looking for one. After a failure, `npx playwright show-report`
+opens the report with screenshots and a step-by-step trace.
+
 ## What's here vs. what's next
 
 This is the Phase 1 scaffold from the scoping discussion:

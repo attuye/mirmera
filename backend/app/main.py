@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.ai.base import ProviderError, ProviderNotConfigured, UnknownProvider
+from app.config import settings
 from app.database import Base, add_missing_columns, engine
 from app.routers import products, artifacts, bugs, charters, sessions, debriefs, risks
 
@@ -16,7 +17,7 @@ app = FastAPI(title="Mirmera API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # the Vite dev server
+    allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
 )
