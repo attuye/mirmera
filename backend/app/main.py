@@ -1,12 +1,16 @@
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.ai.base import ProviderError, ProviderNotConfigured, UnknownProvider
-from app.database import Base, engine
-from app.routers import products, artifacts, charters, sessions, debriefs
+from app.database import Base, add_missing_columns, engine
+from app.routers import products, artifacts, charters, sessions, debriefs, risks
 
-Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)  # creates new tables
+for column in add_missing_columns():  # adds new columns to existing tables
+    logging.getLogger(__name__).warning("Database upgraded: added column %s", column)
 
 app = FastAPI(title="Mirmera API")
 
@@ -40,6 +44,7 @@ app.include_router(sessions.router)
 app.include_router(debriefs.router)
 app.include_router(debriefs.list_router)
 app.include_router(sessions.bugs_list_router)
+app.include_router(risks.router)
 
 
 @app.get("/health")

@@ -52,7 +52,21 @@ def save_charter(product_id: str, payload: schemas.CharterCreate, db: DBSession 
     if not product:
         raise HTTPException(404, "Product not found")
 
-    charter = models.Charter(product_id=product_id, **payload.model_dump())
+    data = payload.model_dump()
+    risk_ids = data.pop("risk_ids")
+    risks = []
+    if risk_ids:
+        risks = (
+            db.query(models.Risk)
+            .filter(models.Risk.id.in_(risk_ids), models.Risk.product_id == product_id)
+            .all()
+        )
+        missing = set(risk_ids) - {r.id for r in risks}
+        if missing:
+            raise HTTPException(400, f"Unknown risk ids for this product: {sorted(missing)}")
+
+    charter = models.Charter(product_id=product_id, **data)
+    charter.risks = risks
     db.add(charter)
     db.commit()
     db.refresh(charter)

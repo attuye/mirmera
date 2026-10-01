@@ -2,7 +2,7 @@
 import uuid
 from app.timeutil import utcnow
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Float, JSON, Boolean
+from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Float, JSON, Boolean, Integer, Table
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -21,9 +21,14 @@ class Product(Base):
     created_at = Column(DateTime, default=utcnow)
 
     default_ai_provider = Column(String, default=lambda: settings.default_ai_provider)
+    # What this testing is for, e.g. "Find release blockers in multi-currency checkout".
+    # Steers the product model, risk analysis and charters. Added in the risk-model step.
+    testing_mission = Column(Text, nullable=True)
 
     artifacts = relationship("Artifact", back_populates="product", cascade="all, delete-orphan")
     charters = relationship("Charter", back_populates="product", cascade="all, delete-orphan")
+    risks = relationship("Risk", back_populates="product", cascade="all, delete-orphan")
+    product_models = relationship("ProductModel", back_populates="product", cascade="all, delete-orphan")
 
 
 class Artifact(Base):
@@ -41,6 +46,69 @@ class Artifact(Base):
     product = relationship("Product", back_populates="artifacts")
 
 
+# Which risks a charter investigates (many-to-many).
+charter_risks = Table(
+    "charter_risks",
+    Base.metadata,
+    Column("charter_id", String, ForeignKey("charters.id"), primary_key=True),
+    Column("risk_id", String, ForeignKey("risks.id"), primary_key=True),
+)
+
+
+class ProductModel(Base):
+    """An SFDIPOT model of the product (Heuristic Test Strategy Model), built from
+    artifacts. Risk analysis starts from the latest one. Kept as snapshots so you
+    can see how your understanding of the product changed over time."""
+    __tablename__ = "product_models"
+    id = Column(String, primary_key=True, default=gen_id)
+    product_id = Column(String, ForeignKey("products.id"), nullable=False, index=True)
+    summary = Column(Text, nullable=False)
+    elements = Column(JSON, default=list)  # [{"category", "name", "description", "sources"}]
+    unknowns = Column(JSON, default=list)  # questions to ask the team
+    artifact_ids = Column(JSON, default=list)
+    ai_provider = Column(String, nullable=True)  # provenance: who drafted this
+    ai_model = Column(String, nullable=True)
+    prompt_version = Column(String, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    product = relationship("Product", back_populates="product_models")
+
+
+class Risk(Base):
+    """A specific way the product could fail someone who matters.
+
+    AI-proposed risks start as "proposed" and only count once the tester
+    accepts them; that review is where the context-driven judgement happens."""
+    __tablename__ = "risks"
+    id = Column(String, primary_key=True, default=gen_id)
+    product_id = Column(String, ForeignKey("products.id"), nullable=False, index=True)
+    ref = Column(String, nullable=False)  # short per-product label: R1, R2...
+    title = Column(String, nullable=False)
+    failure_mode = Column(Text, nullable=False)  # what fails, for whom, when
+    quality_criterion = Column(String, nullable=False)  # capability, security, usability...
+    elements = Column(JSON, default=list)  # product-model elements involved
+    impact = Column(Integer, nullable=False)  # 1-5
+    likelihood = Column(Integer, nullable=False)  # 1-5
+    rationale = Column(Text, nullable=True)
+    evidence = Column(String, nullable=False)  # "stated" | "inferred" | "speculative" | "tester"
+    status = Column(String, default="proposed")  # "proposed" | "accepted" | "retired"
+    source = Column(String, default="ai")  # "ai" | "manual"
+    tester_notes = Column(Text, nullable=True)
+    ai_provider = Column(String, nullable=True)
+    ai_model = Column(String, nullable=True)
+    prompt_version = Column(String, nullable=True)
+    last_change = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    product = relationship("Product", back_populates="risks")
+    charters = relationship("Charter", secondary=charter_risks, back_populates="risks")
+
+    @property
+    def score(self) -> int:
+        return self.impact * self.likelihood
+
+
 class Charter(Base):
     __tablename__ = "charters"
     id = Column(String, primary_key=True, default=gen_id)
@@ -53,9 +121,17 @@ class Charter(Base):
     source_artifact_id = Column(String, ForeignKey("artifacts.id"), nullable=True)
     status = Column(String, default="proposed")  # "proposed" | "active" | "done"
     created_at = Column(DateTime, default=utcnow)
+    # Added in the risk-model step:
+    test_ideas = Column(JSON, default=list)  # starting ideas, not scripted steps
+    oracles = Column(JSON, default=list)  # FEW HICCUPPS heuristics to spot problems
 
     product = relationship("Product", back_populates="charters")
     sessions = relationship("Session", back_populates="charter")
+    risks = relationship("Risk", secondary=charter_risks, back_populates="charters")
+
+    @property
+    def risk_ids(self) -> list[str]:
+        return [r.id for r in self.risks]
 
 
 class Session(Base):
