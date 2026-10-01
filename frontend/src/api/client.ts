@@ -299,6 +299,44 @@ export interface RiskInput {
   tester_notes?: string
 }
 
+/** One entry in a risk's score history: a session's suggestion and the
+ *  tester's decision, or a manual re-score. */
+export interface RiskChange {
+  id: string
+  risk_id: string
+  risk_ref: string
+  risk_title: string
+  session_id: string | null
+  source: 'ai' | 'tester'
+  status: 'proposed' | 'accepted' | 'rejected' | 'no_change'
+  from_impact: number
+  from_likelihood: number
+  to_impact: number
+  to_likelihood: number
+  final_impact: number | null
+  final_likelihood: number | null
+  /** The risk's score now; when it differs from "from", the suggestion is stale. */
+  current_impact: number
+  current_likelihood: number
+  reason: string | null
+  evidence: string[]
+  tester_note: string | null
+  ai_provider: string | null
+  ai_model: string | null
+  prompt_version: string | null
+  created_at: string
+  decided_at: string | null
+}
+
+export interface SessionRiskFeedback {
+  changes: RiskChange[]
+  risk_count: number
+  unreviewed_bugs: number
+  warnings: string[]
+}
+
+export interface RiskChangeDecision { impact?: number; likelihood?: number; note?: string }
+
 export type RiskUpdate = Partial<Pick<Risk, 'title' | 'failure_mode' | 'quality_criterion' | 'impact' | 'likelihood' | 'status' | 'tester_notes'>>
 
 export interface RiskCharterDraft {
@@ -402,6 +440,14 @@ export const api = {
     request<Risk[]>(`/products/${productId}/risks/analyze`, { method: 'POST', body: JSON.stringify({ max_risks: maxRisks }) }),
   createRisk: (productId: string, risk: RiskInput) =>
     request<Risk>(`/products/${productId}/risks`, { method: 'POST', body: JSON.stringify(risk) }),
+  riskHistory: (riskId: string) => request<RiskChange[]>(`/risks/${riskId}/history`),
+  getRiskUpdates: (sessionId: string) => request<SessionRiskFeedback>(`/sessions/${sessionId}/risk-updates`),
+  suggestRiskUpdates: (sessionId: string) =>
+    request<SessionRiskFeedback>(`/sessions/${sessionId}/risk-updates`, { method: 'POST', body: JSON.stringify({}) }),
+  acceptRiskChange: (changeId: string, decision: RiskChangeDecision) =>
+    request<RiskChange>(`/risk-changes/${changeId}/accept`, { method: 'POST', body: JSON.stringify(decision) }),
+  rejectRiskChange: (changeId: string, decision: RiskChangeDecision) =>
+    request<RiskChange>(`/risk-changes/${changeId}/reject`, { method: 'POST', body: JSON.stringify(decision) }),
   updateRisk: (riskId: string, changes: RiskUpdate) =>
     request<Risk>(`/risks/${riskId}`, { method: 'PATCH', body: JSON.stringify(changes) }),
 

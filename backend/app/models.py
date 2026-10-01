@@ -103,6 +103,8 @@ class Risk(Base):
 
     product = relationship("Product", back_populates="risks")
     charters = relationship("Charter", secondary=charter_risks, back_populates="risks")
+    changes = relationship("RiskChange", back_populates="risk", cascade="all, delete-orphan",
+                           order_by="RiskChange.created_at")
 
     @property
     def score(self) -> int:
@@ -252,3 +254,36 @@ class Evidence(Base):
 
     session = relationship("Session", back_populates="evidence")
     bug = relationship("Bug", back_populates="evidence")
+
+
+class RiskChange(Base):
+    """One entry in a risk's score history: a suggestion from a session (AI),
+    and what the tester decided, or a re-score the tester made by hand.
+
+    Rejected suggestions are kept: a "no" with a reason is information too.
+    "no_change" records that a session looked at the risk and found no reason
+    to move it, which is also evidence about the risk."""
+    __tablename__ = "risk_changes"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    risk_id = Column(String, ForeignKey("risks.id"), nullable=False, index=True)
+    session_id = Column(String, ForeignKey("sessions.id"), nullable=True, index=True)  # None for manual re-scores
+    source = Column(String, nullable=False)  # "ai" | "tester"
+    status = Column(String, nullable=False)  # "proposed" | "accepted" | "rejected" | "no_change"
+    from_impact = Column(Integer, nullable=False)
+    from_likelihood = Column(Integer, nullable=False)
+    to_impact = Column(Integer, nullable=False)  # suggested (or, for manual re-scores, chosen)
+    to_likelihood = Column(Integer, nullable=False)
+    final_impact = Column(Integer, nullable=True)  # what the tester accepted; may differ from the suggestion
+    final_likelihood = Column(Integer, nullable=True)
+    reason = Column(Text, nullable=True)
+    evidence = Column(JSON, default=list)  # quoted note / bug / signal lines
+    tester_note = Column(Text, nullable=True)
+    ai_provider = Column(String, nullable=True)
+    ai_model = Column(String, nullable=True)
+    prompt_version = Column(String, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    decided_at = Column(DateTime, nullable=True)
+
+    risk = relationship("Risk", back_populates="changes")
+    session = relationship("Session")

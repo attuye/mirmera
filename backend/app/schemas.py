@@ -562,3 +562,82 @@ class RunnerStatus(BaseModel):
     started_at: Optional[datetime] = None
     counts: dict[str, int] = {}  # signals and screenshots recorded so far, by kind
     dropped: int = 0  # signals not recorded because the page produced too many
+
+
+# ---------- risk feedback: sessions suggest risk score changes ----------
+
+class LLMRiskUpdate(BaseModel):
+    """AI contract: a suggested new score for one of the given risks."""
+    risk_ref: str
+    impact: int = Field(ge=1, le=5)
+    likelihood: int = Field(ge=1, le=5)
+    reason: str = Field(min_length=3)
+    evidence: list[str] = Field(min_length=1)  # quoted lines; a suggestion needs evidence
+
+
+class LLMRiskUnchanged(BaseModel):
+    risk_ref: str
+    reason: str  # e.g. not exercised; exercised and held up but one session is not enough
+
+
+class LLMRiskUpdateList(BaseModel):
+    updates: list[LLMRiskUpdate] = []
+    unchanged: list[LLMRiskUnchanged] = []
+
+
+class RiskSuggestRequest(BaseModel):
+    provider: Optional[str] = None
+
+
+class RiskChangeDecision(BaseModel):
+    """Accept, optionally with the tester's own numbers, or reject with a note."""
+    impact: Optional[int] = Field(default=None, ge=1, le=5)
+    likelihood: Optional[int] = Field(default=None, ge=1, le=5)
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+
+class RiskChangeOut(BaseModel):
+    id: str
+    risk_id: str
+    risk_ref: str
+    risk_title: str
+    session_id: Optional[str] = None
+    source: str
+    status: str
+    from_impact: int
+    from_likelihood: int
+    to_impact: int
+    to_likelihood: int
+    final_impact: Optional[int] = None
+    final_likelihood: Optional[int] = None
+    # The risk's score now: if it moved since the suggestion, accepting is refused.
+    current_impact: int
+    current_likelihood: int
+    reason: Optional[str] = None
+    evidence: list[str] = []
+    tester_note: Optional[str] = None
+    ai_provider: Optional[str] = None
+    ai_model: Optional[str] = None
+    prompt_version: Optional[str] = None
+    created_at: datetime
+    decided_at: Optional[datetime] = None
+
+    @classmethod
+    def of(cls, change) -> "RiskChangeOut":
+        risk = change.risk
+        return cls(
+            **{c: getattr(change, c) for c in (
+                "id", "risk_id", "session_id", "source", "status", "from_impact", "from_likelihood",
+                "to_impact", "to_likelihood", "final_impact", "final_likelihood", "reason", "tester_note",
+                "ai_provider", "ai_model", "prompt_version", "created_at", "decided_at")},
+            evidence=change.evidence or [],
+            risk_ref=risk.ref, risk_title=risk.title,
+            current_impact=risk.impact, current_likelihood=risk.likelihood,
+        )
+
+
+class SessionRiskFeedback(BaseModel):
+    changes: list[RiskChangeOut]
+    risk_count: int  # risks linked to the session's charter
+    unreviewed_bugs: int  # suggestions are better once bugs are reviewed
+    warnings: list[str] = []

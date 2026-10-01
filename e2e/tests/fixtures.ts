@@ -32,8 +32,15 @@ export class Api {
     return this.json(await this.ctx.post('/products', { data: { name, org_id: 'e2e' } }))
   }
 
-  async charter(productId: string, mission: string): Promise<{ id: string }> {
-    return this.json(await this.ctx.post(`/products/${productId}/charters`, { data: { mission_statement: mission } }))
+  async charter(productId: string, mission: string, riskIds: string[] = []): Promise<{ id: string }> {
+    return this.json(await this.ctx.post(`/products/${productId}/charters`, { data: { mission_statement: mission, risk_ids: riskIds } }))
+  }
+
+  /** A tester-added risk (accepted). Its ref (R1, R2…) depends on the risks already there. */
+  async risk(productId: string, title: string, impact: number, likelihood: number): Promise<{ id: string; ref: string }> {
+    return this.json(await this.ctx.post(`/products/${productId}/risks`, {
+      data: { title, failure_mode: `${title}, so fraud gets through`, quality_criterion: 'security', impact, likelihood },
+    }))
   }
 
   async session(charterId: string): Promise<{ id: string }> {
