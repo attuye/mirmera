@@ -74,8 +74,9 @@ export default function BrowserPanel({ sessionId, runner, disabled }: { sessionI
       {!running && (
         <>
           <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 12px', lineHeight: 1.5 }}>
-            Opens a Chromium window on the app you are testing. Test in it as usual; errors, failed requests,
-            pages, a trace and a network log are recorded, and bugs you log get a screenshot.
+            Opens a Chromium window on the app you are testing. Test in it as usual; your actions, errors,
+            failed requests, pages, a trace and a network log are recorded, and bugs you log get a screenshot.
+            Passwords and other secret fields are never recorded.
           </p>
           <form onSubmit={(e) => { e.preventDefault(); act('start', () => api.startRunner(sessionId, url).then(setStatus)) }}>
             <label style={fieldLabel} htmlFor="runner-url">App URL</label>
@@ -111,9 +112,9 @@ export default function BrowserPanel({ sessionId, runner, disabled }: { sessionI
       )}
       <ErrorLine message={error} />
 
-      {status && countLine(status.counts, [...SIGNAL_KINDS, 'navigation', 'screenshot']) && (
+      {status && countLine(status.counts, [...SIGNAL_KINDS, 'navigation', 'action', 'screenshot']) && (
         <div className="mono" style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '14px 0 0' }}>
-          {countLine(status.counts, [...SIGNAL_KINDS, 'navigation', 'screenshot'])}
+          {countLine(status.counts, [...SIGNAL_KINDS, 'navigation', 'action', 'screenshot'])}
         </div>
       )}
       {status && status.dropped > 0 && (

@@ -249,13 +249,14 @@ class Evidence(Base):
     id = Column(String, primary_key=True, default=gen_id)
     session_id = Column(String, ForeignKey("sessions.id"), nullable=False, index=True)
     bug_id = Column(String, ForeignKey("bugs.id"), nullable=True, index=True)  # screenshot taken when the bug was logged
-    kind = Column(String, nullable=False)  # screenshot | trace | har | console_error | page_error | failed_request | navigation
+    kind = Column(String, nullable=False)  # screenshot | trace | har | console_error | page_error | failed_request | navigation | action
     summary = Column(Text, nullable=False)
     url = Column(Text, nullable=True)
     file_path = Column(String, nullable=True)  # under settings.evidence_dir
     count = Column(Integer, default=1)
     captured_at = Column(DateTime, default=utcnow)
     last_seen_at = Column(DateTime, default=utcnow)
+    data = Column(JSON, nullable=True)  # recorded actions: {"action", "locator", "value", ...}
 
     session = relationship("Session", back_populates="evidence")
     bug = relationship("Bug", back_populates="evidence")
@@ -310,3 +311,26 @@ class BugFiling(Base):
     created_at = Column(DateTime, default=utcnow)
 
     bug = relationship("Bug", back_populates="filings")
+
+
+class RegressionTest(Base):
+    """A Playwright regression test for a reviewed bug. The AI chooses the
+    recorded steps and the assertions (the plan); Mirmera renders the code from
+    the plan and can replay it against the app to check it reproduces the bug.
+    Regenerating adds a new row; the latest one is shown."""
+    __tablename__ = "regression_tests"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    bug_id = Column(String, ForeignKey("bugs.id"), nullable=False, index=True)
+    plan = Column(JSON, nullable=False)  # resolved: steps carry the recorded actions themselves
+    code = Column(Text, nullable=False)
+    filename = Column(String, nullable=False)
+    base_url = Column(String, nullable=True)
+    known_failing = Column(Boolean, default=True)
+    warnings = Column(JSON, default=list)
+    ai_provider = Column(String, nullable=True)
+    ai_model = Column(String, nullable=True)
+    prompt_version = Column(String, nullable=True)
+    replay = Column(JSON, nullable=True)
+    replayed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utcnow)

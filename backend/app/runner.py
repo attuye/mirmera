@@ -53,10 +53,38 @@ class RunnerConflict(RunnerError):
 
 @dataclass
 class Signal:
-    kind: str  # "console_error" | "page_error" | "failed_request" | "navigation"
+    kind: str  # "console_error" | "page_error" | "failed_request" | "navigation" | "action"
     summary: str
     url: str | None
     at: datetime
+    data: dict | None = None  # for actions: {"action", "locator", "value" | "masked"/"secret" | "files" | "key"}
+
+
+RECORDER_JS = (Path(__file__).parent / "recorder.js").read_text(encoding="utf-8")
+ACTIONS = {"click", "fill", "select", "check", "uncheck", "press", "upload"}
+LOCATOR_METHODS = {"testid", "label", "placeholder", "role", "text", "css"}
+
+
+def describe_locator(loc: dict) -> str:
+    """'button "Upload"', 'label "Document type"', 'css #main > form'"""
+    if loc.get("method") == "role":
+        return f'{loc.get("role")} "{loc.get("name", "")}"'
+    return f'{loc.get("method")} "{loc.get("value", "")}"'
+
+
+def describe_action(a: dict) -> str:
+    """One readable line: 'fill label "First name" = "Abebe"'."""
+    target = describe_locator(a.get("locator") or {})
+    act = a.get("action")
+    if act == "fill":
+        return f"fill {target} = " + (f"(hidden: {a.get('secret')})" if a.get("masked") else f'"{a.get("value", "")}"')
+    if act == "select":
+        return f'select "{a.get("value", "")}" in {target}'
+    if act == "upload":
+        return f"upload {', '.join(a.get('files') or []) or 'a file'} to {target}"
+    if act == "press":
+        return f"press {a.get('key', 'Enter')} in {target}"
+    return f"{act} {target}"
 
 
 def _cut(text: str | None) -> str:
@@ -132,6 +160,9 @@ class BrowserRunner:
             record_har_content="omit",  # requests, statuses and timings; not the bodies
             no_viewport=not headless,  # a real window sizes itself; headless needs a viewport
         )
+        # The action recorder runs in every page and frame, and reports through this binding.
+        await self._context.expose_binding("__mirmeraRecord", self._on_action)
+        await self._context.add_init_script(RECORDER_JS)
         await self._context.tracing.start(screenshots=True, snapshots=True)
         self._context.on("page", self._watch)
         self._context.on("response", self._on_response)
@@ -205,11 +236,34 @@ class BrowserRunner:
         self._pages = [p for p in self._pages if not p.is_closed()]
         return self._pages[-1] if self._pages else None
 
-    def _add(self, kind: str, summary: str, url: str | None) -> None:
+    def _add(self, kind: str, summary: str, url: str | None, data: dict | None = None) -> None:
         if len(self._signals) >= MAX_BUFFERED_SIGNALS:
             self._dropped += 1
             return
-        self._signals.append(Signal(kind, _cut(summary), _cut(url) or None, utcnow()))
+        self._signals.append(Signal(kind, _cut(summary), _cut(url) or None, utcnow(), data))
+
+    def _on_action(self, source, payload) -> None:
+        """Called by the in-page recorder (recorder.js) through the binding.
+        The page is untrusted: keep only the known shape, with lengths capped."""
+        if not isinstance(payload, dict) or payload.get("action") not in ACTIONS:
+            return
+        loc = payload.get("locator") if isinstance(payload.get("locator"), dict) else {}
+        if loc.get("method") not in LOCATOR_METHODS:
+            return
+        action = {"action": payload["action"],
+                  "locator": {k: _cut(str(loc[k])) for k in ("method", "role", "name", "value") if loc.get(k) is not None}}
+        if payload.get("masked"):
+            action |= {"masked": True, "secret": _cut(str(payload.get("secret") or "MIRMERA_SECRET_VALUE"))[:60]}
+        elif payload.get("value") is not None:
+            action["value"] = _cut(str(payload["value"]))
+        if payload.get("files"):
+            action["files"] = [_cut(str(f)) for f in payload["files"]][:10]
+        if payload.get("key"):
+            action["key"] = _cut(str(payload["key"]))[:20]
+        if payload.get("in_frame"):
+            action["in_frame"] = True
+        url = _cut(str(payload.get("url") or "")) or None
+        self._add("action", describe_action(action), url, action)
 
     def _watch(self, page) -> None:
         if page in self._pages:

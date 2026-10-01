@@ -742,3 +742,104 @@ class FileResult(BaseModel):
 
 BugOut.model_rebuild()
 BugListItem.model_rebuild()
+
+
+# ---------- regression tests: AI plan -> rendered Playwright test -> replay ----------
+
+PLAN_ROLES = (
+    "alert", "button", "cell", "checkbox", "combobox", "dialog", "heading", "img", "link", "listitem",
+    "menuitem", "option", "progressbar", "radio", "row", "searchbox", "spinbutton", "status", "switch",
+    "tab", "textbox",
+)
+
+
+class PlanLocator(BaseModel):
+    """How the test finds an element; mirrors Playwright's getBy* locators."""
+    method: Literal["role", "label", "placeholder", "text", "testid"]  # no CSS: assertions should read like a user
+    role: Optional[str] = None
+    name: Optional[str] = None
+    value: Optional[str] = None
+
+    @model_validator(mode="after")
+    def complete(self):
+        if self.method == "role":
+            if self.role not in PLAN_ROLES:
+                raise ValueError(f"role must be one of {', '.join(PLAN_ROLES)}")
+        elif not (self.value or "").strip():
+            raise ValueError(f"a {self.method} locator needs a value")
+        return self
+
+
+class PlanStep(BaseModel):
+    kind: Literal["goto", "recorded"]
+    url: Optional[str] = None  # goto: a page the tester visited
+    action_index: Optional[int] = None  # recorded: index into the recorded actions
+    why: str = ""
+
+    @model_validator(mode="after")
+    def complete(self):
+        if self.kind == "goto" and not (self.url or "").startswith(("http://", "https://")):
+            raise ValueError("a goto step needs an absolute http(s) url from the recording")
+        if self.kind == "recorded" and self.action_index is None:
+            raise ValueError("a recorded step needs action_index")
+        return self
+
+
+class PlanAssertion(BaseModel):
+    kind: Literal["visible", "hidden", "text", "value", "url", "no_console_errors", "no_failed_requests"]
+    locator: Optional[PlanLocator] = None
+    expected: Optional[str] = None  # text / value / url fragment
+    url_contains: Optional[str] = None  # no_failed_requests: which requests
+    why: str = Field(min_length=3)  # ties the check to the oracle
+
+    @model_validator(mode="after")
+    def complete(self):
+        if self.kind in ("visible", "hidden", "text", "value") and not self.locator:
+            raise ValueError(f"a {self.kind} assertion needs a locator")
+        if self.kind in ("text", "value", "url") and not (self.expected or "").strip():
+            raise ValueError(f"a {self.kind} assertion needs expected")
+        return self
+
+
+class LLMRegressionPlan(BaseModel):
+    """AI contract: which recorded steps to replay and what to assert. Mirmera
+    renders the code itself, so the AI never writes code."""
+    test_title: str = Field(min_length=3)
+    steps: list[PlanStep] = Field(min_length=1)
+    assertions: list[PlanAssertion] = Field(min_length=1)
+    assumptions: list[str] = []
+
+
+class RegressionRequest(BaseModel):
+    provider: Optional[str] = None
+    # test.fail(): the test is expected to fail while the bug exists, so CI stays
+    # green and turns red the day the bug is fixed (time to remove the line).
+    known_failing: bool = True
+
+
+class ReplayRequest(BaseModel):
+    base_url: Optional[str] = Field(default=None, pattern=r"^https?://")
+
+
+class RegressionTestOut(BaseModel):
+    id: str
+    bug_id: str
+    filename: str
+    code: str
+    plan: dict
+    base_url: Optional[str] = None
+    known_failing: bool
+    warnings: list[str] = []
+    ai_provider: Optional[str] = None
+    ai_model: Optional[str] = None
+    prompt_version: Optional[str] = None
+    replay: Optional[dict] = None  # {"outcome", "steps", "assertions", "base_url", "duration_ms"}
+    replayed_at: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("warnings", mode="before")
+    @classmethod
+    def none_is_empty(cls, value):
+        return value or []

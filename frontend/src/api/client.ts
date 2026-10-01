@@ -169,7 +169,7 @@ export interface FileRequest { tracker: TrackerName; mode: 'new' | 'comment'; is
 // ---- Browser session runner ------------------------------------------------
 
 export type EvidenceKind =
-  | 'screenshot' | 'trace' | 'har' | 'console_error' | 'page_error' | 'failed_request' | 'navigation'
+  | 'screenshot' | 'trace' | 'har' | 'console_error' | 'page_error' | 'failed_request' | 'navigation' | 'action'
 
 /** Something the runner recorded. Files are fetched with evidenceFileUrl(). */
 export interface Evidence {
@@ -196,6 +196,38 @@ export interface RunnerStatus {
   counts: Partial<Record<EvidenceKind, number>>
   dropped: number
 }
+
+// ---- Regression tests ---------------------------------------------------------
+
+export interface PlanStep { type: 'goto' | 'action'; url?: string; why: string; action?: { summary: string } }
+export interface PlanAssertion { kind: string; why: string; expected?: string; url_contains?: string }
+
+export interface ReplayResult {
+  /** reproduces: the test catches the bug. passes: it did not show. broken: a step failed. incomplete: a step was skipped. */
+  outcome: 'reproduces' | 'passes' | 'broken' | 'incomplete'
+  base_url: string | null
+  steps: { n: number; description: string; status: 'ok' | 'failed' | 'skipped' | 'not_run'; detail: string }[]
+  assertions: { n: number; kind: string; why: string; status: 'passed' | 'failed' | 'not_run'; detail: string }[]
+  duration_ms: number
+}
+
+export interface RegressionTest {
+  id: string
+  bug_id: string
+  filename: string
+  code: string
+  plan: { title: string; base_url: string | null; steps: PlanStep[]; assertions: PlanAssertion[]; assumptions: string[] }
+  base_url: string | null
+  known_failing: boolean
+  warnings: string[]
+  ai_provider: string | null
+  ai_model: string | null
+  replay: ReplayResult | null
+  replayed_at: string | null
+  created_at: string
+}
+
+export const regressionDownloadUrl = (testId: string) => `${BASE_URL}/regression-tests/${testId}/download`
 
 export const evidenceFileUrl = (evidenceId: string) => `${BASE_URL}/evidence/${evidenceId}/file`
 
@@ -467,6 +499,11 @@ export const api = {
   listEvidence: (sessionId: string, kinds?: EvidenceKind[]) =>
     request<Evidence[]>(`/sessions/${sessionId}/evidence${kinds ? `?kind=${kinds.join(',')}` : ''}`),
   bugEvidence: (bugId: string) => request<Evidence[]>(`/bugs/${bugId}/evidence`),
+  getRegressionTest: (bugId: string) => request<RegressionTest | null>(`/bugs/${bugId}/regression-test`),
+  generateRegressionTest: (bugId: string, knownFailing: boolean) =>
+    request<RegressionTest>(`/bugs/${bugId}/regression-test`, { method: 'POST', body: JSON.stringify({ known_failing: knownFailing }) }),
+  replayRegressionTest: (testId: string, baseUrl?: string) =>
+    request<RegressionTest>(`/regression-tests/${testId}/replay`, { method: 'POST', body: JSON.stringify({ base_url: baseUrl || null }) }),
   trackerStatus: (productId: string) => request<TrackerStatus[]>(`/products/${productId}/trackers`),
   checkDuplicates: (bugId: string, tracker: TrackerName) =>
     request<DuplicateCheck>(`/bugs/${bugId}/duplicates`, { method: 'POST', body: JSON.stringify({ tracker }) }),

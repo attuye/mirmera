@@ -68,6 +68,10 @@ export class Api {
     return this.json(await this.ctx.patch(`/bugs/${bugId}`, { data: review }))
   }
 
+  async sessionBugs(sessionId: string): Promise<{ id: string; title: string }[]> {
+    return this.json(await this.ctx.get(`/sessions/${sessionId}/bugs`))
+  }
+
   async notes(sessionId: string): Promise<{ content: string }[]> {
     return this.json(await this.ctx.get(`/sessions/${sessionId}/notes`))
   }

@@ -175,7 +175,7 @@ function RecordedEvidence({ items }: { items: Evidence[] }) {
       <div style={{ display: 'flex', gap: 14, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 6 }}>
         <span style={{ fontSize: 12.5, fontWeight: 600 }}>Recorded in the browser</span>
         <span className="mono" style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
-          {countLine(counts, [...SIGNAL_KINDS, 'navigation', 'screenshot']) || 'No signals'}
+          {countLine(counts, [...SIGNAL_KINDS, 'navigation', 'action', 'screenshot']) || 'No signals'}
         </span>
       </div>
       <RecordingFiles items={items} />
