@@ -334,3 +334,29 @@ class RegressionTest(Base):
     replay = Column(JSON, nullable=True)
     replayed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utcnow)
+
+
+class ReproductionRun(Base):
+    """One attempt by the reproduction agent to reproduce a bug in a browser.
+    Steps are saved as they happen, so the tester can follow along."""
+    __tablename__ = "reproduction_runs"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    bug_id = Column(String, ForeignKey("bugs.id"), nullable=False, index=True)
+    status = Column(String, default="running")  # running | reproduced | not_reproduced | cancelled | error
+    base_url = Column(String, nullable=False)
+    start_url = Column(String, nullable=False)
+    max_steps = Column(Integer, nullable=False)
+    runs = Column(Integer, nullable=False)
+    steps = Column(JSON, default=list)  # [{"n", "thought", "action", "status", "detail", "url"}]
+    symptom = Column(JSON, nullable=True)  # verified symptom
+    detail = Column(Text, nullable=True)  # why it stopped
+    reproducibility = Column(JSON, nullable=True)
+    plan = Column(JSON, nullable=True)  # the found steps, as a resolved regression plan
+    screenshot_path = Column(String, nullable=True)
+    cancel_requested = Column(Boolean, default=False)
+    ai_provider = Column(String, nullable=True)
+    ai_model = Column(String, nullable=True)
+    prompt_version = Column(String, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    finished_at = Column(DateTime, nullable=True)

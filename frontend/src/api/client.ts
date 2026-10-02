@@ -227,6 +227,41 @@ export interface RegressionTest {
   created_at: string
 }
 
+// ---- Reproduction agent -------------------------------------------------------
+
+export interface AgentStep {
+  n: number
+  thought: string
+  action: string
+  kind: string
+  /** ok | failed | refused (outside the app, missing secret) | verified | not verified | stopped */
+  status: string
+  detail: string
+  url: string
+}
+
+export interface ReproductionRun {
+  id: string
+  bug_id: string
+  status: 'running' | 'reproduced' | 'not_reproduced' | 'cancelled' | 'error'
+  base_url: string
+  start_url: string
+  max_steps: number
+  runs: number
+  steps: AgentStep[]
+  /** What the agent proved, checked by Mirmera: kind, value, explanation, evidence. */
+  symptom: { kind: string; value: string; explanation: string; evidence: string } | null
+  detail: string | null
+  reproducibility: { runs: number; reproduced: number; results: { run: number; reproduced: boolean; detail: string }[] } | null
+  has_screenshot: boolean
+  ai_provider: string | null
+  ai_model: string | null
+  created_at: string
+  finished_at: string | null
+}
+
+export const reproductionScreenshotUrl = (runId: string) => `${BASE_URL}/reproduction-runs/${runId}/screenshot`
+
 export const regressionDownloadUrl = (testId: string) => `${BASE_URL}/regression-tests/${testId}/download`
 
 export const evidenceFileUrl = (evidenceId: string) => `${BASE_URL}/evidence/${evidenceId}/file`
@@ -499,6 +534,14 @@ export const api = {
   listEvidence: (sessionId: string, kinds?: EvidenceKind[]) =>
     request<Evidence[]>(`/sessions/${sessionId}/evidence${kinds ? `?kind=${kinds.join(',')}` : ''}`),
   bugEvidence: (bugId: string) => request<Evidence[]>(`/bugs/${bugId}/evidence`),
+  latestReproduction: (bugId: string) => request<ReproductionRun | null>(`/bugs/${bugId}/reproduction`),
+  getReproduction: (runId: string) => request<ReproductionRun>(`/reproduction-runs/${runId}`),
+  startReproduction: (bugId: string, opts: { base_url?: string; max_steps: number; runs: number }) =>
+    request<ReproductionRun>(`/bugs/${bugId}/reproduce`, { method: 'POST', body: JSON.stringify(opts) }),
+  cancelReproduction: (runId: string) =>
+    request<ReproductionRun>(`/reproduction-runs/${runId}/cancel`, { method: 'POST' }),
+  regressionFromReproduction: (runId: string) =>
+    request<RegressionTest>(`/reproduction-runs/${runId}/regression-test`, { method: 'POST', body: JSON.stringify({}) }),
   getRegressionTest: (bugId: string) => request<RegressionTest | null>(`/bugs/${bugId}/regression-test`),
   generateRegressionTest: (bugId: string, knownFailing: boolean) =>
     request<RegressionTest>(`/bugs/${bugId}/regression-test`, { method: 'POST', body: JSON.stringify({ known_failing: knownFailing }) }),

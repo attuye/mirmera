@@ -86,6 +86,27 @@ or file was missing). Set the `MIRMERA_SECRET_*` variables in the backend's
 environment to replay steps that need them. Download the `.spec.ts`, review
 it, and add it to your test suite.
 
+### Reproduction agent
+
+On any bug, **Reproduce with the agent** lets an AI try to reproduce it in a
+headless browser, one step at a time: it sees the bug report, your recorded
+actions as hints, and the page's accessibility tree, and picks one action per
+step (click, fill, select, press, open a page, wait). Guard rails, in code:
+
+- it stays inside the app's address: other sites are refused, and a click
+  that leaves the app is undone;
+- it never sees secrets: it names a `MIRMERA_SECRET_*` variable and the
+  backend types the value;
+- **its claim "reproduced" is checked by Mirmera** (the failing request really
+  happened, the text really is on the page); an unchecked claim is refused;
+- it has a step budget (default 20) and can be cancelled.
+
+When it reproduces the bug, the steps that worked are rerun in fresh browsers
+(default 3) to measure how reliably: "2 of 3" means intermittent. **Make a
+regression test from these steps** turns them into a Playwright test that
+checks the symptom is gone. Useful for bugs logged without the recorded
+browser, and for flaky ones.
+
 ### Filing bugs to GitHub and Jira
 
 Reviewed bugs and questions can be filed from the Bugs page. Put the
@@ -163,6 +184,7 @@ This is the Phase 1 scaffold from the scoping discussion:
   decides, and each risk keeps its score history
 - ✅ Filing to GitHub Issues and Jira Cloud, with an AI-rated duplicate check
 - ✅ Regression tests: recorded actions -> AI plan -> rendered Playwright test, verified by replay
+- ✅ Reproduction agent: AI drives a browser to reproduce a bug; Mirmera verifies and measures it
 
 Not yet built (Phase 2/3 from the scoping doc):
 - Importing specs, diffs and past bugs from Git, GitHub and Jira as artifacts (currently paste-only)
