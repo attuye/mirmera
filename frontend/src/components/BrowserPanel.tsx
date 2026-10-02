@@ -21,10 +21,10 @@ export function useRunner(sessionId: string | undefined) {
 
   useEffect(() => { refresh().catch(console.error) }, [refresh])
   useEffect(() => {
-    if (!status?.running) return
+    if (!status?.running && !status?.extension_active) return
     const id = setInterval(() => refresh().catch(console.error), POLL_MS)
     return () => clearInterval(id)
-  }, [status?.running, refresh])
+  }, [status?.running, status?.extension_active, refresh])
 
   return { status, evidence, refresh, setStatus }
 }
@@ -56,6 +56,7 @@ export default function BrowserPanel({ sessionId, runner, disabled }: { sessionI
   const signals = evidence.filter((e) => SIGNAL_KINDS.includes(e.kind)).reverse()
   const pages = evidence.filter((e) => e.kind === 'navigation').reverse().slice(0, 8)
   const running = !!status?.running
+  const viaChrome = !running && !!status?.extension_active
 
   return (
     <aside aria-label="Browser" style={{
@@ -65,18 +66,27 @@ export default function BrowserPanel({ sessionId, runner, disabled }: { sessionI
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <span aria-hidden style={{
           width: 8, height: 8, borderRadius: '50%',
-          background: running ? 'var(--danger)' : 'var(--border)',
-          boxShadow: running ? '0 0 0 4px var(--danger-bg)' : 'none',
+          background: running || viaChrome ? 'var(--danger)' : 'var(--border)',
+          boxShadow: running || viaChrome ? '0 0 0 4px var(--danger-bg)' : 'none',
         }} />
-        <h2 style={{ fontSize: 13.5, fontWeight: 600, margin: 0 }}>{running ? 'Recording browser' : 'Recorded browser'}</h2>
+        <h2 style={{ fontSize: 13.5, fontWeight: 600, margin: 0 }}>
+          {running ? 'Recording browser' : viaChrome ? 'Recording from Chrome' : 'Recorded browser'}
+        </h2>
       </div>
 
-      {!running && (
+      {viaChrome && (
+        <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 4px', lineHeight: 1.5 }}>
+          The Mirmera Chrome extension is recording a tab into this session. Stop it from the extension.
+        </p>
+      )}
+
+      {!running && !viaChrome && (
         <>
           <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '0 0 12px', lineHeight: 1.5 }}>
             Opens a Chromium window on the app you are testing. Test in it as usual; your actions, errors,
             failed requests, pages, a trace and a network log are recorded, and bugs you log get a screenshot.
-            Passwords and other secret fields are never recorded.
+            Passwords and other secret fields are never recorded. To record in your own Chrome instead, use the
+            Mirmera Chrome extension (the <span className="mono">extension</span> folder).
           </p>
           <form onSubmit={(e) => { e.preventDefault(); act('start', () => api.startRunner(sessionId, url).then(setStatus)) }}>
             <label style={fieldLabel} htmlFor="runner-url">App URL</label>
@@ -123,7 +133,7 @@ export default function BrowserPanel({ sessionId, runner, disabled }: { sessionI
         </div>
       )}
 
-      {(running || signals.length > 0) && (
+      {(running || viaChrome || signals.length > 0) && (
         <section aria-label="What the page reported" style={{ marginTop: 14 }}>
           <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 4 }}>
             What the page reported <span style={{ color: 'var(--text-quiet)' }}>(evidence, not verdicts: you decide)</span>

@@ -86,6 +86,23 @@ or file was missing). Set the `MIRMERA_SECRET_*` variables in the backend's
 environment to replay steps that need them. Download the `.spec.ts`, review
 it, and add it to your test suite.
 
+### Recording from your own Chrome (extension)
+
+The `extension` folder is a Chrome extension that records a session from your
+everyday browser, with your usual logins, instead of the recorded browser.
+Load it once: `chrome://extensions`, turn on **Developer mode**, **Load
+unpacked**, pick the `extension` folder. Then, with a session running in
+Mirmera, open the app you are testing, click the extension, pick the session
+and **Record this tab**.
+
+It records that one tab only: your actions (same recorder as the recorded
+browser, so regression tests and the reproduction agent can use them),
+console and page errors, failed requests, pages visited, screenshots, and
+notes and bugs typed in its popup. Passwords are never recorded, and values
+in URL query strings are removed (`?token=…`); the backend applies both rules
+again. The session screen shows **Recording from Chrome** while it runs. See
+`extension/README.md`.
+
 ### Reproduction agent
 
 On any bug, **Reproduce with the agent** lets an AI try to reproduce it in a
@@ -185,6 +202,7 @@ This is the Phase 1 scaffold from the scoping discussion:
 - ✅ Filing to GitHub Issues and Jira Cloud, with an AI-rated duplicate check
 - ✅ Regression tests: recorded actions -> AI plan -> rendered Playwright test, verified by replay
 - ✅ Reproduction agent: AI drives a browser to reproduce a bug; Mirmera verifies and measures it
+- ✅ Chrome extension: record a session from your everyday browser
 
 Not yet built (Phase 2/3 from the scoping doc):
 - Importing specs, diffs and past bugs from Git, GitHub and Jira as artifacts (currently paste-only)

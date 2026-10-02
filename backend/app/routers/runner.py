@@ -132,11 +132,12 @@ def _status(db: DBSession, session_id: str, runner: BrowserRunner | None) -> sch
         .group_by(models.Evidence.kind)
         .all()
     )
+    from app.routers.extension import extension_active
     if not runner:
-        return schemas.RunnerStatus(running=False, counts=counts)
+        return schemas.RunnerStatus(running=False, counts=counts, extension_active=extension_active(session_id))
     live = manager.loop.run(runner.status(), timeout=15)
     return schemas.RunnerStatus(running=True, start_url=runner.start_url, started_at=runner.started_at,
-                                counts=counts, dropped=runner.dropped, **live)
+                                counts=counts, dropped=runner.dropped, extension_active=extension_active(session_id), **live)
 
 
 # ---------- endpoints ----------
@@ -237,5 +238,6 @@ def evidence_file(evidence_id: str, db: DBSession = Depends(get_db)):
         raise HTTPException(404, "The file is no longer on disk")
     filename = {"trace": f"mirmera-trace-{evidence.session_id[:8]}.zip",
                 "har": f"mirmera-network-{evidence.session_id[:8]}.har"}.get(evidence.kind)
-    return FileResponse(path, media_type=FILE_KINDS.get(evidence.kind, "application/octet-stream"),
+    media_type = "image/jpeg" if path.suffix == ".jpg" else FILE_KINDS.get(evidence.kind, "application/octet-stream")
+    return FileResponse(path, media_type=media_type,
                         filename=filename, content_disposition_type="attachment" if filename else "inline")

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import sys
 import threading
 from collections.abc import Coroutine
@@ -64,6 +65,31 @@ class Signal:
 RECORDER_JS = (Path(__file__).parent / "recorder.js").read_text(encoding="utf-8")
 ACTIONS = {"click", "fill", "select", "check", "uncheck", "press", "upload"}
 LOCATOR_METHODS = {"testid", "label", "placeholder", "role", "text", "css"}
+
+
+def sanitize_action(payload) -> dict | None:
+    """A recorded action from an untrusted page (recorder.js, in the recorded
+    browser or the Chrome extension): only the known shape, lengths capped,
+    secret names in their fixed form. None when it is not a valid action."""
+    if not isinstance(payload, dict) or payload.get("action") not in ACTIONS:
+        return None
+    loc = payload.get("locator") if isinstance(payload.get("locator"), dict) else {}
+    if loc.get("method") not in LOCATOR_METHODS:
+        return None
+    action = {"action": payload["action"],
+              "locator": {k: _cut(str(loc[k])) for k in ("method", "role", "name", "value") if loc.get(k) is not None}}
+    if payload.get("masked"):
+        secret = re.sub(r"[^A-Z0-9_]", "_", str(payload.get("secret") or "").upper())[:60]
+        action |= {"masked": True, "secret": secret if secret.startswith("MIRMERA_SECRET_") else "MIRMERA_SECRET_VALUE"}
+    elif payload.get("value") is not None:
+        action["value"] = _cut(str(payload["value"]))
+    if payload.get("files"):
+        action["files"] = [_cut(str(f)) for f in payload["files"]][:10]
+    if payload.get("key"):
+        action["key"] = _cut(str(payload["key"]))[:20]
+    if payload.get("in_frame"):
+        action["in_frame"] = True
+    return action
 
 
 def describe_locator(loc: dict) -> str:
@@ -254,27 +280,11 @@ class BrowserRunner:
         self._signals.append(Signal(kind, _cut(summary), _cut(url) or None, utcnow(), data))
 
     def _on_action(self, source, payload) -> None:
-        """Called by the in-page recorder (recorder.js) through the binding.
-        The page is untrusted: keep only the known shape, with lengths capped."""
-        if not isinstance(payload, dict) or payload.get("action") not in ACTIONS:
-            return
-        loc = payload.get("locator") if isinstance(payload.get("locator"), dict) else {}
-        if loc.get("method") not in LOCATOR_METHODS:
-            return
-        action = {"action": payload["action"],
-                  "locator": {k: _cut(str(loc[k])) for k in ("method", "role", "name", "value") if loc.get(k) is not None}}
-        if payload.get("masked"):
-            action |= {"masked": True, "secret": _cut(str(payload.get("secret") or "MIRMERA_SECRET_VALUE"))[:60]}
-        elif payload.get("value") is not None:
-            action["value"] = _cut(str(payload["value"]))
-        if payload.get("files"):
-            action["files"] = [_cut(str(f)) for f in payload["files"]][:10]
-        if payload.get("key"):
-            action["key"] = _cut(str(payload["key"]))[:20]
-        if payload.get("in_frame"):
-            action["in_frame"] = True
-        url = _cut(str(payload.get("url") or "")) or None
-        self._add("action", describe_action(action), url, action)
+        """Called by the in-page recorder (recorder.js) through the binding."""
+        action = sanitize_action(payload)
+        if action:
+            url = _cut(str(payload.get("url") or "")) or None
+            self._add("action", describe_action(action), url, action)
 
     def _watch(self, page) -> None:
         if page in self._pages:

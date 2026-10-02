@@ -63,7 +63,8 @@ def action_line(a: dict) -> list[str]:
     elif act == "press":
         lines.append(f"await {target}.press({ts(a.get('key') or 'Enter')})")
     elif act == "upload":
-        files = ", ".join(f"path.join(__dirname, 'fixtures', {ts(f)})" for f in (a.get("files") or ["file"]))
+        # test.info().file works in CommonJS and ES-module projects alike (__dirname does not exist in ESM).
+        files = ", ".join(f"path.join(path.dirname(test.info().file), 'fixtures', {ts(f)})" for f in (a.get("files") or ["file"]))
         lines.append("// Put the uploaded file(s) next to this test in a fixtures/ folder.")
         lines.append(f"await {target}.setInputFiles([{files}])")
     return lines

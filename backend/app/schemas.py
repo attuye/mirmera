@@ -569,6 +569,8 @@ class RunnerStatus(BaseModel):
     started_at: Optional[datetime] = None
     counts: dict[str, int] = {}  # signals and screenshots recorded so far, by kind
     dropped: int = 0  # signals not recorded because the page produced too many
+    # The Chrome extension is recording into this session (it sent something in the last 2 minutes)
+    extension_active: bool = False
 
 
 # ---------- risk feedback: sessions suggest risk score changes ----------
@@ -934,3 +936,35 @@ class ReproductionRunOut(BaseModel):
             out["steps"] = data.steps or []
             return out
         return data
+
+
+# ---------- Chrome extension ----------
+
+class ActiveSessionOut(BaseModel):
+    id: str
+    charter_mission: str
+    started_at: datetime
+    paused: bool
+
+
+class ExtensionEvent(BaseModel):
+    """One thing the extension saw in the recorded tab. The server builds the
+    summary itself from these fields, and redacts URLs."""
+    kind: Literal["navigation", "action", "console_error", "page_error", "failed_request"]
+    url: Optional[str] = Field(default=None, max_length=4000)
+    message: Optional[str] = Field(default=None, max_length=4000)  # console / page errors
+    method: Optional[str] = Field(default=None, max_length=16)  # failed requests
+    status: Optional[int] = None  # failed requests: HTTP status, or none when there was no response
+    error: Optional[str] = Field(default=None, max_length=300)  # failed requests without a response
+    action: Optional[dict] = None  # recorded actions, as recorder.js sends them
+
+
+class ExtensionEvents(BaseModel):
+    events: list[ExtensionEvent] = Field(max_length=200)
+
+
+class ExtensionScreenshot(BaseModel):
+    image: str = Field(max_length=8_000_000)  # data URL from chrome.tabs.captureVisibleTab (PNG or JPEG)
+    caption: Optional[str] = Field(default=None, max_length=500)
+    bug_id: Optional[str] = None
+    url: Optional[str] = Field(default=None, max_length=4000)
