@@ -271,7 +271,14 @@ E2E = __import__("pathlib").Path(__file__).resolve().parents[2] / "e2e"
 def run_generated(code: str, app_url: str, env: dict) -> int:
     """Runs a generated spec with the e2e project's Playwright Test. Returns the exit code."""
     import os
+    import shutil
     import subprocess
+    # On Windows npx is npx.cmd, which subprocess only finds by its full path; shutil.which follows PATHEXT.
+    npx = shutil.which("npx")
+    if not npx:
+        if os.environ.get("REQUIRE_GENERATED_RUN"):
+            raise AssertionError("npx (Node.js) is not on PATH")
+        pytest.skip("Node.js (npx) is not on PATH")
     folder = E2E / ".generated"
     folder.mkdir(exist_ok=True)
     (folder / "regression.spec.ts").write_text(code)
@@ -279,7 +286,7 @@ def run_generated(code: str, app_url: str, env: dict) -> int:
         "import { defineConfig } from '@playwright/test'\n"
         "export default defineConfig({ testDir: '.', workers: 1, retries: 0, reporter: 'line',\n"
         "  use: { launchOptions: process.env.PW_CHROMIUM_PATH ? { executablePath: process.env.PW_CHROMIUM_PATH } : {} } })\n")
-    proc = subprocess.run(["npx", "playwright", "test", "--config", ".generated/generated.config.ts"],
+    proc = subprocess.run([npx, "playwright", "test", "--config", ".generated/generated.config.ts"],
                           cwd=E2E, env={**os.environ, "BASE_URL": app_url, **env},
                           capture_output=True, text=True, timeout=180)
     print(proc.stdout[-2000:], proc.stderr[-2000:])
