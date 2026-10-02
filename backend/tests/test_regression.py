@@ -299,3 +299,15 @@ def test_the_rendered_code_runs_in_playwright_test(client, recorded_bug, app_url
     # Bug fixed: the test now passes, which test.fail() reports as a failure: time to remove the line.
     App.fixed = True
     assert run_generated(code, app_url, secret) == 1
+
+
+def test_uploads_work_in_es_module_projects_too():
+    """__dirname does not exist in ES-module test projects; test.info().file does."""
+    plan = {"title": "Upload", "base_url": "http://app.test", "assumptions": [],
+            "steps": [{"type": "goto", "url": "http://app.test/", "why": ""},
+                      {"type": "action", "why": "", "action": {"action": "upload", "files": ["id.jpg"],
+                                                               "locator": {"method": "label", "value": "Photo"}}}],
+            "assertions": [{"kind": "no_console_errors", "why": "No errors"}]}
+    code = render(plan, bug_title="Upload", oracle="x", issue_links=[], provenance="mock", known_failing=False)
+    assert "__dirname" not in code
+    assert "path.join(path.dirname(test.info().file), 'fixtures', \"id.jpg\")" in code

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Mirmera recorder</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <strong>Mirmera</strong>
+    <span id="state" class="pill">Not recording</span>
+  </header>
+
+  <section id="idle" hidden>
+    <label for="session">Session</label>
+    <select id="session"></select>
+    <p id="no-sessions" class="hint" hidden>No running session. Start one in Mirmera, then reopen this.</p>
+    <p class="hint">Records this tab only: your actions, errors, failed requests, pages and screenshots.
+      Passwords and query-string values are never stored.</p>
+    <button id="start" class="primary">Record this tab</button>
+  </section>
+
+  <section id="recording" hidden>
+    <p class="mission" id="mission"></p>
+    <p class="hint" id="tab"></p>
+    <div class="row">
+      <button id="shot">Screenshot</button>
+      <button id="stop">Stop recording</button>
+    </div>
+    <label for="note">What are you observing?</label>
+    <textarea id="note" rows="3"></textarea>
+    <div class="tags" role="radiogroup" aria-label="Tag">
+      <label><input type="radio" name="tag" value="test" checked> Test</label>
+      <label><input type="radio" name="tag" value="bug"> Bug</label>
+      <label><input type="radio" name="tag" value="issue"> Issue</label>
+      <label><input type="radio" name="tag" value="question"> Question</label>
+      <label><input type="radio" name="tag" value="setup"> Setup</label>
+    </div>
+    <button id="log" class="primary">Log note</button>
+    <a id="open" target="_blank">Open the session in Mirmera</a>
+  </section>
+
+  <p id="message" role="status"></p>
+
+  <details>
+    <summary>Settings</summary>
+    <label for="api">Mirmera API</label>
+    <input id="api" placeholder="http://localhost:8000">
+    <label for="app">Mirmera app</label>
+    <input id="app" placeholder="http://localhost:5173">
+    <button id="save">Save settings</button>
+  </details>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -23,7 +23,8 @@ export function shortUrl(url: string | null): string {
   if (!url) return ''
   try {
     const u = new URL(url)
-    return `${u.host}${u.pathname}${u.search}`
+    const text = `${u.host}${u.pathname}${u.search}`
+    try { return decodeURIComponent(text) } catch { return text }  // show "?q=…", not "?q=%E2%80%A6"
   } catch {
     return url
   }

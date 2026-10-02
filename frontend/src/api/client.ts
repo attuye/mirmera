@@ -195,6 +195,8 @@ export interface RunnerStatus {
   started_at: string | null
   counts: Partial<Record<EvidenceKind, number>>
   dropped: number
+  /** The Chrome extension is recording into this session. */
+  extension_active: boolean
 }
 
 // ---- Regression tests ---------------------------------------------------------

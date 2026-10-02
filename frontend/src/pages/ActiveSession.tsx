@@ -58,6 +58,14 @@ export default function ActiveSession() {
   const [charterMission, setCharterMission] = useState('')
   const runner = useRunner(sessionId)
 
+  // Notes and bugs can also arrive from the Chrome extension's popup: refresh while it records.
+  const extensionActive = !!runner.status?.extension_active
+  useEffect(() => {
+    if (!sessionId || !extensionActive) return
+    const id = setInterval(() => { api.listNotes(sessionId).then(setNotes).catch(() => {}) }, 3000)
+    return () => clearInterval(id)
+  }, [sessionId, extensionActive])
+
   useEffect(() => {
     if (!sessionId) return
     api.listNotes(sessionId).then(setNotes).catch(console.error)

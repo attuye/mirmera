@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Mirmera recorder",
+  "version": "0.1.0",
+  "description": "Record an exploratory testing session from your own Chrome into Mirmera: your actions, errors, failed requests, pages, screenshots and notes.",
+  "permissions": ["storage", "tabs", "scripting", "webRequest", "webNavigation"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "Mirmera recorder" }
+}
