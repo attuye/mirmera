@@ -273,8 +273,9 @@ def run_generated(code: str, app_url: str, env: dict) -> int:
     import os
     import shutil
     import subprocess
-    # On Windows npx is npx.cmd, which subprocess only finds by its full path; shutil.which follows PATHEXT.
-    npx = shutil.which("npx")
+    # On Windows, Node ships both "npx" (a bash script) and "npx.cmd". shutil.which("npx") can return the
+    # bash script, which Windows cannot start (WinError 193), so ask for npx.cmd by name there.
+    npx = (shutil.which("npx.cmd") if os.name == "nt" else None) or shutil.which("npx")
     if not npx:
         if os.environ.get("REQUIRE_GENERATED_RUN"):
             raise AssertionError("npx (Node.js) is not on PATH")
