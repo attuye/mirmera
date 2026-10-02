@@ -84,6 +84,8 @@ def assertion_lines(a: dict) -> list[str]:
         return [f"await expect.poll(() => page.url(), {{ message: {why} }}).toContain({ts(a['expected'])})"]
     if kind == "no_console_errors":
         return [f"expect(consoleErrors, {why}).toEqual([])"]
+    if kind == "no_page_errors":
+        return [f"expect(pageErrors, {why}).toEqual([])"]
     if kind == "no_failed_requests":
         part = a.get("url_contains") or ""
         return [f"expect(failedRequests.filter((r) => r.includes({ts(part)})), {why}).toEqual([])"]
@@ -121,11 +123,14 @@ def render(plan: dict, *, bug_title: str, oracle: str, issue_links: list[str],
                  "page.on('console', (m) => {",
                  "  if (m.type() === 'error' && !m.text().startsWith('Failed to load resource')) consoleErrors.push(m.text())",
                  "})"]
+    if "no_page_errors" in kinds:
+        body += ["const pageErrors: string[] = []",
+                 "page.on('pageerror', (e) => pageErrors.push(e.message))"]
     if "no_failed_requests" in kinds:
         body += ["const failedRequests: string[] = []",
                  "page.on('response', (r) => { if (r.status() >= 400) failedRequests.push(`${r.request().method()} ${r.url()} -> ${r.status()}`) })",
                  "page.on('requestfailed', (r) => { if (!r.failure()?.errorText.includes('ERR_ABORTED')) failedRequests.push(`${r.method()} ${r.url()} -> ${r.failure()?.errorText}`) })"]
-    if kinds & {"no_console_errors", "no_failed_requests"}:
+    if kinds & {"no_console_errors", "no_page_errors", "no_failed_requests"}:
         body.append("")
 
     for n, step in enumerate(steps, 1):
@@ -137,7 +142,7 @@ def render(plan: dict, *, bug_title: str, oracle: str, issue_links: list[str],
             body += action_line(step["action"])
 
     body.append("")
-    if kinds & {"no_console_errors", "no_failed_requests"}:
+    if kinds & {"no_console_errors", "no_page_errors", "no_failed_requests"}:
         body.append("await page.waitForLoadState('networkidle').catch(() => {})  // let requests settle")
     body.append("// What should happen (the oracle). These fail while the bug exists.")
     for a in assertions:

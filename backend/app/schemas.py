@@ -1,4 +1,5 @@
 """Pydantic schemas — request/response shapes, and the AI provider's structured output contracts."""
+import re
 from datetime import datetime
 from typing import Optional, Literal
 
@@ -786,7 +787,8 @@ class PlanStep(BaseModel):
 
 
 class PlanAssertion(BaseModel):
-    kind: Literal["visible", "hidden", "text", "value", "url", "no_console_errors", "no_failed_requests"]
+    kind: Literal["visible", "hidden", "text", "value", "url", "no_console_errors", "no_page_errors",
+                  "no_failed_requests"]
     locator: Optional[PlanLocator] = None
     expected: Optional[str] = None  # text / value / url fragment
     url_contains: Optional[str] = None  # no_failed_requests: which requests
@@ -843,3 +845,92 @@ class RegressionTestOut(BaseModel):
     @classmethod
     def none_is_empty(cls, value):
         return value or []
+
+
+# ---------- reproduction agent ----------
+
+class Symptom(BaseModel):
+    """What the agent says it saw. Mirmera checks it itself before believing it."""
+    kind: Literal["failed_request", "console_error", "page_error", "text_visible", "text_absent", "url"]
+    value: str = Field(min_length=1, max_length=300)  # URL part, message part, or page text
+    explanation: str = Field(min_length=3, max_length=600)  # why this is the bug the tester reported
+
+
+AGENT_KEYS = ("Enter", "Tab", "Escape", "ArrowDown", "ArrowUp", "Space")
+
+
+class AgentAction(BaseModel):
+    kind: Literal["goto", "click", "fill", "fill_secret", "select", "check", "uncheck", "press", "wait",
+                  "reproduced", "give_up"]
+    locator: Optional[PlanLocator] = None
+    url: Optional[str] = Field(default=None, max_length=2000)
+    value: Optional[str] = Field(default=None, max_length=500)
+    secret: Optional[str] = None  # fill_secret: the name of an environment variable, never a value
+    key: Optional[str] = None
+    symptom: Optional[Symptom] = None
+    reason: Optional[str] = Field(default=None, max_length=600)
+
+    @model_validator(mode="after")
+    def complete(self):
+        k = self.kind
+        if k in ("click", "fill", "fill_secret", "select", "check", "uncheck", "press") and not self.locator:
+            raise ValueError(f"{k} needs a locator")
+        if k == "goto" and not (self.url or "").startswith(("http://", "https://")):
+            raise ValueError("goto needs an absolute http(s) url")
+        if k in ("fill", "select") and self.value is None:
+            raise ValueError(f"{k} needs a value")
+        if k == "fill_secret" and not re.fullmatch(r"MIRMERA_SECRET_[A-Z0-9_]{1,60}", self.secret or ""):
+            raise ValueError("fill_secret needs a secret name like MIRMERA_SECRET_PASSWORD")
+        if k == "press" and self.key not in AGENT_KEYS:
+            raise ValueError(f"press key must be one of {', '.join(AGENT_KEYS)}")
+        if k == "reproduced" and not self.symptom:
+            raise ValueError("reproduced needs the symptom you saw")
+        if k == "give_up" and not (self.reason or "").strip():
+            raise ValueError("give_up needs a reason")
+        return self
+
+
+class LLMAgentStep(BaseModel):
+    """AI contract: one step at a time."""
+    thought: str = Field(min_length=1, max_length=600)
+    action: AgentAction
+
+
+class ReproduceRequest(BaseModel):
+    base_url: Optional[str] = Field(default=None, pattern=r"^https?://")
+    provider: Optional[str] = None
+    max_steps: int = Field(default=20, ge=3, le=40)
+    runs: int = Field(default=3, ge=1, le=10)  # reruns of the found steps, to measure how reliably it reproduces
+
+
+class ReproductionRunOut(BaseModel):
+    id: str
+    bug_id: str
+    status: str  # running | reproduced | not_reproduced | cancelled | error
+    base_url: str
+    start_url: str
+    max_steps: int
+    runs: int
+    steps: list[dict] = []
+    symptom: Optional[dict] = None
+    detail: Optional[str] = None
+    reproducibility: Optional[dict] = None  # {"runs", "reproduced", "results": [...]}
+    plan: Optional[dict] = None
+    has_screenshot: bool = False
+    ai_provider: Optional[str] = None
+    ai_model: Optional[str] = None
+    prompt_version: Optional[str] = None
+    created_at: datetime
+    finished_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def flags(cls, data):
+        if hasattr(data, "screenshot_path"):
+            out = {c: getattr(data, c) for c in cls.model_fields if c != "has_screenshot" and hasattr(data, c)}
+            out["has_screenshot"] = bool(data.screenshot_path)
+            out["steps"] = data.steps or []
+            return out
+        return data

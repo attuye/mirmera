@@ -75,7 +75,8 @@ async def _run_action(page, a: dict) -> str | None:
     return None
 
 
-async def _check(page, a: dict, console_errors: list[str], failed: list[str]) -> tuple[bool, str]:
+async def _check(page, a: dict, console_errors: list[str], failed: list[str],
+                 page_errors: list[str] | None = None) -> tuple[bool, str]:
     from playwright.async_api import expect
     kind = a["kind"]
     try:
@@ -96,6 +97,9 @@ async def _check(page, a: dict, console_errors: list[str], failed: list[str]) ->
         elif kind == "no_console_errors":
             if console_errors:
                 return False, "Console errors: " + "; ".join(console_errors[:3])
+        elif kind == "no_page_errors":
+            if page_errors:
+                return False, "Page errors: " + "; ".join(page_errors[:3])
         elif kind == "no_failed_requests":
             hits = [r for r in failed if (a.get("url_contains") or "") in r]
             if hits:
@@ -105,6 +109,33 @@ async def _check(page, a: dict, console_errors: list[str], failed: list[str]) ->
         return False, _first_line(err)
     except Exception as err:  # e.g. a locator matching several elements
         return False, _first_line(err)
+
+
+class Signals:
+    """Console errors, uncaught page errors and failed requests seen on a page,
+    in order. Shared by replays and the reproduction agent."""
+
+    def __init__(self) -> None:
+        self.console_errors: list[str] = []
+        self.page_errors: list[str] = []
+        self.failed: list[str] = []
+
+    def attach(self, page) -> None:
+        page.on("console", lambda m: m.type == "error" and not m.text.startswith("Failed to load resource")
+                and self.console_errors.append(m.text))
+        page.on("pageerror", lambda e: self.page_errors.append(str(e)))
+        page.on("response", lambda r: r.status >= 400 and self.failed.append(f"{r.request.method} {r.url} -> {r.status}"))
+        page.on("requestfailed", lambda r: "ERR_ABORTED" not in (r.failure or "")
+                and self.failed.append(f"{r.method} {r.url} -> {r.failure}"))
+
+
+async def run_step(page, step: dict, plan_base: str | None, base_url: str | None) -> str | None:
+    """Runs one resolved plan step. Returns a reason when it has to be skipped;
+    raises when it fails."""
+    if step["type"] == "goto":
+        await page.goto(_rebase(step["url"], plan_base, base_url), wait_until="domcontentloaded", timeout=30_000)
+        return None
+    return await _run_action(page, step["action"])
 
 
 async def replay(plan: dict, *, base_url: str | None, headless: bool = True, executable_path: str | None = None) -> dict:
@@ -118,27 +149,18 @@ async def replay(plan: dict, *, base_url: str | None, headless: bool = True, exe
     steps = [{"n": i + 1, "description": described(s), "status": "not_run", "detail": ""} for i, s in enumerate(plan["steps"])]
     checks = [{"n": i + 1, "kind": a["kind"], "why": a.get("why", ""), "status": "not_run", "detail": ""}
               for i, a in enumerate(plan["assertions"])]
-    console_errors: list[str] = []
-    failed: list[str] = []
+    signals = Signals()
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=headless, executable_path=executable_path or None)
         try:
             page = await (await browser.new_context()).new_page()
-            page.on("console", lambda m: m.type == "error" and not m.text.startswith("Failed to load resource")
-                    and console_errors.append(m.text))
-            page.on("response", lambda r: r.status >= 400 and failed.append(f"{r.request.method} {r.url} -> {r.status}"))
-            page.on("requestfailed", lambda r: "ERR_ABORTED" not in (r.failure or "")
-                    and failed.append(f"{r.method} {r.url} -> {r.failure}"))
+            signals.attach(page)
 
             stopped = False
             for step, result in zip(plan["steps"], steps):
                 try:
-                    if step["type"] == "goto":
-                        await page.goto(_rebase(step["url"], plan_base, base_url), wait_until="domcontentloaded", timeout=30_000)
-                        skipped = None
-                    else:
-                        skipped = await _run_action(page, step["action"])
+                    skipped = await run_step(page, step, plan_base, base_url)
                     result["status"], result["detail"] = ("skipped", skipped) if skipped else ("ok", "")
                 except Exception as err:
                     result["status"], result["detail"] = "failed", _first_line(err)
@@ -151,7 +173,7 @@ async def replay(plan: dict, *, base_url: str | None, headless: bool = True, exe
                 except Exception:
                     pass
                 for a, result in zip(plan["assertions"], checks):
-                    ok, detail = await _check(page, a, console_errors, failed)
+                    ok, detail = await _check(page, a, signals.console_errors, signals.failed, signals.page_errors)
                     result["status"], result["detail"] = ("passed" if ok else "failed"), detail
         finally:
             await browser.close()

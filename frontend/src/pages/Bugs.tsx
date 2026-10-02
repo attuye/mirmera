@@ -4,6 +4,7 @@ import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } f
 import { api, BugFiling, BugListItem, BugReview, Evidence, ORACLES, OracleHeuristic, Product, Reproducibility } from '../api/client'
 import FileToTracker, { FilingLinks } from '../components/FileToTracker'
 import RegressionTestPanel from '../components/RegressionTestPanel'
+import ReproductionPanel from '../components/ReproductionPanel'
 import { Screenshot, SignalList } from '../components/Evidence'
 
 const SEVERITY_COLOR: Record<string, string> = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-tertiary)' }
@@ -128,6 +129,7 @@ function BugDetail({ bug, onSaved, product, onProduct }: {
 }) {
   const [editing, setEditing] = useState(false)
   const [drafting, setDrafting] = useState(false)
+  const [testVersion, setTestVersion] = useState(0)  // remounts the regression panel after the agent makes a test
   const [error, setError] = useState<string | null>(null)
 
   async function draft() {
@@ -158,7 +160,7 @@ function BugDetail({ bug, onSaved, product, onProduct }: {
             <FileToTracker bug={bug} product={product} onProduct={onProduct}
               onFiled={(f: BugFiling) => onSaved({ ...bug, filings: [...bug.filings, f] })} />
           )}
-          {bug.kind === 'bug' && <RegressionTestPanel bug={bug} />}
+          {bug.kind === 'bug' && <RegressionTestPanel key={testVersion} bug={bug} />}
         </>
       ) : (
         <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
@@ -168,6 +170,7 @@ function BugDetail({ bug, onSaved, product, onProduct }: {
           <button onClick={() => setEditing(true)} style={quietButton}>Write it myself</button>
         </div>
       )}
+      {!editing && <ReproductionPanel bug={bug} onTestCreated={() => setTestVersion((v) => v + 1)} />}
       <ErrorLine message={error} />
     </div>
   )

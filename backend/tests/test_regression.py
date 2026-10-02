@@ -27,6 +27,7 @@ APP = b"""<!doctype html><title>KYC verify</title>
   <button type=submit>Verify</button>
 </form>
 <p role=status id=msg></p>
+<a href="http://127.0.0.1:9/">Elsewhere</a>
 <script>
 document.getElementById('f').addEventListener('submit', async (e) => {
   e.preventDefault()
@@ -39,13 +40,16 @@ document.getElementById('f').addEventListener('submit', async (e) => {
 
 class App(BaseHTTPRequestHandler):
     fixed = False
+    flaky = False  # Passport fails on every other request only: an intermittent bug
+    posts = 0
 
     def do_GET(self):
         self._send(200 if self.path == "/" else 404, APP if self.path == "/" else b"", "text/html")
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
-        broken = body == b"Passport" and not App.fixed
+        App.posts += 1
+        broken = body == b"Passport" and not App.fixed and (not App.flaky or App.posts % 2 == 1)
         self._send(500 if broken else 200, b'{"ok": %s}' % (b"false" if broken else b"true"), "application/json")
 
     def _send(self, status, body, ctype):
@@ -69,9 +73,9 @@ def app_url():
 
 @pytest.fixture(autouse=True)
 def bug_present():
-    App.fixed = False
+    App.fixed, App.flaky, App.posts = False, False, 0
     yield
-    App.fixed = False
+    App.fixed, App.flaky, App.posts = False, False, 0
 
 
 def wait_for(client, session, condition, timeout=10.0):

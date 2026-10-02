@@ -51,6 +51,8 @@ class MockProvider(LLMProvider):
             return json.dumps(self._duplicates(user))
         if task == "regression_test":
             return json.dumps(self._regression(user))
+        if task == "reproduce_step":
+            return json.dumps(self._reproduce_step(user))
         return json.dumps({"note": f"mock provider has no canned answer for task '{task}'"})
 
     @staticmethod
@@ -208,6 +210,53 @@ class MockProvider(LLMProvider):
         return {"charters": charters}
 
     # ---- bug reports ----
+
+    @staticmethod
+    def _reproduce_step(user: str) -> dict:
+        """Follows the recorded actions one per step, then claims the symptom the
+        recording points to (a failed request, an error, else the actual text)."""
+        bug = json.loads(_between(user, "bug") or "{}")
+        recorded = _between(user, "recorded")
+        hints_line = next((l for l in recorded.splitlines() if l.startswith("[")), "[]")
+        try:
+            hints = json.loads(hints_line.replace("‹", "<").replace("›", ">"))
+        except ValueError:
+            hints = []
+        usable = [h for h in hints if h.get("action") in ("click", "fill", "select", "check", "uncheck", "press")
+                  and (h.get("locator") or {}).get("method") not in (None, "css") and not h.get("in_frame")]
+        history = [l for l in _between(user, "history").splitlines() if re.match(r"\d+\. ", l)]
+        if any("-> not verified" in l for l in history):
+            return {"thought": "(mock) My claim could not be checked.",
+                    "action": {"kind": "give_up", "reason": "(mock) the symptom I expected did not show"}}
+        if len(history) < len(usable):
+            h = usable[len(history)]
+            act = {"click": {"kind": "click"}, "check": {"kind": "check"}, "uncheck": {"kind": "uncheck"},
+                   "select": {"kind": "select", "value": h.get("value")},
+                   "press": {"kind": "press", "key": h.get("key") or "Enter"},
+                   "fill": ({"kind": "fill_secret", "secret": h.get("secret")} if h.get("masked")
+                            else {"kind": "fill", "value": h.get("value", "")})}[h["action"]]
+            return {"thought": f"(mock) Repeat recorded action {len(history) + 1} of {len(usable)}.",
+                    "action": {**act, "locator": h["locator"]}}
+        page = _between(user, "page")
+        text = page + "\n" + recorded
+        failed = re.search(r"\[failed request[^\]]*\] \w+ (https?://\S+)", text)
+        console = re.search(r"\[console error[^\]]*\] (.{1,80})", text)
+        page_err = re.search(r"\[page error[^\]]*\] (.{1,80})", text)
+        if failed:
+            path = re.sub(r"^https?://[^/]+", "", failed.group(1)) or failed.group(1)
+            symptom = {"kind": "failed_request", "value": path}
+        elif page_err:
+            symptom = {"kind": "page_error", "value": page_err.group(1).strip()[:60]}
+        elif console:
+            symptom = {"kind": "console_error", "value": console.group(1).strip()[:60]}
+        elif bug.get("actual"):
+            symptom = {"kind": "text_visible", "value": bug["actual"][:60]}
+        else:
+            return {"thought": "(mock) Nothing recorded to go on.",
+                    "action": {"kind": "give_up", "reason": "(mock) no recorded actions or signals to follow"}}
+        return {"thought": "(mock) The recorded actions are done; check the symptom.",
+                "action": {"kind": "reproduced",
+                           "symptom": {**symptom, "explanation": "(mock) This is what the recording showed."}}}
 
     @staticmethod
     def _regression(user: str) -> dict:
