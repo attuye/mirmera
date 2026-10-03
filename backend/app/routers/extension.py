@@ -80,12 +80,14 @@ def to_signal(e: schemas.ExtensionEvent) -> Signal | None:
 @router.get("/sessions/active", response_model=list[schemas.ActiveSessionOut])
 def active_sessions(db: DBSession = Depends(get_db)):
     """Running sessions, newest first, for the extension's session picker."""
-    rows = (db.query(models.Session, models.Charter)
+    rows = (db.query(models.Session, models.Charter, models.Project)
             .join(models.Charter, models.Session.charter_id == models.Charter.id)
+            .join(models.Project, models.Charter.project_id == models.Project.id)
             .filter(models.Session.ended_at.is_(None))
             .order_by(models.Session.started_at.desc()).all())
     return [schemas.ActiveSessionOut(id=s.id, charter_mission=c.mission_statement, started_at=s.started_at,
-                                     paused=bool(s.paused_at)) for s, c in rows]
+                                     paused=bool(s.paused_at), project_id=p.id, project_name=p.name)
+            for s, c, p in rows]
 
 
 @router.post("/sessions/{session_id}/extension/events")

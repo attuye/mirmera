@@ -22,7 +22,7 @@ class TrackerError(Exception):
 
 
 class TrackerNotConfigured(TrackerError):
-    """Credentials or the product's target are missing (503)."""
+    """Credentials or the project's target are missing (503)."""
 
 
 class UnknownTracker(TrackerError):

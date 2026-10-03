@@ -7,13 +7,13 @@ const TARGET = 'http://localhost:5190/'
 // the request succeeds"; recorded clicks and typing are covered by the backend
 // tests with a real form.
 test('regression test: generate from the recording, read the code, replay it to see it catch the bug', async ({ page, api, request }) => {
-  const product = await api.product()
-  const charter = await api.charter(product.id, 'Explore the document list after login')
+  const project = await api.project()
+  const charter = await api.charter(project.id, 'Explore the document list after login')
   const session = await api.session(charter.id)
   const title = 'Documents fail to load on the upload page'
 
   await test.step('record the bug in the recorded browser', async () => {
-    await page.goto(`/sessions/${session.id}`)
+    await page.goto(`/projects/${project.id}/sessions/${session.id}`)
     const panel = page.getByRole('complementary', { name: 'Browser' })
     await panel.getByLabel('App URL').fill(TARGET)
     await panel.getByRole('button', { name: 'Open browser' }).click()
@@ -33,7 +33,7 @@ test('regression test: generate from the recording, read the code, replay it to 
   const panel = row.getByRole('region', { name: 'Regression test' })
 
   await test.step('generate: the code opens the page and asserts the request succeeds', async () => {
-    await page.goto('/bugs')
+    await page.goto(`/projects/${project.id}/bugs`)
     await row.getByRole('button', { name: new RegExp(title) }).click()
     await panel.getByRole('button', { name: 'Generate regression test' }).click()
     const code = panel.getByLabel('Test code')

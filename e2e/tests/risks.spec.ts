@@ -1,8 +1,8 @@
 import { expect, test } from './fixtures'
 
 test('plan from risks: model the product, review risks, save a charter', async ({ page, api }) => {
-  await api.product()
-  await page.goto('/risks')
+  const project = await api.project()
+  await page.goto(`/projects/${project.id}/risks`)
 
   await test.step('page starts empty', async () => {
     await expect(page.getByRole('heading', { name: 'Risks', level: 1 })).toBeVisible()
@@ -90,7 +90,7 @@ test('plan from risks: model the product, review risks, save a charter', async (
   })
 
   await test.step('everything survives a reload', async () => {
-    await page.goto('/risks')
+    await page.goto(`/projects/${project.id}/risks`)
     await expect(page.getByText('Accepted (3)')).toBeVisible()
     await expect(page.getByText('Questions for the team')).toBeVisible()
   })

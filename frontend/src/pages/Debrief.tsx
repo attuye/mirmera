@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { useProjectPath, useSessionProject } from '../project'
 import {
   api, Charter, CharterStatus, Debrief, ObservedRisk, OutlookItem, QUALITY_CRITERIA, SessionRecord,
 } from '../api/client'
@@ -78,6 +79,7 @@ function TimeSplit({ breakdown }: { breakdown: Record<string, number> }) {
 }
 
 function OutlookRow({ item, onSave }: { item: OutlookItem; onSave: () => Promise<void> }) {
+  const path = useProjectPath()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   async function save() {
@@ -92,7 +94,7 @@ function OutlookRow({ item, onSave }: { item: OutlookItem; onSave: () => Promise
           {item.reason && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 3 }}>Why: {item.reason}</div>}
         </div>
         {item.charter_id
-          ? <Link to="/charters/suggest" style={{ fontSize: 12, color: 'var(--accent)', whiteSpace: 'nowrap' }}>Saved as charter →</Link>
+          ? <Link to={path('/charters/suggest')} style={{ fontSize: 12, color: 'var(--accent)', whiteSpace: 'nowrap' }}>Saved as charter →</Link>
           : <button onClick={save} disabled={busy} style={{ ...quietButton, whiteSpace: 'nowrap' }}>{busy ? 'Saving…' : 'Save as charter'}</button>}
       </div>
       <ErrorLine message={error} />
@@ -104,6 +106,7 @@ function ObservedRiskRow({ risk, onPromote }: {
   risk: ObservedRisk
   onPromote: (p: { title: string; quality_criterion: string; impact: number; likelihood: number }) => Promise<void>
 }) {
+  const path = useProjectPath()
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState(risk.text.slice(0, 80))
   const [criterion, setCriterion] = useState<string>('capability')
@@ -131,7 +134,7 @@ function ObservedRiskRow({ risk, onPromote }: {
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, fontSize: 13 }}>{risk.text}</div>
         {risk.risk_id
-          ? <Link to="/risks" style={{ fontSize: 12, color: 'var(--accent)', whiteSpace: 'nowrap' }}>Added to risks →</Link>
+          ? <Link to={path('/risks')} style={{ fontSize: 12, color: 'var(--accent)', whiteSpace: 'nowrap' }}>Added to risks →</Link>
           : !open && <button onClick={() => setOpen(true)} style={{ ...quietButton, whiteSpace: 'nowrap' }}>Add as risk…</button>}
       </div>
       {open && !risk.risk_id && (
@@ -184,12 +187,14 @@ function RecordedEvidence({ items }: { items: Evidence[] }) {
 }
 
 export default function DebriefPage() {
+  const path = useProjectPath()
   const { sessionId } = useParams<{ sessionId: string }>()
   const [debrief, setDebrief] = useState<Debrief | null>(null)
   const [session, setSession] = useState<SessionRecord | null>(null)
   const [charter, setCharter] = useState<Charter | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [evidence, setEvidence] = useState<Evidence[]>([])
+  useSessionProject(session?.project_id)
 
   // Editable copies of the tester's text; saved together with one button.
   const [past, setPast] = useState('')
@@ -344,7 +349,7 @@ export default function DebriefPage() {
           {saved && !dirty && <span role="status" style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>Saved ✓</span>}
           {dirty && <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Unsaved changes</span>}
           <div style={{ flex: 1 }} />
-          <Link to="/debriefs" style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>All debriefs</Link>
+          <Link to={path('/debriefs')} style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>All debriefs</Link>
         </div>
         <div style={{ marginLeft: 58 }}><ErrorLine message={saveError} /></div>
       </main>

@@ -72,8 +72,8 @@ def start(bug_id: str, payload: schemas.ReproduceRequest, db: DBSession = Depend
         start_url = base_url + (first[len(origin(first)):] or "/") if not is_same_origin(first, base_url) else first
     origins = {origin(base_url)}
 
-    product = db.get(models.Product, bug.charter.product_id)
-    provider = get_provider(payload.provider or product.default_ai_provider)
+    project = db.get(models.Project, bug.charter.project_id)
+    provider = get_provider(payload.provider or project.default_ai_provider)
     evidence = [e for e in runner_api.evidence_for_bug(db, bug) if e.kind != "action"]
     ctx = agent.BugContext(
         report={"title": bug.title, "kind": bug.kind or "unreviewed", "description": bug.description,

@@ -17,28 +17,27 @@ export class Api {
     return response.json() as Promise<T>
   }
 
-  /** The app works on the first product; create it if this is a fresh database. */
-  async product(): Promise<{ id: string; name: string }> {
-    const products = await this.json<{ id: string; name: string }[]>(await this.ctx.get('/products'))
-    if (products.length) return products[0]
-    return this.json(await this.ctx.post('/products', { data: { name: 'AddisVerify KYC Platform', org_id: 'e2e' } }))
+  /** The project most specs share; created on a fresh database. */
+  async project(): Promise<{ id: string; name: string }> {
+    const projects = await this.json<{ id: string; name: string }[]>(await this.ctx.get('/projects'))
+    const shared = projects.find((p) => p.name === 'AddisVerify KYC Platform')
+    if (shared) return shared
+    return this.json(await this.ctx.post('/projects', { data: { name: 'AddisVerify KYC Platform', org_id: 'e2e' } }))
   }
 
-  /** A separate product, for specs whose data must not change the shared one
-   *  (risk refs like R1 are numbered per product). */
-  async newProduct(name: string): Promise<{ id: string; name: string }> {
-    // The app's pages work on the first product, so make sure that exists first.
-    await this.product()
-    return this.json(await this.ctx.post('/products', { data: { name, org_id: 'e2e' } }))
+  /** A separate project, for specs whose data must not change the shared one
+   *  (risk refs like R1 are numbered per project). */
+  async newProject(name: string): Promise<{ id: string; name: string }> {
+    return this.json(await this.ctx.post('/projects', { data: { name, org_id: 'e2e' } }))
   }
 
-  async charter(productId: string, mission: string, riskIds: string[] = []): Promise<{ id: string }> {
-    return this.json(await this.ctx.post(`/products/${productId}/charters`, { data: { mission_statement: mission, risk_ids: riskIds } }))
+  async charter(projectId: string, mission: string, riskIds: string[] = []): Promise<{ id: string }> {
+    return this.json(await this.ctx.post(`/projects/${projectId}/charters`, { data: { mission_statement: mission, risk_ids: riskIds } }))
   }
 
   /** A tester-added risk (accepted). Its ref (R1, R2…) depends on the risks already there. */
-  async risk(productId: string, title: string, impact: number, likelihood: number): Promise<{ id: string; ref: string }> {
-    return this.json(await this.ctx.post(`/products/${productId}/risks`, {
+  async risk(projectId: string, title: string, impact: number, likelihood: number): Promise<{ id: string; ref: string }> {
+    return this.json(await this.ctx.post(`/projects/${projectId}/risks`, {
       data: { title, failure_mode: `${title}, so fraud gets through`, quality_criterion: 'security', impact, likelihood },
     }))
   }
@@ -55,12 +54,12 @@ export class Api {
     return this.json(await this.ctx.post(`/sessions/${sessionId}/bugs`, { data: { title } }))
   }
 
-  async risks(productId: string): Promise<{ id: string; title: string; score: number; status: string; source: string }[]> {
-    return this.json(await this.ctx.get(`/products/${productId}/risks`))
+  async risks(projectId: string): Promise<{ id: string; title: string; score: number; status: string; source: string }[]> {
+    return this.json(await this.ctx.get(`/projects/${projectId}/risks`))
   }
 
-  async charters(productId: string): Promise<{ id: string; mission_statement: string; source: string }[]> {
-    return this.json(await this.ctx.get(`/products/${productId}/charters`))
+  async charters(projectId: string): Promise<{ id: string; mission_statement: string; source: string }[]> {
+    return this.json(await this.ctx.get(`/projects/${projectId}/charters`))
   }
 
   /** Saves the tester's review, so the bug can be filed. */

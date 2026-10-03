@@ -69,12 +69,12 @@ def test_ending_a_session_drafts_a_proof_debrief(ended):
     assert (d["ai_provider"], d["prompt_version"]) == ("scripted", "debrief-proof-v2")
 
 
-def test_the_draft_sees_notes_with_minutes_bugs_risks_and_time_split(client, product, monkeypatch):
-    risk = client.post(f"/products/{product['id']}/risks", json={
+def test_the_draft_sees_notes_with_minutes_bugs_risks_and_time_split(client, project, monkeypatch):
+    risk = client.post(f"/projects/{project['id']}/risks", json={
         "title": "Coupon lost on currency switch", "failure_mode": "Shoppers overpay",
         "quality_criterion": "capability", "impact": 5, "likelihood": 3,
     }).json()
-    charter = client.post(f"/products/{product['id']}/charters", json={
+    charter = client.post(f"/projects/{project['id']}/charters", json={
         "mission_statement": "Explore coupons with currencies", "risk_ids": [risk["id"]],
     }).json()
     s = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
@@ -125,7 +125,7 @@ def test_old_style_update_still_works(client, session, ended):
 
 # ---------- outlook -> charters ----------
 
-def test_outlook_charter_is_saved_once_with_the_session_risks(client, product, session, ended):
+def test_outlook_charter_is_saved_once_with_the_session_risks(client, project, session, ended):
     d = client.post(f"/sessions/{session['id']}/debrief/outlook/0/charter").json()
     charter_id = d["outlook"][0]["charter_id"]
     assert charter_id and d["outlook"][1]["charter_id"] is None
@@ -137,7 +137,7 @@ def test_outlook_charter_is_saved_once_with_the_session_risks(client, product, s
 
     again = client.post(f"/sessions/{session['id']}/debrief/outlook/0/charter")
     assert again.status_code == 409
-    assert len(client.get(f"/products/{product['id']}/charters").json()) == 2  # original + one follow-up
+    assert len(client.get(f"/projects/{project['id']}/charters").json()) == 2  # original + one follow-up
 
 
 def test_unknown_outlook_index_is_404(client, session, ended):
@@ -146,12 +146,12 @@ def test_unknown_outlook_index_is_404(client, session, ended):
 
 # ---------- observed risks -> risks ----------
 
-def test_observed_risk_is_promoted_once(client, product, session, ended):
+def test_observed_risk_is_promoted_once(client, project, session, ended):
     d = client.post(f"/sessions/{session['id']}/debrief/risks-observed/0/risk", json={
         "title": "Rounding differs by currency", "quality_criterion": "capability", "impact": 4, "likelihood": 3,
     }).json()
     risk_id = d["risks_observed"][0]["risk_id"]
-    risk = next(r for r in client.get(f"/products/{product['id']}/risks").json() if r["id"] == risk_id)
+    risk = next(r for r in client.get(f"/projects/{project['id']}/risks").json() if r["id"] == risk_id)
     assert (risk["title"], risk["score"], risk["status"]) == ("Rounding differs by currency", 12, "accepted")
     assert (risk["source"], risk["evidence"]) == ("session", "tester")
     assert risk["failure_mode"] == PROOF["risks_observed"][0]

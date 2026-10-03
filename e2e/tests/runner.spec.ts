@@ -3,14 +3,14 @@ import { expect, test } from './fixtures'
 const TARGET = 'http://localhost:5190/'
 
 test('recorded browser: signals, screenshots, bug evidence and the trace', async ({ page, api, request }) => {
-  // The shared product: the Bugs page lists the first product's bugs.
-  const product = await api.product()
-  const charter = await api.charter(product.id, 'Explore ID upload when the storage service fails')
+  // The shared project.
+  const project = await api.project()
+  const charter = await api.charter(project.id, 'Explore ID upload when the storage service fails')
   const session = await api.session(charter.id)
   const panel = page.getByRole('complementary', { name: 'Browser' })
 
   await test.step('open the recorded browser on the app under test', async () => {
-    await page.goto(`/sessions/${session.id}`)
+    await page.goto(`/projects/${project.id}/sessions/${session.id}`)
     await panel.getByLabel('App URL').fill(TARGET)
     await panel.getByRole('button', { name: 'Open browser' }).click()
     await expect(panel.getByRole('heading', { name: 'Recording browser' })).toBeVisible()
@@ -41,7 +41,7 @@ test('recorded browser: signals, screenshots, bug evidence and the trace', async
   })
 
   await test.step('the bug shows its screenshot and what the page reported before it', async () => {
-    await page.goto('/bugs')
+    await page.goto(`/projects/${project.id}/bugs`)
     const bug = page.getByRole('article', { name: 'Upload widget never loads' })
     await bug.getByRole('button', { name: /Upload widget never loads/ }).click()
     const recorded = bug.getByRole('region', { name: 'Recorded evidence' })
@@ -59,7 +59,7 @@ test('recorded browser: signals, screenshots, bug evidence and the trace', async
   })
 
   await test.step('ending the session closes the browser and keeps the trace and network log', async () => {
-    await page.goto(`/sessions/${session.id}`)
+    await page.goto(`/projects/${project.id}/sessions/${session.id}`)
     await page.getByRole('button', { name: 'End Session' }).click()
     await expect(page).toHaveURL(new RegExp(`/sessions/${session.id}/debrief$`))
     const recorded = page.getByRole('region', { name: 'Recorded evidence' })

@@ -58,8 +58,15 @@ npm install
 npm run dev
 ```
 
-App at http://localhost:5173. On first load it creates a demo product
-("AddisVerify KYC Platform") if none exists yet.
+App at http://localhost:5173. It opens on the Projects page: create a project
+for the app you are testing (name, description, app URL). Everything else
+(risks, charters, sessions, bugs, debriefs) lives inside a project, under
+`/projects/<id>/...`, and the project's Settings page holds its environments,
+default tester, testing mission, AI provider and tracker targets.
+
+Upgrading an existing `mirmera.db`: on start the backend renames the old
+`products` table to `projects` (and `product_id` columns to `project_id`),
+keeping all data. Your old demo product shows up as a project.
 
 ### Regression tests from a bug
 
@@ -129,8 +136,8 @@ browser, and for flaky ones.
 Reviewed bugs and questions can be filed from the Bugs page. Put the
 credentials in `backend/.env` (see `.env.example`: a GitHub fine-grained
 token with Issues read/write, and/or your Jira Cloud site, email and API
-token), restart the backend, then set the product's GitHub repo or Jira
-project key in the filing panel.
+token), restart the backend, then set the project's GitHub repo or Jira
+project key in the filing panel or the project's Settings page.
 
 Before filing, **Check for duplicates** searches the tracker's open and closed
 issues for words from the bug title and has the AI rate each match (likely
@@ -190,7 +197,8 @@ opens the report with screenshots and a step-by-step trace.
 
 This is the Phase 1 scaffold from the scoping discussion:
 
-- ✅ Product → Artifact → Charter → Session → Note → Bug → Debrief data model
+- ✅ Project → Artifact → Charter → Session → Note → Bug → Debrief data model
+- ✅ Projects: a Projects home, project-scoped pages, and per-project settings (app URL, environments, default tester)
 - ✅ Swappable AI provider interface, Claude implemented end-to-end
   (charter suggestion, debrief drafting, artifact summarization)
 - ✅ Evidence-trail bug logging (preceding session notes auto-snapshotted

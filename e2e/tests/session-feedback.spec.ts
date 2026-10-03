@@ -3,10 +3,10 @@ import { expect, test } from './fixtures'
 // Runs after risks.spec.ts (alphabetical order, one worker), so the risk added
 // here never takes the R1/R2 refs that spec expects.
 test('feedback loop: a session suggests a re-score, the tester decides, the risk keeps the history', async ({ page, api }) => {
-  const product = await api.product()
+  const project = await api.project()
   const title = 'Liveness check accepts printed photos'
-  const risk = await api.risk(product.id, title, 5, 2)
-  const charter = await api.charter(product.id, 'Explore selfie liveness with printed photos', [risk.id])
+  const risk = await api.risk(project.id, title, 5, 2)
+  const charter = await api.charter(project.id, 'Explore selfie liveness with printed photos', [risk.id])
   const session = await api.session(charter.id)
   await api.note(session.id, 'test', 'Held a printed photo up to the camera')
   await api.bug(session.id, 'Printed photo passes liveness')
@@ -15,7 +15,7 @@ test('feedback loop: a session suggests a re-score, the tester decides, the risk
   const card = scores.getByRole('listitem', { name: `${risk.ref} ${title}` })
 
   await test.step('end the session; the debrief offers suggestions and flags unreviewed bugs', async () => {
-    await page.goto(`/sessions/${session.id}`)
+    await page.goto(`/projects/${project.id}/sessions/${session.id}`)
     await page.getByRole('button', { name: 'End Session' }).click()
     await expect(page).toHaveURL(new RegExp(`/sessions/${session.id}/debrief$`))
     await expect(scores.getByText(/1 bug from this session not reviewed yet/)).toBeVisible()
@@ -37,7 +37,7 @@ test('feedback loop: a session suggests a re-score, the tester decides, the risk
   })
 
   await test.step('the risk has the new score and the decision in its history', async () => {
-    await page.goto('/risks')
+    await page.goto(`/projects/${project.id}/risks`)
     const riskCard = page.getByRole('article', { name: `${risk.ref} ${title}` })
     await expect(riskCard.getByText(`${risk.ref} · 20`)).toBeVisible()
     await expect(riskCard.getByText(/after a session \(adjusted by tester\)/)).toBeVisible()
@@ -46,7 +46,7 @@ test('feedback loop: a session suggests a re-score, the tester decides, the risk
     await expect(history.getByRole('listitem')).toHaveCount(1)
     await expect(history).toContainText('Accepted')
     await expect(history).toContainText('Your note: Reproduced with two different photos')
-    await expect(history.getByRole('link', { name: 'session' })).toHaveAttribute('href', `/sessions/${session.id}/debrief`)
+    await expect(history.getByRole('link', { name: 'session' })).toHaveAttribute('href', `/projects/${project.id}/sessions/${session.id}/debrief`)
   })
 
   await test.step('a manual re-score is added to the same history', async () => {

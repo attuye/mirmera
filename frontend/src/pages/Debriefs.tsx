@@ -2,21 +2,19 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import { api, DebriefListItem } from '../api/client'
+import { useProject, useProjectPath } from '../project'
 
 export default function DebriefsList() {
   const [debriefs, setDebriefs] = useState<DebriefListItem[]>([])
   const [loading, setLoading] = useState(true)
 
+  const { project } = useProject()
+  const path = useProjectPath()
+
   useEffect(() => {
-    api.listProducts().then((ps) => {
-      const p = ps[0]
-      if (!p) return setLoading(false)
-      api.listDebriefs(p.id).then((d) => {
-        setDebriefs(d)
-        setLoading(false)
-      }).catch(console.error)
-    }).catch(console.error)
-  }, [])
+    setLoading(true)
+    api.listDebriefs(project.id).then(setDebriefs).catch(console.error).finally(() => setLoading(false))
+  }, [project.id])
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
@@ -33,7 +31,7 @@ export default function DebriefsList() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {debriefs.map((d) => (
-            <Link key={d.id} to={`/sessions/${d.session_id}/debrief`} style={{
+            <Link key={d.id} to={path(`/sessions/${d.session_id}/debrief`)} style={{
               display: 'block', border: '1px solid var(--border)', borderRadius: 10,
               padding: '14px 18px', color: 'var(--text)',
             }}>

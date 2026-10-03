@@ -15,51 +15,51 @@ from app.timeutil import utcnow
 router = APIRouter(tags=["risks"])
 
 
-def _product_or_404(db: DBSession, product_id: str) -> models.Product:
-    product = db.get(models.Product, product_id)
-    if not product:
-        raise HTTPException(404, "Product not found")
-    return product
+def _project_or_404(db: DBSession, project_id: str) -> models.Project:
+    project = db.get(models.Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    return project
 
 
-def _latest_model(db: DBSession, product_id: str) -> models.ProductModel | None:
+def _latest_model(db: DBSession, project_id: str) -> models.ProductModel | None:
     return (
         db.query(models.ProductModel)
-        .filter(models.ProductModel.product_id == product_id)
+        .filter(models.ProductModel.project_id == project_id)
         .order_by(models.ProductModel.created_at.desc())
         .first()
     )
 
 
-def _next_ref_number(db: DBSession, product_id: str) -> int:
-    refs = db.query(models.Risk.ref).filter(models.Risk.product_id == product_id).all()
+def _next_ref_number(db: DBSession, project_id: str) -> int:
+    refs = db.query(models.Risk.ref).filter(models.Risk.project_id == project_id).all()
     numbers = [int(r[1:]) for (r,) in refs if r[1:].isdigit()]
     return max(numbers, default=0) + 1
 
 
 # ---------- product model ----------
 
-@router.post("/products/{product_id}/product-model", response_model=schemas.ProductModelOut)
-async def build_product_model(product_id: str, payload: schemas.ProductModelRequest, db: DBSession = Depends(get_db)):
-    product = _product_or_404(db, product_id)
+@router.post("/projects/{project_id}/product-model", response_model=schemas.ProductModelOut)
+async def build_product_model(project_id: str, payload: schemas.ProductModelRequest, db: DBSession = Depends(get_db)):
+    project = _project_or_404(db, project_id)
     artifacts = (
         db.query(models.Artifact)
-        .filter(models.Artifact.id.in_(payload.artifact_ids), models.Artifact.product_id == product_id)
+        .filter(models.Artifact.id.in_(payload.artifact_ids), models.Artifact.project_id == project_id)
         .all()
     )
     if not artifacts:
-        raise HTTPException(400, "No matching artifacts found for this product")
+        raise HTTPException(400, "No matching artifacts found for this project")
 
-    provider = get_provider(payload.provider or product.default_ai_provider)
+    provider = get_provider(payload.provider or project.default_ai_provider)
     result, truncated = await tasks.build_product_model(
         provider,
-        project_name=product.name,
-        testing_mission=product.testing_mission,
+        project_name=project.name,
+        testing_mission=project.testing_mission,
         # The full content, not the cached summary: the model needs the detail.
         artifacts=[(a.type, a.label, a.raw_content or a.ai_summary or "") for a in artifacts],
     )
     snapshot = models.ProductModel(
-        product_id=product_id,
+        project_id=project_id,
         summary=result.summary,
         elements=[e.model_dump() for e in result.elements],
         unknowns=result.unknowns,
@@ -76,10 +76,10 @@ async def build_product_model(product_id: str, payload: schemas.ProductModelRequ
     return out
 
 
-@router.get("/products/{product_id}/product-model", response_model=schemas.ProductModelOut)
-def get_product_model(product_id: str, db: DBSession = Depends(get_db)):
-    _product_or_404(db, product_id)
-    snapshot = _latest_model(db, product_id)
+@router.get("/projects/{project_id}/product-model", response_model=schemas.ProductModelOut)
+def get_product_model(project_id: str, db: DBSession = Depends(get_db)):
+    _project_or_404(db, project_id)
+    snapshot = _latest_model(db, project_id)
     if not snapshot:
         raise HTTPException(404, "No product model yet. Build one from artifacts first.")
     return snapshot
@@ -87,23 +87,23 @@ def get_product_model(product_id: str, db: DBSession = Depends(get_db)):
 
 # ---------- risks ----------
 
-@router.post("/products/{product_id}/risks/analyze", response_model=list[schemas.RiskOut])
-async def analyze_risks(product_id: str, payload: schemas.RiskAnalyzeRequest, db: DBSession = Depends(get_db)):
-    product = _product_or_404(db, product_id)
-    snapshot = _latest_model(db, product_id)
+@router.post("/projects/{project_id}/risks/analyze", response_model=list[schemas.RiskOut])
+async def analyze_risks(project_id: str, payload: schemas.RiskAnalyzeRequest, db: DBSession = Depends(get_db)):
+    project = _project_or_404(db, project_id)
+    snapshot = _latest_model(db, project_id)
     if not snapshot:
-        raise HTTPException(409, "Build a product model first: POST /products/{id}/product-model")
+        raise HTTPException(409, "Build a product model first: POST /projects/{id}/product-model")
 
     existing = (
         db.query(models.Risk)
-        .filter(models.Risk.product_id == product_id, models.Risk.status != "retired")
+        .filter(models.Risk.project_id == project_id, models.Risk.status != "retired")
         .all()
     )
-    provider = get_provider(payload.provider or product.default_ai_provider)
+    provider = get_provider(payload.provider or project.default_ai_provider)
     proposed = await tasks.analyze_risks(
         provider,
-        project_name=product.name,
-        testing_mission=product.testing_mission,
+        project_name=project.name,
+        testing_mission=project.testing_mission,
         product_model={"summary": snapshot.summary, "elements": snapshot.elements, "unknowns": snapshot.unknowns},
         max_risks=payload.max_risks,
         existing_titles=[r.title for r in existing],
@@ -111,11 +111,11 @@ async def analyze_risks(product_id: str, payload: schemas.RiskAnalyzeRequest, db
 
     # Number by score, so the riskiest new item gets the lowest ref.
     proposed = sorted(proposed, key=lambda r: r.impact * r.likelihood, reverse=True)
-    next_number = _next_ref_number(db, product_id)
+    next_number = _next_ref_number(db, project_id)
     created = []
     for offset, r in enumerate(proposed):
         risk = models.Risk(
-            product_id=product_id,
+            project_id=project_id,
             ref=f"R{next_number + offset}",
             **r.model_dump(),
             status="proposed",
@@ -132,22 +132,22 @@ async def analyze_risks(product_id: str, payload: schemas.RiskAnalyzeRequest, db
     return created
 
 
-@router.get("/products/{product_id}/risks", response_model=list[schemas.RiskOut])
-def list_risks(product_id: str, status: schemas.RiskStatus | None = None, db: DBSession = Depends(get_db)):
+@router.get("/projects/{project_id}/risks", response_model=list[schemas.RiskOut])
+def list_risks(project_id: str, status: schemas.RiskStatus | None = None, db: DBSession = Depends(get_db)):
     """Highest score first. Retired risks are left out unless asked for."""
-    _product_or_404(db, product_id)
-    query = db.query(models.Risk).filter(models.Risk.product_id == product_id)
+    _project_or_404(db, project_id)
+    query = db.query(models.Risk).filter(models.Risk.project_id == project_id)
     query = query.filter(models.Risk.status == status) if status else query.filter(models.Risk.status != "retired")
     risks = query.all()
     return sorted(risks, key=lambda r: (-r.score, int(r.ref[1:]) if r.ref[1:].isdigit() else 0))
 
 
-@router.post("/products/{product_id}/risks", response_model=schemas.RiskOut)
-def create_risk(product_id: str, payload: schemas.RiskCreate, db: DBSession = Depends(get_db)):
-    _product_or_404(db, product_id)
+@router.post("/projects/{project_id}/risks", response_model=schemas.RiskOut)
+def create_risk(project_id: str, payload: schemas.RiskCreate, db: DBSession = Depends(get_db)):
+    _project_or_404(db, project_id)
     risk = models.Risk(
-        product_id=product_id,
-        ref=f"R{_next_ref_number(db, product_id)}",
+        project_id=project_id,
+        ref=f"R{_next_ref_number(db, project_id)}",
         **payload.model_dump(),
         evidence="tester",
         status="accepted",
@@ -200,24 +200,24 @@ def update_risk(risk_id: str, payload: schemas.RiskUpdate, db: DBSession = Depen
 
 # ---------- charters from risks ----------
 
-@router.post("/products/{product_id}/charters/from-risks", response_model=schemas.ChartersFromRisksOut)
-async def charters_from_risks(product_id: str, payload: schemas.ChartersFromRisksRequest, db: DBSession = Depends(get_db)):
+@router.post("/projects/{project_id}/charters/from-risks", response_model=schemas.ChartersFromRisksOut)
+async def charters_from_risks(project_id: str, payload: schemas.ChartersFromRisksRequest, db: DBSession = Depends(get_db)):
     """Drafts charters for accepted risks. Nothing is saved: accept a draft by
-    posting it to /products/{id}/charters, like the other suggestions."""
-    product = _product_or_404(db, product_id)
-    query = db.query(models.Risk).filter(models.Risk.product_id == product_id, models.Risk.status == "accepted")
+    posting it to /projects/{id}/charters, like the other suggestions."""
+    project = _project_or_404(db, project_id)
+    query = db.query(models.Risk).filter(models.Risk.project_id == project_id, models.Risk.status == "accepted")
     if payload.risk_ids is not None:
         query = query.filter(models.Risk.id.in_(payload.risk_ids))
     risks = sorted(query.all(), key=lambda r: -r.score)
     if not risks:
         raise HTTPException(400, "No accepted risks to plan from. Accept at least one risk first.")
 
-    snapshot = _latest_model(db, product_id)
-    provider = get_provider(payload.provider or product.default_ai_provider)
+    snapshot = _latest_model(db, project_id)
+    provider = get_provider(payload.provider or project.default_ai_provider)
     drafts = await tasks.charters_from_risks(
         provider,
-        project_name=product.name,
-        testing_mission=product.testing_mission,
+        project_name=project.name,
+        testing_mission=project.testing_mission,
         product_summary=snapshot.summary if snapshot else "(no product model yet)",
         risks=[
             {

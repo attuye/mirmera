@@ -92,8 +92,8 @@ async def suggest(session_id: str, payload: schemas.RiskSuggestRequest, db: DBSe
         .order_by(models.Evidence.captured_at).all()
     )
     debrief = session.debrief
-    product = db.get(models.Product, charter.product_id)
-    provider = get_provider(payload.provider or product.default_ai_provider)
+    project = db.get(models.Project, charter.project_id)
+    provider = get_provider(payload.provider or project.default_ai_provider)
 
     result = await tasks.suggest_risk_updates(
         provider,

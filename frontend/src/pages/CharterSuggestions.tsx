@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
-import { API_URL, api, Charter, CharterSuggestion, Product } from '../api/client'
+import TesterField, { useTesterName } from '../components/TesterField'
+import { errorText } from '../components/ui'
+import { API_URL, api, Charter, CharterSuggestion } from '../api/client'
+import { useProject, useProjectPath } from '../project'
 
 const PRIORITY_COLOR: Record<string, string> = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-tertiary)' }
 
 export default function CharterSuggestions() {
-  const [product, setProduct] = useState<Product | null>(null)
+  const { project } = useProject()
+  const path = useProjectPath()
+  const [tester, setTester] = useTesterName(project)
+  const [startError, setStartError] = useState<string | null>(null)
   const [diffText, setDiffText] = useState('')
   const [suggestions, setSuggestions] = useState<CharterSuggestion[]>([])
   const [busy, setBusy] = useState(false)
@@ -15,21 +21,17 @@ export default function CharterSuggestions() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    api.listProducts().then((ps) => {
-      const p = ps[0] ?? null
-      setProduct(p)
-      if (p) api.listCharters(p.id).then(setExistingCharters).catch(console.error)
-    }).catch(console.error)
-  }, [])
+    api.listCharters(project.id).then(setExistingCharters).catch(console.error)
+  }, [project.id])
 
   async function generate() {
-    if (!product || !diffText.trim()) return
+    if (!diffText.trim()) return
     setBusy(true)
     setError(null)
     try {
-      const artifact = await api.createArtifact(product.id, { type: 'diff', label: 'pasted diff', raw_content: diffText })
+      const artifact = await api.createArtifact(project.id, { type: 'diff', label: 'pasted diff', raw_content: diffText })
 
-      const result = await api.suggestCharters(product.id, [artifact.id])
+      const result = await api.suggestCharters(project.id, [artifact.id])
       setSuggestions(result)
     } catch (e) {
       // The backend explains provider problems (missing key, Ollama not running...).
@@ -45,8 +47,7 @@ export default function CharterSuggestions() {
   }
 
   async function accept(s: CharterSuggestion, index: number) {
-    if (!product) return
-    const charter = await api.saveCharter(product.id, {
+    const charter = await api.saveCharter(project.id, {
       mission_statement: s.mission_statement,
       rationale: s.rationale,
       risk_areas: s.risk_areas,
@@ -57,19 +58,25 @@ export default function CharterSuggestions() {
     setSuggestions((prev) => prev.filter((_, i) => i !== index))
   }
 
-  async function openExisting(c: any) {
+  async function openExisting(c: Charter) {
+    setStartError(null)
     if (c.status === 'active') {
       try {
         const session = await api.getActiveSession(c.id)
-        navigate(`/sessions/${session.id}`)
+        navigate(path(`/sessions/${session.id}`))
       } catch {
         console.warn('Charter marked active but no open session found')
       }
       return
     }
     if (c.status === 'proposed') {
-      const session = await api.startSession(c.id, 'attu')
-      navigate(`/sessions/${session.id}`)
+      if (!tester.trim()) { setStartError('Enter your name under "Testing as" first.'); return }
+      try {
+        const session = await api.startSession(c.id, tester.trim())
+        navigate(path(`/sessions/${session.id}`))
+      } catch (e) {
+        setStartError(errorText(e))
+      }
     }
   }
 
@@ -80,9 +87,13 @@ export default function CharterSuggestions() {
         <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>Suggest Charters</div>
         {existingCharters.length > 0 && (
           <div style={{ marginBottom: 28 }}>
-            <div className="mono" style={{ fontSize: 10.5, color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: 10 }}>
-              Existing charters ({existingCharters.length})
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', maxWidth: 700, marginBottom: 10 }}>
+              <div className="mono" style={{ fontSize: 10.5, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
+                Existing charters ({existingCharters.length})
+              </div>
+              <TesterField value={tester} onChange={setTester} />
             </div>
+            {startError && <div role="alert" style={{ color: 'var(--danger)', fontSize: 12.5, marginBottom: 8 }}>{startError}</div>}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 700 }}>
               {existingCharters.map((c) => (
                 <div

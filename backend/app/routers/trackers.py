@@ -39,8 +39,8 @@ def _reviewed(bug: models.Bug) -> None:
         raise HTTPException(409, "Review this bug first (save it as a bug or a question); only reviewed reports are filed.")
 
 
-def _product(db: DBSession, bug: models.Bug) -> models.Product:
-    return db.get(models.Product, bug.charter.product_id)
+def _project(db: DBSession, bug: models.Bug) -> models.Project:
+    return db.get(models.Project, bug.charter.project_id)
 
 
 def _issue_title(bug: models.Bug) -> str:
@@ -59,18 +59,18 @@ def _labels(tracker: str, bug: models.Bug) -> list[str]:
     return ["mirmera"] + (["question"] if bug.kind == "question" else [])
 
 
-@router.get("/products/{product_id}/trackers", response_model=list[schemas.TrackerStatus])
-def tracker_status(product_id: str, db: DBSession = Depends(get_db)):
-    """Which trackers this product can file to, and what is missing for the others."""
-    product = db.get(models.Product, product_id)
-    if not product:
-        raise HTTPException(404, "Product not found")
+@router.get("/projects/{project_id}/trackers", response_model=list[schemas.TrackerStatus])
+def tracker_status(project_id: str, db: DBSession = Depends(get_db)):
+    """Which trackers this project can file to, and what is missing for the others."""
+    project = db.get(models.Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
     out = []
     for name in TRACKER_NAMES:
-        missing = missing_settings(name, product)
+        missing = missing_settings(name, project)
         out.append(schemas.TrackerStatus(
             name=name, configured=not missing, missing=missing,
-            target=product.github_repo if name == "github" else product.jira_project_key,
+            target=project.github_repo if name == "github" else project.jira_project_key,
             supports_attachments=name == "jira", is_mock=settings.mock_trackers,
         ))
     return out
@@ -81,15 +81,15 @@ async def check_duplicates(bug_id: str, payload: schemas.TrackerRequest, db: DBS
     """Search the tracker (open and closed issues) and have the AI rate each match."""
     bug = _bug_or_404(db, bug_id)
     _reviewed(bug)
-    product = _product(db, bug)
-    tracker = get_tracker(payload.tracker, product)
+    project = _project(db, bug)
+    tracker = get_tracker(payload.tracker, project)
     words = keywords(bug.title)
     issues = await tracker.search(words) if words else []
     out = schemas.DuplicateCheckOut(tracker=tracker.name, target=tracker.target, searched_for=words, candidates=[])
     if not issues:
         return out
 
-    provider = get_provider(payload.provider or product.default_ai_provider)
+    provider = get_provider(payload.provider or project.default_ai_provider)
     # Issue text comes from the tracker and can be written by anyone: data only, and tag-proof.
     result = await tasks.check_duplicates(
         provider,
@@ -139,7 +139,7 @@ async def file_bug(bug_id: str, payload: schemas.FileRequest, db: DBSession = De
     if done:
         raise HTTPException(409, f"Already filed to {payload.tracker} as {done.issue_key}: {done.issue_url}")
 
-    tracker = get_tracker(payload.tracker, _product(db, bug))
+    tracker = get_tracker(payload.tracker, _project(db, bug))
     evidence = runner_api.evidence_for_bug(db, bug)
     blocks = build_report(bug, evidence, attaches_files=tracker.supports_attachments,
                           note=payload.note, occurrence=payload.mode == "comment")

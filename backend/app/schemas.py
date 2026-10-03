@@ -6,32 +6,122 @@ from typing import Optional, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-# ---- Products / Artifacts -------------------------------------------------
+# ---- Projects / Artifacts -------------------------------------------------
 
-class ProductCreate(BaseModel):
-    name: str
-    org_id: str
+def _http_url(value: Optional[str]) -> Optional[str]:
+    """"" clears; anything else must be an http(s) address."""
+    if value is None:
+        return None
+    value = value.strip()
+    if not value:
+        return ""
+    if not re.match(r"^https?://[^\s/]+", value):
+        raise ValueError("must start with http:// or https://")
+    return value
 
 
-class ProductOut(BaseModel):
+class Environment(BaseModel):
+    """A named address of the app under test, e.g. staging."""
+    name: str = Field(min_length=1, max_length=40)
+    url: str
+
+    @field_validator("url")
+    @classmethod
+    def _url(cls, v: str) -> str:
+        v = _http_url(v)
+        if not v:
+            raise ValueError("is required")
+        return v
+
+    @field_validator("name")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("is required")
+        return v
+
+
+def _unique_environments(envs: Optional[list[Environment]]) -> Optional[list[Environment]]:
+    if envs is None:
+        return None
+    names = [e.name.lower() for e in envs]
+    if len(names) != len(set(names)):
+        raise ValueError("environment names must be unique")
+    return envs
+
+
+class ProjectCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    org_id: str = "local"
+    description: Optional[str] = Field(default=None, max_length=300)
+    app_url: Optional[str] = None
+
+    @field_validator("app_url")
+    @classmethod
+    def _app_url(cls, v: Optional[str]) -> Optional[str]:
+        return _http_url(v) or None
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("is required")
+        return v
+
+
+class ProjectOut(BaseModel):
     id: str
     name: str
     org_id: str
+    description: Optional[str] = None
     default_ai_provider: str
     testing_mission: Optional[str] = None
     github_repo: Optional[str] = None
     jira_project_key: Optional[str] = None
+    app_url: Optional[str] = None
+    environments: list[Environment] = []
+    default_tester: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
+    @field_validator("environments", mode="before")
+    @classmethod
+    def _none_is_empty(cls, v):
+        return v or []
 
-class ProductUpdate(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1)
+
+class ProjectSummary(ProjectOut):
+    """A project on the Projects page, with a few counts."""
+    risk_count: int = 0
+    charter_count: int = 0
+    session_count: int = 0
+    bug_count: int = 0
+    last_activity: Optional[datetime] = None
+
+
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    description: Optional[str] = Field(default=None, max_length=300)
     testing_mission: Optional[str] = None
     default_ai_provider: Optional[str] = None  # validated against the registered providers
     github_repo: Optional[str] = Field(default=None, pattern=r"^$|^[\w.-]+/[\w.-]+$")  # owner/repo; "" clears
     jira_project_key: Optional[str] = Field(default=None, pattern=r"^$|^[A-Z][A-Z0-9_]+$")  # e.g. KYC; "" clears
+    app_url: Optional[str] = None  # "" clears
+    environments: Optional[list[Environment]] = Field(default=None, max_length=10)
+    default_tester: Optional[str] = Field(default=None, max_length=60)  # "" clears
+
+    @field_validator("app_url")
+    @classmethod
+    def _app_url(cls, v: Optional[str]) -> Optional[str]:
+        return _http_url(v)
+
+    @field_validator("environments")
+    @classmethod
+    def _envs(cls, v: Optional[list[Environment]]) -> Optional[list[Environment]]:
+        return _unique_environments(v)
 
 
 class ArtifactCreate(BaseModel):
@@ -43,7 +133,7 @@ class ArtifactCreate(BaseModel):
 
 class ArtifactOut(BaseModel):
     id: str
-    product_id: str
+    project_id: str
     type: str
     label: str
     ai_summary: Optional[str] = None
@@ -74,7 +164,7 @@ class DebriefDraft(BaseModel):
 
 class CharterSuggestRequest(BaseModel):
     artifact_ids: list[str]
-    provider: Optional[str] = None  # override the product's default for this call
+    provider: Optional[str] = None  # override the project's default for this call
 
 
 class CharterCreate(BaseModel):
@@ -84,14 +174,14 @@ class CharterCreate(BaseModel):
     priority: Literal["high", "medium", "low"] = "medium"
     source: Literal["ai-suggested", "risk-based", "follow-up", "manual"] = "manual"
     source_artifact_id: Optional[str] = None
-    risk_ids: list[str] = []  # risks this charter investigates (must belong to the product)
+    risk_ids: list[str] = []  # risks this charter investigates (must belong to the project)
     test_ideas: list[str] = []
     oracles: list[str] = []
 
 
 class CharterOut(BaseModel):
     id: str
-    product_id: str
+    project_id: str
     mission_statement: str
     rationale: Optional[str]
     risk_areas: list[str]
@@ -123,6 +213,7 @@ class SessionCreate(BaseModel):
 class SessionOut(BaseModel):
     id: str
     charter_id: str
+    project_id: Optional[str] = None
     tester_id: str
     started_at: datetime
     ended_at: Optional[datetime]
@@ -365,7 +456,7 @@ class ProductModelRequest(BaseModel):
 
 class ProductModelOut(BaseModel):
     id: str
-    product_id: str
+    project_id: str
     summary: str
     elements: list[ModelElement]
     unknowns: list[str]
@@ -408,7 +499,7 @@ class RiskUpdate(BaseModel):
 
 class RiskOut(BaseModel):
     id: str
-    product_id: str
+    project_id: str
     ref: str
     title: str
     failure_mode: str
@@ -439,7 +530,7 @@ class ChartersFromRisksRequest(BaseModel):
 
 
 class RiskCharterDraft(BaseModel):
-    """A charter proposal; save it with POST /products/{id}/charters to use it."""
+    """A charter proposal; save it with POST /projects/{id}/charters to use it."""
     mission_statement: str
     rationale: str
     priority: Literal["high", "medium", "low"]
@@ -945,6 +1036,8 @@ class ActiveSessionOut(BaseModel):
     charter_mission: str
     started_at: datetime
     paused: bool
+    project_id: str
+    project_name: str
 
 
 class ExtensionEvent(BaseModel):

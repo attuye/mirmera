@@ -76,12 +76,12 @@ def test_a_note_phrased_as_a_question_is_drafted_as_a_question(client, session):
     assert draft["oracle"] is None
 
 
-def test_draft_gets_charter_risks_trail_and_environment(client, product, session, monkeypatch):
-    risk = client.post(f"/products/{product['id']}/risks", json={
+def test_draft_gets_charter_risks_trail_and_environment(client, project, session, monkeypatch):
+    risk = client.post(f"/projects/{project['id']}/risks", json={
         "title": "Coupon lost on currency switch", "failure_mode": "Shoppers overpay",
         "quality_criterion": "capability", "impact": 5, "likelihood": 3,
     }).json()
-    charter = client.post(f"/products/{product['id']}/charters", json={
+    charter = client.post(f"/projects/{project['id']}/charters", json={
         "mission_statement": "Explore coupons with currencies", "risk_ids": [risk["id"]],
     }).json()
     risky_session = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
@@ -169,9 +169,9 @@ def test_ai_draft_survives_the_review(client, bug):
     assert saved["expected"] == "Discount kept"  # the tester's version
 
 
-def test_product_bug_list_carries_the_report(client, product, bug):
+def test_project_bug_list_carries_the_report(client, project, bug):
     client.patch(f"/bugs/{bug['id']}", json=GOOD_REVIEW)
-    listed = client.get(f"/products/{product['id']}/bugs").json()[0]
+    listed = client.get(f"/projects/{project['id']}/bugs").json()[0]
     assert listed["kind"] == "bug"
     assert listed["oracle_heuristic"] == "claims"
     assert listed["charter_mission"] == "Explore checkout with coupons"

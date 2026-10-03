@@ -18,8 +18,8 @@ async function chromeWithExtension(): Promise<BrowserContext> {
 }
 
 test('chrome extension: record a tab of your own browser into a session', async ({ page, api }) => {
-  const product = await api.product()
-  const charter = await api.charter(product.id, 'Explore document search in the everyday browser')
+  const project = await api.project()
+  const charter = await api.charter(project.id, 'Explore document search in the everyday browser')
   const session = await api.session(charter.id)
   const chrome = await chromeWithExtension()
 
@@ -61,7 +61,7 @@ test('chrome extension: record a tab of your own browser into a session', async 
     })
 
     await test.step('Mirmera shows the recording live', async () => {
-      await page.goto(`/sessions/${session.id}`)
+      await page.goto(`/projects/${project.id}/sessions/${session.id}`)
       // A note logged from the popup while the session screen is open appears without a reload.
       await popup.getByLabel('Test').check()
       await popup.getByLabel('What are you observing?').fill('Searched for passport')

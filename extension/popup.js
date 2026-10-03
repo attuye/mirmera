@@ -33,9 +33,10 @@ async function render() {
   if (rec) {
     if (!sessions.length) { try { sessions = await send('sessions') } catch (_) { /* shown below */ } }
     const s = sessions.find((x) => x.id === rec.sessionId)
-    $('mission').textContent = s ? s.charter_mission : 'Recording'
+    $('mission').textContent = s ? `${s.project_name} · ${s.charter_mission}` : 'Recording'
     $('tab').textContent = status.tab ? `Tab: ${status.tab.title || status.tab.url}` : 'The recorded tab was closed.'
-    $('open').href = `${status.settings.appUrl.replace(/\/+$/, '')}/sessions/${rec.sessionId}`
+    const base = status.settings.appUrl.replace(/\/+$/, '')
+    $('open').href = s ? `${base}/projects/${s.project_id}/sessions/${rec.sessionId}` : `${base}/sessions/${rec.sessionId}`
     return
   }
   try {
@@ -48,7 +49,7 @@ async function render() {
   for (const s of sessions) {
     const o = document.createElement('option')
     o.value = s.id
-    o.textContent = (s.paused ? '(paused) ' : '') + s.charter_mission
+    o.textContent = `${s.paused ? '(paused) ' : ''}${s.project_name} · ${s.charter_mission}`
     $('session').append(o)
   }
   $('no-sessions').hidden = sessions.length > 0

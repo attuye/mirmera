@@ -13,32 +13,42 @@ def gen_id() -> str:
     return str(uuid.uuid4())
 
 
-class Product(Base):
-    __tablename__ = "products"
+class Project(Base):
+    """What a tester works on: one app or product under test. Everything else
+    (specs, the product model, risks, charters, and through them sessions and
+    bugs) belongs to a project. Called "product" before the projects step."""
+    __tablename__ = "projects"
     id = Column(String, primary_key=True, default=gen_id)
     org_id = Column(String, nullable=False, index=True)  # multi-tenancy hook from day one
     name = Column(String, nullable=False)
     created_at = Column(DateTime, default=utcnow)
+    description = Column(Text, nullable=True)  # one line shown on the project card
 
     default_ai_provider = Column(String, default=lambda: settings.default_ai_provider)
     # What this testing is for, e.g. "Find release blockers in multi-currency checkout".
     # Steers the product model, risk analysis and charters. Added in the risk-model step.
     testing_mission = Column(Text, nullable=True)
-    # Where this product's bugs are filed (credentials are in backend/.env)
+    # Where this project's bugs are filed (credentials are in backend/.env)
     github_repo = Column(String, nullable=True)  # "owner/repo"
     jira_project_key = Column(String, nullable=True)  # e.g. "KYC"
 
-    artifacts = relationship("Artifact", back_populates="product", cascade="all, delete-orphan")
-    charters = relationship("Charter", back_populates="product", cascade="all, delete-orphan")
-    risks = relationship("Risk", back_populates="product", cascade="all, delete-orphan")
-    product_models = relationship("ProductModel", back_populates="product", cascade="all, delete-orphan")
+    # Where the app under test runs. app_url is the default for the recorded browser,
+    # the reproduction agent and regression runs; environments are other named addresses.
+    app_url = Column(String, nullable=True)
+    environments = Column(JSON, nullable=True)  # [{"name": "staging", "url": "https://..."}]
+    default_tester = Column(String, nullable=True)  # prefilled when starting a session
+
+    artifacts = relationship("Artifact", back_populates="project", cascade="all, delete-orphan")
+    charters = relationship("Charter", back_populates="project", cascade="all, delete-orphan")
+    risks = relationship("Risk", back_populates="project", cascade="all, delete-orphan")
+    product_models = relationship("ProductModel", back_populates="project", cascade="all, delete-orphan")
 
 
 class Artifact(Base):
     """A spec, git diff, or bug-history import that feeds the AI charter/risk suggester."""
     __tablename__ = "artifacts"
     id = Column(String, primary_key=True, default=gen_id)
-    product_id = Column(String, ForeignKey("products.id"), nullable=False)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
     type = Column(String, nullable=False)  # "spec" | "diff" | "bug_import"
     label = Column(String, nullable=False)  # e.g. "kyc-spec-v3.md", "diff #245"
     raw_content = Column(Text, nullable=True)
@@ -46,7 +56,7 @@ class Artifact(Base):
     ai_summary = Column(Text, nullable=True)  # cached, regenerated when raw_content changes
     created_at = Column(DateTime, default=utcnow)
 
-    product = relationship("Product", back_populates="artifacts")
+    project = relationship("Project", back_populates="artifacts")
 
 
 # Which risks a charter investigates (many-to-many).
@@ -64,7 +74,7 @@ class ProductModel(Base):
     can see how your understanding of the product changed over time."""
     __tablename__ = "product_models"
     id = Column(String, primary_key=True, default=gen_id)
-    product_id = Column(String, ForeignKey("products.id"), nullable=False, index=True)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
     summary = Column(Text, nullable=False)
     elements = Column(JSON, default=list)  # [{"category", "name", "description", "sources"}]
     unknowns = Column(JSON, default=list)  # questions to ask the team
@@ -74,7 +84,7 @@ class ProductModel(Base):
     prompt_version = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
-    product = relationship("Product", back_populates="product_models")
+    project = relationship("Project", back_populates="product_models")
 
 
 class Risk(Base):
@@ -84,8 +94,8 @@ class Risk(Base):
     accepts them; that review is where the context-driven judgement happens."""
     __tablename__ = "risks"
     id = Column(String, primary_key=True, default=gen_id)
-    product_id = Column(String, ForeignKey("products.id"), nullable=False, index=True)
-    ref = Column(String, nullable=False)  # short per-product label: R1, R2...
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    ref = Column(String, nullable=False)  # short per-project label: R1, R2...
     title = Column(String, nullable=False)
     failure_mode = Column(Text, nullable=False)  # what fails, for whom, when
     quality_criterion = Column(String, nullable=False)  # capability, security, usability...
@@ -104,7 +114,7 @@ class Risk(Base):
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
-    product = relationship("Product", back_populates="risks")
+    project = relationship("Project", back_populates="risks")
     charters = relationship("Charter", secondary=charter_risks, back_populates="risks")
     changes = relationship("RiskChange", back_populates="risk", cascade="all, delete-orphan",
                            order_by="RiskChange.created_at")
@@ -117,7 +127,7 @@ class Risk(Base):
 class Charter(Base):
     __tablename__ = "charters"
     id = Column(String, primary_key=True, default=gen_id)
-    product_id = Column(String, ForeignKey("products.id"), nullable=False)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False)
     mission_statement = Column(Text, nullable=False)
     rationale = Column(Text, nullable=True)
     risk_areas = Column(JSON, default=list)  # list[str]
@@ -130,7 +140,7 @@ class Charter(Base):
     test_ideas = Column(JSON, default=list)  # starting ideas, not scripted steps
     oracles = Column(JSON, default=list)  # FEW HICCUPPS heuristics to spot problems
 
-    product = relationship("Product", back_populates="charters")
+    project = relationship("Project", back_populates="charters")
     sessions = relationship("Session", back_populates="charter")
     risks = relationship("Risk", secondary=charter_risks, back_populates="charters")
 
@@ -156,6 +166,11 @@ class Session(Base):
     debrief = relationship("Debrief", back_populates="session", uselist=False, cascade="all, delete-orphan")
     evidence = relationship("Evidence", back_populates="session", cascade="all, delete-orphan",
                             order_by="Evidence.captured_at")
+
+    @property
+    def project_id(self) -> str | None:
+        """So a session link can find its project's pages."""
+        return self.charter.project_id if self.charter else None
 
 
 class Note(Base):

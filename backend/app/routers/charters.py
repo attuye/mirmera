@@ -9,26 +9,26 @@ from app.database import get_db
 router = APIRouter(tags=["charters"])
 
 
-@router.post("/products/{product_id}/charters/suggest", response_model=list[schemas.CharterSuggestion])
-async def suggest_charters(product_id: str, payload: schemas.CharterSuggestRequest, db: DBSession = Depends(get_db)):
-    product = db.get(models.Product, product_id)
-    if not product:
-        raise HTTPException(404, "Product not found")
+@router.post("/projects/{project_id}/charters/suggest", response_model=list[schemas.CharterSuggestion])
+async def suggest_charters(project_id: str, payload: schemas.CharterSuggestRequest, db: DBSession = Depends(get_db)):
+    project = db.get(models.Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
 
     artifacts = (
         db.query(models.Artifact)
-        .filter(models.Artifact.id.in_(payload.artifact_ids), models.Artifact.product_id == product_id)
+        .filter(models.Artifact.id.in_(payload.artifact_ids), models.Artifact.project_id == project_id)
         .all()
     )
     if not artifacts:
-        raise HTTPException(400, "No matching artifacts found for this product")
+        raise HTTPException(400, "No matching artifacts found for this project")
 
     artifact_context = "\n\n".join(
         f"[{a.type}] {a.label}\n{a.ai_summary or a.raw_content or ''}" for a in artifacts
     )
     recent = (
         db.query(models.Charter)
-        .filter(models.Charter.product_id == product_id)
+        .filter(models.Charter.project_id == project_id)
         .order_by(models.Charter.created_at.desc())
         .limit(10)
         .all()
@@ -37,20 +37,20 @@ async def suggest_charters(product_id: str, payload: schemas.CharterSuggestReque
     
     # Provider problems (unknown name, missing key, model down) are turned into
     # clear HTTP errors by the handlers in app/main.py
-    provider = get_provider(payload.provider or product.default_ai_provider)
+    provider = get_provider(payload.provider or project.default_ai_provider)
     return await tasks.suggest_charters(
         provider,
-        project_name=product.name, 
+        project_name=project.name, 
         artifact_context=artifact_context,
         recent_charters=recent_charters,
     )
 
 
-@router.post("/products/{product_id}/charters", response_model=schemas.CharterOut)
-def save_charter(product_id: str, payload: schemas.CharterCreate, db: DBSession = Depends(get_db)):
-    product = db.get(models.Product, product_id)
-    if not product:
-        raise HTTPException(404, "Product not found")
+@router.post("/projects/{project_id}/charters", response_model=schemas.CharterOut)
+def save_charter(project_id: str, payload: schemas.CharterCreate, db: DBSession = Depends(get_db)):
+    project = db.get(models.Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
 
     data = payload.model_dump()
     risk_ids = data.pop("risk_ids")
@@ -58,14 +58,14 @@ def save_charter(product_id: str, payload: schemas.CharterCreate, db: DBSession 
     if risk_ids:
         risks = (
             db.query(models.Risk)
-            .filter(models.Risk.id.in_(risk_ids), models.Risk.product_id == product_id)
+            .filter(models.Risk.id.in_(risk_ids), models.Risk.project_id == project_id)
             .all()
         )
         missing = set(risk_ids) - {r.id for r in risks}
         if missing:
-            raise HTTPException(400, f"Unknown risk ids for this product: {sorted(missing)}")
+            raise HTTPException(400, f"Unknown risk ids for this project: {sorted(missing)}")
 
-    charter = models.Charter(product_id=product_id, **data)
+    charter = models.Charter(project_id=project_id, **data)
     charter.risks = risks
     db.add(charter)
     db.commit()
@@ -73,9 +73,9 @@ def save_charter(product_id: str, payload: schemas.CharterCreate, db: DBSession 
     return charter
 
 
-@router.get("/products/{product_id}/charters", response_model=list[schemas.CharterOut])
-def list_charters(product_id: str, db: DBSession = Depends(get_db)):
-    return db.query(models.Charter).filter(models.Charter.product_id == product_id).all()
+@router.get("/projects/{project_id}/charters", response_model=list[schemas.CharterOut])
+def list_charters(project_id: str, db: DBSession = Depends(get_db)):
+    return db.query(models.Charter).filter(models.Charter.project_id == project_id).all()
 
 @router.get("/charters/{charter_id}", response_model=schemas.CharterOut)
 def get_charter(charter_id: str, db: DBSession = Depends(get_db)):

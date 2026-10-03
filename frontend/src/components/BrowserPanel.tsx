@@ -1,7 +1,7 @@
 /** Session screen panel for the recorded browser: open it on the app under
  *  test, take screenshots, watch what the page reports, stop it. */
 import { useCallback, useEffect, useState } from 'react'
-import { api, Evidence, RunnerStatus } from '../api/client'
+import { api, Environment, Evidence, Project, projectUrls, RunnerStatus } from '../api/client'
 import { RecordingFiles, SIGNAL_KINDS, SignalList, countLine, shortUrl } from './Evidence'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from './ui'
 
@@ -31,14 +31,20 @@ export function useRunner(sessionId: string | undefined) {
 
 type Runner = ReturnType<typeof useRunner>
 
-export default function BrowserPanel({ sessionId, runner, disabled }: { sessionId: string; runner: Runner; disabled?: boolean }) {
+export default function BrowserPanel({ sessionId, runner, disabled, project }: {
+  sessionId: string; runner: Runner; disabled?: boolean; project?: Project
+}) {
   const { status, evidence, refresh, setStatus } = runner
   const [url, setUrl] = useState('')
   const [busy, setBusy] = useState<null | 'start' | 'shot' | 'stop'>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // Prefill with the last address used in this session.
+  // Prefill with the last address used in this session, else the project's app URL.
   useEffect(() => { if (status?.start_url) setUrl((current) => current || status.start_url!) }, [status?.start_url])
+  useEffect(() => {
+    if (status && !status.start_url && project?.app_url) setUrl((current) => current || project.app_url!)
+  }, [status, project?.app_url])
+  const environments = project ? projectUrls(project) : []
 
   async function act(kind: 'start' | 'shot' | 'stop', fn: () => Promise<unknown>) {
     setBusy(kind)
@@ -97,6 +103,7 @@ export default function BrowserPanel({ sessionId, runner, disabled }: { sessionI
                 {busy === 'start' ? 'Opening…' : 'Open browser'}
               </button>
             </div>
+            {environments.length > 1 && <EnvironmentChoice environments={environments} current={url} onPick={setUrl} />}
           </form>
         </>
       )}
@@ -155,5 +162,24 @@ export default function BrowserPanel({ sessionId, runner, disabled }: { sessionI
         <div style={{ marginTop: 14 }}><RecordingFiles items={evidence} /></div>
       )}
     </aside>
+  )
+}
+
+/** One click to use one of the project's addresses. */
+export function EnvironmentChoice({ environments, current, onPick }: {
+  environments: Environment[]; current: string; onPick: (url: string) => void
+}) {
+  return (
+    <div role="group" aria-label="Environments" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+      {environments.map((e) => {
+        const on = current.trim() === e.url
+        return (
+          <button key={e.url} type="button" title={e.url} aria-pressed={on} onClick={() => onPick(e.url)} style={{
+            fontSize: 11.5, padding: '4px 9px', borderRadius: 6, border: '1px solid var(--border)',
+            background: on ? 'var(--accent-bg)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-secondary)',
+          }}>{e.name}</button>
+        )
+      })}
+    </div>
   )
 }

@@ -33,14 +33,14 @@ def client():
 
 
 @pytest.fixture
-def product(client):
-    return client.post("/products", json={"name": "ShopFlow", "org_id": "addisverify"}).json()
+def project(client):
+    return client.post("/projects", json={"name": "ShopFlow", "org_id": "addisverify"}).json()
 
 
 @pytest.fixture
-def charter(client, product):
+def charter(client, project):
     return client.post(
-        f"/products/{product['id']}/charters",
+        f"/projects/{project['id']}/charters",
         json={"mission_statement": "Explore checkout with coupons", "risk_areas": ["pricing"]},
     ).json()
 

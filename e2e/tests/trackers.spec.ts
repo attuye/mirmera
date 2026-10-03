@@ -4,8 +4,8 @@ import { expect, test } from './fixtures'
 // each starting with two issues ("Upload widget fails to load on Safari" open,
 // "Expired national ID accepted at upload" closed).
 test('file a reviewed bug: set up, check duplicates, add an occurrence on GitHub, file new in Jira', async ({ page, api }) => {
-  const product = await api.product()
-  const charter = await api.charter(product.id, 'Explore ID upload across browsers')
+  const project = await api.project()
+  const charter = await api.charter(project.id, 'Explore ID upload across browsers')
   const session = await api.session(charter.id)
   const title = 'Upload widget fails to load on Chrome'
   const bug = await api.bug(session.id, title)
@@ -19,10 +19,10 @@ test('file a reviewed bug: set up, check duplicates, add an occurrence on GitHub
   const panel = row.getByRole('region', { name: 'File in tracker' })
 
   await test.step('open the reviewed bug; GitHub needs the repo first', async () => {
-    await page.goto('/bugs')
+    await page.goto(`/projects/${project.id}/bugs`)
     await row.getByRole('button', { name: new RegExp(title) }).click()
     await expect(panel.getByText('Mock trackers (MOCK_TRACKERS=true)', { exact: false })).toBeVisible()
-    await panel.getByLabel('GitHub repo for this product').fill('addisverify/kyc')
+    await panel.getByLabel('GitHub repo for this project').fill('addisverify/kyc')
     await panel.getByRole('button', { name: 'Save' }).click()
     await expect(panel.getByRole('tab', { name: /GitHub addisverify\/kyc/ })).toBeVisible()
   })
@@ -51,7 +51,7 @@ test('file a reviewed bug: set up, check duplicates, add an occurrence on GitHub
 
   await test.step('in Jira the tester files a new issue anyway: the verdict informs, the tester decides', async () => {
     await panel.getByRole('tab', { name: /Jira/ }).click()
-    await panel.getByLabel('Jira project key for this product').fill('KYC')
+    await panel.getByLabel('Jira project key for this project').fill('KYC')
     await panel.getByRole('button', { name: 'Save' }).click()
     await panel.getByRole('button', { name: 'Check for duplicates' }).click()
     await expect(panel.getByRole('listitem', { name: /KYC-1 / })).toContainText('Likely duplicate')

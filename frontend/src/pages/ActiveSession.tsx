@@ -5,6 +5,7 @@ import Sidebar from '../components/Sidebar'
 import { errorText } from '../components/ui'
 import BrowserPanel, { useRunner } from '../components/BrowserPanel'
 import { Screenshot, clock } from '../components/Evidence'
+import { useProject, useProjectPath, useSessionProject } from '../project'
 
 const TAGS: { key: Note['tag']; label: string; color: string }[] = [
   { key: 'test', label: 'Test', color: 'var(--info)' },
@@ -48,6 +49,10 @@ export default function ActiveSession() {
   const [tag, setTag] = useState<Note['tag']>('test')
   const [startedAt, setStartedAt] = useState<string>()
   const navigate = useNavigate()
+  const { project } = useProject()
+  const path = useProjectPath()
+  const [sessionProjectId, setSessionProjectId] = useState<string | null>(null)
+  useSessionProject(sessionProjectId)
   const [ending, setEnding] = useState(false)
   const [saving, setSaving] = useState(false)
   const [logError, setLogError] = useState<string | null>(null)
@@ -74,6 +79,7 @@ export default function ActiveSession() {
       setPaused(!!session.paused_at)
       setPausedAt(session.paused_at)
       setTotalPausedSeconds(session.total_paused_seconds)
+      setSessionProjectId(session.project_id)
       api.getCharter(session.charter_id).then((charter) => {
         setCharterMission(charter.mission_statement)
       }).catch(console.error)
@@ -106,7 +112,7 @@ export default function ActiveSession() {
     if (!sessionId) return
     setEnding(true)
     await api.endSession(sessionId)
-    navigate(`/sessions/${sessionId}/debrief`)
+    navigate(path(`/sessions/${sessionId}/debrief`))
   }
 
   async function togglePause() {
@@ -217,7 +223,7 @@ export default function ActiveSession() {
               ))}
             </div>
           </div>
-          {sessionId && <BrowserPanel sessionId={sessionId} runner={runner} disabled={ending} />}
+          {sessionId && <BrowserPanel sessionId={sessionId} runner={runner} disabled={ending} project={project} />}
         </div>
       </div>
     </div>
