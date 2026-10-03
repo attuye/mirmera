@@ -61,7 +61,7 @@ function NewProjectForm({ onCancel }: { onCancel?: () => void }) {
             placeholder="http://localhost:4000" />
           <div style={{ fontSize: 11.5, color: 'var(--text-quiet)', marginTop: 5 }}>
             Where the app under test runs. Used by the recorded browser, the reproduction agent and regression runs.
-            More environments can be added in the project's settings.
+            After creating the project, add more environments (staging, production…) under <b>Settings</b> in the sidebar.
           </div>
         </div>
       </div>

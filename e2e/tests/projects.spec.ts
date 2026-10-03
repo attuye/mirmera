@@ -18,12 +18,15 @@ test('projects: create one, set it up, work inside it, switch away', async ({ pa
     await expect(page).toHaveURL(/\/projects\/[^/]+\/dashboard$/)
     await expect(page.getByRole('heading', { name })).toBeVisible()
     await expect(page.getByText('Mobile money wallet')).toBeVisible()
+    const nudge = page.getByRole('note', { name: 'Finish setting up' })
+    await expect(nudge).toHaveText(/add a default tester, and any other environments\./)
+    await nudge.getByRole('link', { name: 'Open Settings →' }).click()
+    await expect(page).toHaveURL(/\/settings$/)
     await expect(page.getByRole('combobox', { name: 'Project' })).toHaveValue(/.+/)
-    projectUrl = page.url().replace(/\/dashboard$/, '')
+    projectUrl = page.url().replace(/\/(dashboard|settings)$/, '')
   })
 
   await test.step('settings: environments and a default tester', async () => {
-    await page.getByRole('link', { name: 'Settings', exact: true }).click()
     await expect(page.getByLabel('App URL (default)')).toHaveValue('http://localhost:5190')
     await page.getByRole('button', { name: '+ Add environment' }).click()
     await page.getByLabel('Environment 1 name').fill('staging')
@@ -46,6 +49,7 @@ test('projects: create one, set it up, work inside it, switch away', async ({ pa
   await test.step('start a session as the default tester; the browser panel knows the addresses', async () => {
     await page.getByRole('link', { name: 'Dashboard', exact: true }).click()
     await expect(page.getByLabel('Tester name')).toHaveValue('Attu')
+    await expect(page.getByRole('note', { name: 'Finish setting up' })).toHaveCount(0)
     await page.getByText('Explore sending money to a wrong number').click()
     await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/sessions/[^/]+$`))
 
