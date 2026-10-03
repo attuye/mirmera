@@ -100,8 +100,15 @@ def delete_project(db: DBSession, project: models.Project) -> dict:
     bug_ids = [b.id for b in db.query(models.Bug.id).filter(models.Bug.session_id.in_(session_ids))] if session_ids else []
     _check_sessions_idle(session_ids)
     _check_bugs_idle(db, bug_ids)
+    from app.regression import suite
+    running = db.query(models.RegressionSuiteRun.id).filter(models.RegressionSuiteRun.project_id == pid,
+                                                           models.RegressionSuiteRun.status == "running").all()
+    if any(r.id in suite.ACTIVE for r in running):
+        raise BusyError("The regression tests are running for this project. Cancel the run or let it finish first.")
     counts: Counter = Counter()
     _delete_sessions(db, session_ids, counts)
+    counts["suite_runs"] += db.query(models.RegressionSuiteRun).filter(
+        models.RegressionSuiteRun.project_id == pid).delete(synchronize_session=False)
     risk_ids = [r.id for r in db.query(models.Risk.id).filter(models.Risk.project_id == pid)]
     if risk_ids:
         counts["risk_changes"] += db.query(models.RiskChange).filter(models.RiskChange.risk_id.in_(risk_ids)).delete(synchronize_session=False)

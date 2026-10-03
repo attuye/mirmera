@@ -1269,3 +1269,42 @@ class IsolationRunOut(BaseModel):
 class Deleted(BaseModel):
     """What a delete removed, e.g. {"sessions": 2, "bugs": 3, "evidence": 140}."""
     deleted: dict[str, int]
+
+
+# ---------- regression suite ----------
+
+class SuiteRequest(BaseModel):
+    base_url: Optional[str] = Field(default=None, pattern=r"^https?://")  # None: each test's recorded address
+
+
+class SuiteTest(BaseModel):
+    """A bug's latest regression test, for the project's Regression page."""
+    bug_id: str
+    bug_title: str
+    test_id: str
+    filename: str
+    known_failing: bool
+    base_url: Optional[str] = None
+    outcome: Optional[str] = None  # last replay
+    meaning: Optional[str] = None
+    replayed_at: Optional[datetime] = None
+    created_at: datetime
+
+
+class SuiteRunOut(BaseModel):
+    id: str
+    project_id: str
+    status: str
+    base_url: Optional[str] = None
+    total: int
+    results: list[dict] = []
+    detail: Optional[str] = None
+    created_at: datetime
+    finished_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("results", mode="before")
+    @classmethod
+    def _none_is_empty(cls, v):
+        return v or []
