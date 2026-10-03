@@ -67,6 +67,8 @@ export default function Dashboard() {
           }}>+ New Session</Link>
         </div>
 
+        <SetupNudge />
+
         {loading ? (
           <div style={{ color: 'var(--text-secondary)' }}>Loading…</div>
         ) : (
@@ -114,6 +116,26 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/** Until a project has an app URL and a default tester, point to Settings. Environments
+ *  are optional, so they are suggested but never keep the nudge on screen. */
+function SetupNudge() {
+  const { project } = useProject()
+  const path = useProjectPath()
+  const missing = [!project.app_url && 'an app URL', !project.default_tester && 'a default tester'].filter(Boolean) as string[]
+  if (!missing.length) return null
+  return (
+    <div role="note" aria-label="Finish setting up" style={{
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, maxWidth: 700, marginBottom: 18,
+      background: 'var(--accent-bg)', border: '1px solid var(--border)', borderRadius: 10, padding: '11px 16px', fontSize: 13,
+    }}>
+      <span style={{ color: 'var(--text-secondary)' }}>
+        Finish setting up: add {missing.join(' and ')}{project.environments.length ? '' : ', and any other environments'}.
+      </span>
+      <Link to={path('/settings')} style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>Open Settings →</Link>
     </div>
   )
 }
