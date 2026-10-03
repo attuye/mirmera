@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from app.ai.base import ProviderError, ProviderNotConfigured, UnknownProvider
 from app.config import settings
 from app.database import Base, add_missing_columns, apply_renames, engine
-from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension
+from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension, isolate
 from app.runner import RunnerConflict, RunnerUnavailable, manager as runner_manager
 from app.trackers import TrackerError, TrackerNotConfigured, UnknownTracker
 
@@ -91,6 +91,7 @@ app.include_router(risk_feedback.router)
 app.include_router(trackers.router)
 app.include_router(regression.router)
 app.include_router(reproduce.router)
+app.include_router(isolate.router)
 
 
 @app.get("/health")
