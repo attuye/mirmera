@@ -377,3 +377,23 @@ class ReproductionRun(Base):
     prompt_version = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow)
     finished_at = Column(DateTime, nullable=True)
+
+
+class IsolationRun(Base):
+    """Replays a bug's steps with one recorded value changed at a time, to find
+    which ones the bug depends on. Variants are saved as they finish."""
+    __tablename__ = "isolation_runs"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    bug_id = Column(String, ForeignKey("bugs.id"), nullable=False, index=True)
+    status = Column(String, default="running")  # running | done | not_reproduced | cancelled | error
+    base_url = Column(String, nullable=False)
+    symptom = Column(JSON, nullable=False)  # {"kind": "failed_request" | "text", "value"}
+    baseline = Column(JSON, nullable=True)  # {"result", "detail"}
+    variants = Column(JSON, default=list)  # [{"n", "step", "field", "change", "result", "detail"}]
+    total = Column(Integer, default=0)  # variants planned
+    summary = Column(JSON, nullable=True)  # {"depends_on": [...], "irrelevant": [...], "inconclusive": [...]}
+    detail = Column(Text, nullable=True)
+    cancel_requested = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=utcnow)
+    finished_at = Column(DateTime, nullable=True)
