@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 from typing import Optional, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 
 # ---- Projects / Artifacts -------------------------------------------------
@@ -903,6 +903,31 @@ class LLMRegressionPlan(BaseModel):
     steps: list[PlanStep] = Field(min_length=1)
     assertions: list[PlanAssertion] = Field(min_length=1)
     assumptions: list[str] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_incomplete_assertions(cls, data):
+        """One incomplete check (a url check without the URL, a text check without a
+        locator) should not throw away a plan whose other checks are fine, which
+        smaller local models often produce. Incomplete checks are dropped and listed
+        in assumptions, so the tester sees what is missing. If no check survives,
+        validation fails as before and the AI is asked again."""
+        if not isinstance(data, dict) or not isinstance(data.get("assertions"), list):
+            return data
+        kept, dropped = [], []
+        for raw in data["assertions"]:
+            try:
+                PlanAssertion.model_validate(raw)
+                kept.append(raw)
+            except ValidationError as err:
+                reason = err.errors()[0]["msg"].removeprefix("Value error, ")
+                why = raw.get("why") if isinstance(raw, dict) else None
+                dropped.append(f"Mirmera dropped a check the AI left incomplete ({reason})"
+                               + (f": {why}" if why else "") + ". Add it by hand if it matters.")
+        if not kept or not dropped:
+            return data
+        assumptions = data.get("assumptions") if isinstance(data.get("assumptions"), list) else []
+        return {**data, "assertions": kept, "assumptions": [*assumptions, *dropped]}
 
 
 class RegressionRequest(BaseModel):

@@ -28,6 +28,10 @@ Assertions:
   request in what the page reported, and no_console_errors when the bug is a
   script error. Prefer user-visible checks when both apply; using both is fine.
 - why: one sentence linking the check to the oracle.
+- Each kind needs these fields, or the check is unusable and gets dropped:
+  visible / hidden: locator · text / value: locator and expected ·
+  url: expected (a fragment the URL should contain, e.g. "/documents") ·
+  no_failed_requests: url_contains · no_console_errors / no_page_errors: nothing else.
 
 assumptions: everything the tester must check before trusting the test.
 

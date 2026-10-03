@@ -166,7 +166,7 @@ def test_the_generated_test_replays_the_actions_and_asserts_the_oracle(client, r
     assert "test.fail(true, " in code  # known failing until the fix
     assert 'failedRequests.filter((r) => r.includes("/api/verify"))' in code
     assert "// Oracle: Product (consistency within the product). National ID verifies; Passport should too" in code
-    assert (test["ai_provider"], test["prompt_version"]) == ("mock", "regression-test-v1")
+    assert (test["ai_provider"], test["prompt_version"]) == ("mock", "regression-test-v2")
 
 
 def test_not_known_failing_leaves_out_test_fail(client, recorded_bug):

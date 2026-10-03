@@ -28,7 +28,7 @@ PROMPT_VERSIONS = {
     "bug_report": "bug-report-v2",
     "risk_update": "risk-update-v1",
     "duplicate_check": "duplicate-check-v1",
-    "regression_test": "regression-test-v1",
+    "regression_test": "regression-test-v2",
 }
 PLANNING_TOKENS = 4000
 MAX_ARTIFACT_CHARS = 15_000
