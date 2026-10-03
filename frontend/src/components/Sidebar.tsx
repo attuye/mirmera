@@ -47,7 +47,7 @@ function ProjectSwitcher({ projectId }: { projectId: string }) {
         color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--font-ui)',
       }}>
         {projects.length === 0 && <option value={projectId}>Loading…</option>}
-        {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        {projects.filter((p) => !p.archived_at || p.id === projectId).map((p) => <option key={p.id} value={p.id}>{p.name}{p.archived_at ? ' (archived)' : ''}</option>)}
       </select>
       <Link to="/projects" style={{ display: 'inline-block', fontSize: 12, color: 'var(--text-tertiary)', marginTop: 7 }}>
         All projects

@@ -1,8 +1,9 @@
 /** A project's settings, saved together. */
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
-import { AI_PROVIDERS, api, Environment, Project, ProjectChanges } from '../api/client'
+import { AI_PROVIDERS, api, deletedText, Environment, Project, ProjectChanges } from '../api/client'
 import { useProject } from '../project'
 
 interface Form {
@@ -174,7 +175,59 @@ export default function ProjectSettings() {
           </div>
           <ErrorLine message={error} />
         </form>
+        <DangerZone />
       </main>
     </div>
+  )
+}
+
+/** Archive (hide from the Projects page, keep everything) or delete for good. */
+function DangerZone() {
+  const { project, setProject } = useProject()
+  const navigate = useNavigate()
+  const [typed, setTyped] = useState('')
+  const [busy, setBusy] = useState<null | 'archive' | 'delete'>(null)
+  const [error, setError] = useState<string | null>(null)
+  const archived = !!project.archived_at
+
+  async function run(kind: 'archive' | 'delete', fn: () => Promise<void>) {
+    setBusy(kind); setError(null)
+    try { await fn() } catch (e) { setError(errorText(e)) } finally { setBusy(null) }
+  }
+  const danger = { ...quietButton, color: 'var(--danger)', borderColor: 'var(--danger-bg)' }
+
+  return (
+    <section aria-label="Archive or delete" style={{ borderTop: '1px solid var(--border-soft)', marginTop: 28, padding: '22px 0', display: 'grid', gridTemplateColumns: '220px 1fr', gap: 24 }}>
+      <div>
+        <h2 style={{ fontSize: 14.5, fontWeight: 600, margin: 0, color: 'var(--danger)' }}>Archive or delete</h2>
+        <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '5px 0 0', lineHeight: 1.5 }}>
+          Archiving hides the project from the Projects page and keeps everything. Deleting can't be undone.
+        </p>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 560 }}>
+        <div>
+          <div style={{ fontSize: 13, marginBottom: 6 }}>
+            {archived ? 'This project is archived: it only shows on the Projects page under Show archived.' : 'Done with this project for now?'}
+          </div>
+          <button type="button" disabled={!!busy} style={quietButton} onClick={() => run('archive', async () => {
+            setProject(await (archived ? api.unarchiveProject(project.id) : api.archiveProject(project.id)))
+          })}>{busy === 'archive' ? 'Saving…' : archived ? 'Unarchive project' : 'Archive project'}</button>
+        </div>
+        <div>
+          <label htmlFor="confirm-delete" style={fieldLabel}>
+            To delete {project.name} with all its risks, charters, sessions, bugs, tests and recordings, type its name:
+          </label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input id="confirm-delete" value={typed} onChange={(e) => setTyped(e.target.value)} style={input} placeholder={project.name} autoComplete="off" />
+            <button type="button" disabled={typed !== project.name || !!busy} style={{ ...danger, whiteSpace: 'nowrap', opacity: typed !== project.name ? 0.5 : 1 }}
+              onClick={() => run('delete', async () => {
+                const d = await api.deleteProject(project.id, typed)
+                navigate('/projects', { replace: true, state: { notice: `Deleted ${project.name} (${deletedText(d)}).` } })
+              })}>{busy === 'delete' ? 'Deleting…' : 'Delete project'}</button>
+          </div>
+        </div>
+        <ErrorLine message={error} />
+      </div>
+    </section>
   )
 }

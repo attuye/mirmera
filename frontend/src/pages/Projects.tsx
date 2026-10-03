@@ -1,6 +1,6 @@
 /** Projects home: every project with a few counts, and a form to start a new one. */
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import { utcDate } from '../components/Evidence'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
@@ -86,7 +86,10 @@ function ProjectCard({ p }: { p: ProjectSummary }) {
       display: 'block', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 12,
       padding: '18px 20px', color: 'inherit',
     }}>
-      <div style={{ fontSize: 15, fontWeight: 600 }}>{p.name}</div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <span style={{ fontSize: 15, fontWeight: 600 }}>{p.name}</span>
+        {p.archived_at && <span className="mono" style={{ fontSize: 9.5, color: 'var(--text-tertiary)', border: '1px solid var(--border)', padding: '1px 6px', borderRadius: 5 }}>ARCHIVED</span>}
+      </div>
       {p.description && <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.45 }}>{p.description}</div>}
       {p.app_url && <div className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.app_url}</div>}
       <div className="mono" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 11, color: 'var(--text-tertiary)', marginTop: 14 }}>
@@ -106,6 +109,8 @@ export default function Projects() {
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
+  const notice = (useLocation().state as { notice?: string } | null)?.notice
 
   useEffect(() => { api.listProjects().then(setProjects).catch((e) => setError(errorText(e))) }, [])
 
@@ -130,6 +135,7 @@ export default function Projects() {
             <button onClick={() => setCreating(true)} style={{ ...primaryButton(), fontSize: 13.5, padding: '11px 18px' }}>+ New project</button>
           )}
         </div>
+        {notice && <div role="status" style={{ fontSize: 12.5, color: 'var(--accent)', marginBottom: 14 }}>{notice}</div>}
         <ErrorLine message={error} />
         {!projects && !error && <div style={{ color: 'var(--text-secondary)' }}>Loading…</div>}
         {projects && projects.length === 0 && (
@@ -139,11 +145,24 @@ export default function Projects() {
           </>
         )}
         {creating && <div style={{ marginBottom: 24 }}><NewProjectForm onCancel={() => setCreating(false)} /></div>}
-        {projects && projects.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14, maxWidth: 1000 }}>
-            {projects.map((p) => <ProjectCard key={p.id} p={p} />)}
-          </div>
-        )}
+        {projects && projects.length > 0 && (() => {
+          const archived = projects.filter((p) => p.archived_at).length
+          const shown = projects.filter((p) => showArchived || !p.archived_at)
+          return (
+            <>
+              {shown.length === 0 && <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Every project is archived.</p>}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14, maxWidth: 1000 }}>
+                {shown.map((p) => <ProjectCard key={p.id} p={p} />)}
+              </div>
+              {archived > 0 && (
+                <label style={{ display: 'flex', gap: 7, alignItems: 'center', fontSize: 12.5, color: 'var(--text-tertiary)', marginTop: 16 }}>
+                  <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+                  Show archived ({archived})
+                </label>
+              )}
+            </>
+          )
+        })()}
       </main>
     </div>
   )

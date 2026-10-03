@@ -246,3 +246,16 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
     db.commit()
     db.refresh(debrief)
     return debrief
+
+
+@router.delete("/{session_id}", response_model=schemas.Deleted)
+def delete_session(session_id: str, db: DBSession = Depends(get_db)):
+    """Delete a session with its notes, bugs, debrief, evidence and recorded files."""
+    from app.housekeeping import BusyError, delete_session as remove
+    session = db.get(models.Session, session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    try:
+        return {"deleted": remove(db, session)}
+    except BusyError as err:
+        raise HTTPException(409, str(err)) from err

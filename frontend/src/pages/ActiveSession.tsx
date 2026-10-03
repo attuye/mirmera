@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, Note } from '../api/client'
 import Sidebar from '../components/Sidebar'
-import { errorText } from '../components/ui'
+import { errorText, ConfirmDelete } from '../components/ui'
 import BrowserPanel, { useRunner } from '../components/BrowserPanel'
 import { Screenshot, clock } from '../components/Evidence'
 import { useProject, useProjectPath, useSessionProject } from '../project'
@@ -147,6 +147,12 @@ export default function ActiveSession() {
           <div>
             <div className="mono" style={{ fontSize: 10, color: 'var(--text-quiet)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Charter</div>
             <div style={{ fontSize: 14.5, fontWeight: 600, maxWidth: 560 }}>{charterMission || 'Loading…'}</div>
+            {sessionId && (
+              <div style={{ marginTop: 6 }}>
+                <ConfirmDelete label="Delete session" question="Delete this session with its notes, bugs and recordings?"
+                  onConfirm={async () => { await api.deleteSession(sessionId); navigate(path('/dashboard'), { replace: true }) }} />
+              </div>
+            )}
           </div>
           <div className="mono" style={{ fontSize: 26, fontWeight: 600, color: paused ? 'var(--text-tertiary)' : 'var(--accent)' }}>{elapsed}</div>
           <button onClick={togglePause} disabled={ending} style={{

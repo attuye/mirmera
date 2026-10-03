@@ -93,3 +93,17 @@ def review_bug(bug_id: str, payload: schemas.BugReview, db: DBSession = Depends(
     db.commit()
     db.refresh(bug)
     return bug
+
+
+@router.delete("/{bug_id}", response_model=schemas.Deleted)
+def delete_bug(bug_id: str, db: DBSession = Depends(get_db)):
+    """Delete a bug with its regression tests, agent and isolation runs and filing
+    records. Issues already filed in GitHub or Jira are not touched."""
+    from app.housekeeping import BusyError, delete_bug as remove
+    bug = db.get(models.Bug, bug_id)
+    if not bug:
+        raise HTTPException(404, "Bug not found")
+    try:
+        return {"deleted": remove(db, bug)}
+    except BusyError as err:
+        raise HTTPException(409, str(err)) from err

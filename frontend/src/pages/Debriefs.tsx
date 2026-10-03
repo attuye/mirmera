@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
+import { ConfirmDelete } from '../components/ui'
 import { api, DebriefListItem } from '../api/client'
 import { useProject, useProjectPath } from '../project'
 
@@ -31,10 +32,8 @@ export default function DebriefsList() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {debriefs.map((d) => (
-            <Link key={d.id} to={path(`/sessions/${d.session_id}/debrief`)} style={{
-              display: 'block', border: '1px solid var(--border)', borderRadius: 10,
-              padding: '14px 18px', color: 'var(--text)',
-            }}>
+            <div key={d.id} aria-label={d.charter_mission} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '14px 18px' }}>
+            <Link to={path(`/sessions/${d.session_id}/debrief`)} style={{ display: 'block', color: 'var(--text)' }}>
               <div style={{ fontSize: 13.5, fontWeight: 500 }}>{d.charter_mission}</div>
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 6, lineHeight: 1.5 }}>
                 {d.coverage_summary
@@ -45,6 +44,11 @@ export default function DebriefsList() {
                 {d.ended_at ? new Date(d.ended_at).toLocaleString() : '—'}
               </div>
             </Link>
+            <div style={{ marginTop: 10 }}>
+              <ConfirmDelete label="Delete session" question="Delete this session with its notes, bugs, debrief and recordings?"
+                onConfirm={async () => { await api.deleteSession(d.session_id); setDebriefs((prev) => prev.filter((x) => x.id !== d.id)) }} />
+            </div>
+            </div>
           ))}
         </div>
       </div>
