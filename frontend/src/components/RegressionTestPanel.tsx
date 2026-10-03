@@ -23,6 +23,11 @@ const OUTCOME: Record<ReplayResult['outcome'], { label: string; fg: string; bg: 
     label: 'Incomplete', fg: 'var(--warning)', bg: 'var(--warning-bg)',
     hint: 'Some steps were skipped (a secret or a file the replay does not have). Assertion results may not mean much.',
   },
+  misses_bug: {
+    label: "Doesn't reach the bug", fg: 'var(--danger)', bg: 'var(--danger-bg)',
+    hint: 'Every step ran, but the request the bug was recorded on was never sent, so the assertions prove nothing. '
+      + 'Fix the steps under Steps to the bug (add what is missing), then generate the test again.',
+  },
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -54,6 +59,12 @@ function Replay({ result }: { result: ReplayResult }) {
         </span>
       </div>
       <div style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '6px 0' }}>{o.hint}</div>
+      {result.reach && (
+        <div className="mono" style={{ fontSize: 11.5, color: result.reach.reached ? 'var(--text-tertiary)' : 'var(--danger)', margin: '0 0 6px' }}>
+          {result.reach.reached ? 'Reached' : 'Never sent'} a request to {result.reach.url_contains}
+          {result.reach.recorded ? ` (recorded: ${result.reach.recorded})` : ''}
+        </div>
+      )}
       <ul style={{ margin: 0, padding: 0 }}>
         {result.steps.map((s) => row(s.status, `${s.n}. ${s.description}`, s.detail, `s${s.n}`))}
         {result.assertions.map((a) => row(a.status, `Check ${a.n}: ${KIND_LABEL[a.kind] ?? a.kind}. ${a.why}`,

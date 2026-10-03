@@ -217,6 +217,8 @@ class Bug(Base):
     prompt_version = Column(String, nullable=True)
     last_change = Column(Text, nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
+    # Steps to the bug as the tester edited them (resolved plan steps); None = proposed from the recording
+    edited_steps = Column(JSON, nullable=True)
 
     session = relationship("Session", back_populates="bugs")
     charter = relationship("Charter")

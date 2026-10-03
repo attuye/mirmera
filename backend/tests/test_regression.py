@@ -166,7 +166,9 @@ def test_the_generated_test_replays_the_actions_and_asserts_the_oracle(client, r
     assert "test.fail(true, " in code  # known failing until the fix
     assert 'failedRequests.filter((r) => r.includes("/api/verify"))' in code
     assert "// Oracle: Product (consistency within the product). National ID verifies; Passport should too" in code
-    assert (test["ai_provider"], test["prompt_version"]) == ("mock", "regression-test-v2")
+    assert (test["ai_provider"], test["prompt_version"]) == ("mock", "regression-checks-v1")  # steps picked by Mirmera
+    assert test["plan"]["reach"] == {"url_contains": "/api/verify", "recorded": test["plan"]["reach"]["recorded"]}
+    assert test["plan"]["reach"]["recorded"].startswith("POST ") and "/api/verify" in test["plan"]["reach"]["recorded"]
 
 
 def test_not_known_failing_leaves_out_test_fail(client, recorded_bug):
@@ -201,6 +203,21 @@ def test_replay_waits_for_a_slow_answer_before_checking(client, recorded_bug, mo
     App.delay = 1.0
     result = replay(client, test)
     assert result["outcome"] == "reproduces", result
+
+
+def test_steps_that_never_send_the_failing_request_miss_the_bug(client, recorded_bug, monkeypatch):
+    """Edited steps without the Verify click: the assertions would pass, but the test
+    never reached the bug, and the replay says so instead of "passes"."""
+    monkeypatch.setenv("MIRMERA_SECRET_PASSWORD", "s3cret-pass")
+    steps = client.get(f"/bugs/{recorded_bug['id']}/steps").json()["steps"]
+    without_verify = [{k: v for k, v in st.items() if k in ("type", "url", "action") and v is not None}
+                      for st in steps if "Verify" not in (st["summary"] or "")]
+    assert client.put(f"/bugs/{recorded_bug['id']}/steps", json={"steps": without_verify}).status_code == 200
+    test = generate(client, recorded_bug)
+    result = replay(client, test)
+    assert result["outcome"] == "misses_bug", result
+    assert result["reach"]["url_contains"] == "/api/verify" and result["reach"]["reached"] is False
+    assert all(c["status"] == "passed" for c in result["assertions"])  # why "passes" would have been wrong
 
 
 def test_replay_against_another_base_url_reports_a_broken_step(client, recorded_bug):

@@ -51,6 +51,10 @@ class MockProvider(LLMProvider):
             return json.dumps(self._duplicates(user))
         if task == "regression_test":
             return json.dumps(self._regression(user))
+        if task == "regression_checks":
+            plan = self._regression(user)
+            return json.dumps({k: plan[k] for k in ("test_title", "assertions")} | {
+                "assumptions": ["(mock) The steps were fixed before the AI was asked; check the assertion matches the oracle."]})
         if task == "reproduce_step":
             return json.dumps(self._reproduce_step(user))
         return json.dumps({"note": f"mock provider has no canned answer for task '{task}'"})

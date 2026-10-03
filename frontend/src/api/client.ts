@@ -239,12 +239,38 @@ export interface RunnerStatus {
 
 // ---- Regression tests ---------------------------------------------------------
 
-export interface PlanStep { type: 'goto' | 'action'; url?: string; why: string; action?: { summary: string } }
+export interface PlanStep { type: 'goto' | 'action'; url?: string; why?: string; action?: { summary: string } }
+
+/** A recorded-style action, the same shape the recorder produces. */
+export interface StepAction {
+  action: 'click' | 'fill' | 'select' | 'check' | 'uncheck' | 'press' | 'upload'
+  locator: { method: 'label' | 'role' | 'text' | 'placeholder' | 'testid' | 'css'; role?: string; name?: string; value?: string }
+  value?: string
+  masked?: boolean
+  secret?: string
+  key?: string
+  summary?: string
+}
+
+/** A step to the bug: open a page, or one action. */
+export interface BugStep { type: 'goto' | 'action'; url?: string | null; action?: StepAction | null; summary?: string | null }
+
+export interface BugSteps {
+  steps: BugStep[]
+  /** edited: by the tester, used as they are · recording: picked by Mirmera up to the failed request ·
+   *  ai: Mirmera can't tell which actions lead to the bug, so the AI picks from these */
+  source: 'edited' | 'recording' | 'ai'
+  note: string
+  anchor: string | null
+  recorded_actions: number
+}
 export interface PlanAssertion { kind: string; why: string; expected?: string; url_contains?: string }
 
 export interface ReplayResult {
-  /** reproduces: the test catches the bug. passes: it did not show. broken: a step failed. incomplete: a step was skipped. */
-  outcome: 'reproduces' | 'passes' | 'broken' | 'incomplete'
+  /** reproduces: the test catches the bug. passes: it did not show. broken: a step failed. incomplete: a step was skipped.
+   *  misses_bug: the steps ran but never sent the request the bug was recorded on. */
+  outcome: 'reproduces' | 'passes' | 'broken' | 'incomplete' | 'misses_bug'
+  reach?: { url_contains: string; recorded: string | null; reached: boolean }
   base_url: string | null
   steps: { n: number; description: string; status: 'ok' | 'failed' | 'skipped' | 'not_run'; detail: string }[]
   assertions: { n: number; kind: string; why: string; status: 'passed' | 'failed' | 'not_run'; detail: string }[]
@@ -583,6 +609,10 @@ export const api = {
     request<ReproductionRun>(`/reproduction-runs/${runId}/cancel`, { method: 'POST' }),
   regressionFromReproduction: (runId: string) =>
     request<RegressionTest>(`/reproduction-runs/${runId}/regression-test`, { method: 'POST', body: JSON.stringify({}) }),
+  getBugSteps: (bugId: string) => request<BugSteps>(`/bugs/${bugId}/steps`),
+  saveBugSteps: (bugId: string, steps: BugStep[]) =>
+    request<BugSteps>(`/bugs/${bugId}/steps`, { method: 'PUT', body: JSON.stringify({ steps }) }),
+  resetBugSteps: (bugId: string) => request<BugSteps>(`/bugs/${bugId}/steps`, { method: 'DELETE' }),
   getRegressionTest: (bugId: string) => request<RegressionTest | null>(`/bugs/${bugId}/regression-test`),
   generateRegressionTest: (bugId: string, knownFailing: boolean) =>
     request<RegressionTest>(`/bugs/${bugId}/regression-test`, { method: 'POST', body: JSON.stringify({ known_failing: knownFailing }) }),

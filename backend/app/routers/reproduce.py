@@ -17,7 +17,7 @@ from app.evidence_text import browser_context
 from app.regression.plan import is_same_origin, origin, slug
 from app.regression.render import render
 from app.routers import runner as runner_api
-from app.routers.regression import _recorded_before
+from app.regression import steps as bug_steps
 from app.routers.trackers import _bug_or_404
 from app.runner import manager
 from app.timeutil import utcnow
@@ -59,8 +59,10 @@ def start(bug_id: str, payload: schemas.ReproduceRequest, db: DBSession = Depend
         raise HTTPException(409, "The agent is already working on this bug.")
 
     runner_api.sync_signals(db, bug.session_id)
-    actions = _recorded_before(db, bug, "action")
-    pages = list(dict.fromkeys(e.url for e in _recorded_before(db, bug, "navigation") if e.url))
+    # Only this bug's own recording (since the previous bug), and its steps as the hints:
+    # edited by the tester, picked from the recording, or the recorded actions.
+    st, rec = bug_steps.steps_for(db, bug)
+    pages = list(dict.fromkeys([s["url"] for s in st.steps if s["type"] == "goto"] + rec.pages))
     base_url = payload.base_url or (origin(pages[0]) if pages else None)
     if not base_url:
         raise HTTPException(409, "Nothing was recorded for this bug, so give the app's address (base URL) to start from.")
@@ -80,7 +82,8 @@ def start(bug_id: str, payload: schemas.ReproduceRequest, db: DBSession = Depend
                 "steps": bug.steps_to_reproduce or [], "expected": bug.expected, "actual": bug.actual,
                 "oracle": bug.oracle_heuristic, "why_its_a_problem": bug.oracle_explanation,
                 "notes_before": [n.get("content") for n in (bug.reproduction_trail or [])]},
-        hints=[{k: v for k, v in (e.data or {}).items() if k != "in_frame"} for e in actions[-40:]],
+        hints=[{k: v for k, v in s["action"].items() if k not in ("in_frame", "summary")}
+               for s in st.steps if s["type"] == "action"][-40:],
         pages=pages,
         signals=browser_context(evidence, bug.session.started_at, used=bool(evidence)) if evidence else "",
     )
