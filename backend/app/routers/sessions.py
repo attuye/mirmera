@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session as DBSession
 
 from app import models, schemas
 from app.ai import tasks
-from app.ai.base import ProviderError, get_provider
+from app.ai.base import ProviderError
+from app.ai.routing import provider_for
 from app.database import get_db
 from app.evidence_text import browser_context
 from app.session_text import bug_line, note_line, riskiest_first
@@ -212,7 +213,7 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
     browser = browser_context(recorded, session.started_at, used=bool(recorded))
 
     try:
-        provider = get_provider(project.default_ai_provider)
+        provider = provider_for(project, "debrief")
         draft = await tasks.draft_debrief(
             provider,
             charter_mission=charter.mission_statement,

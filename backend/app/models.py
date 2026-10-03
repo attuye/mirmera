@@ -26,6 +26,8 @@ class Project(Base):
     archived_at = Column(DateTime, nullable=True)  # hidden from the Projects page until unarchived
 
     default_ai_provider = Column(String, default=lambda: settings.default_ai_provider)
+    # Per-task choices, e.g. {"debrief": "local", "regression": "claude"}; others use the default
+    ai_task_providers = Column(JSON, nullable=True)
     # What this testing is for, e.g. "Find release blockers in multi-currency checkout".
     # Steers the product model, risk analysis and charters. Added in the risk-model step.
     testing_mission = Column(Text, nullable=True)

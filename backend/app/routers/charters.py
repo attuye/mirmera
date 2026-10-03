@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from app import models, schemas
 from app.ai import tasks
-from app.ai.base import get_provider
+from app.ai.routing import provider_for
 from app.database import get_db
 
 router = APIRouter(tags=["charters"])
@@ -37,7 +37,7 @@ async def suggest_charters(project_id: str, payload: schemas.CharterSuggestReque
     
     # Provider problems (unknown name, missing key, model down) are turned into
     # clear HTTP errors by the handlers in app/main.py
-    provider = get_provider(payload.provider or project.default_ai_provider)
+    provider = provider_for(project, "charter_suggestions", payload.provider)
     return await tasks.suggest_charters(
         provider,
         project_name=project.name, 
