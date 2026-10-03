@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useProjectPath, useSessionProject } from '../project'
 import {
   api, Charter, CharterStatus, Debrief, ObservedRisk, OutlookItem, QUALITY_CRITERIA, SessionRecord,
 } from '../api/client'
 import Sidebar from '../components/Sidebar'
-import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
+import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton, ConfirmDelete } from '../components/ui'
 import { RecordingFiles, SIGNAL_KINDS, countLine } from '../components/Evidence'
 import { SessionRiskUpdates } from '../components/RiskUpdates'
 import type { Evidence, EvidenceKind } from '../api/client'
@@ -188,6 +188,7 @@ function RecordedEvidence({ items }: { items: Evidence[] }) {
 
 export default function DebriefPage() {
   const path = useProjectPath()
+  const navigate = useNavigate()
   const { sessionId } = useParams<{ sessionId: string }>()
   const [debrief, setDebrief] = useState<Debrief | null>(null)
   const [session, setSession] = useState<SessionRecord | null>(null)
@@ -349,6 +350,10 @@ export default function DebriefPage() {
           {saved && !dirty && <span role="status" style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>Saved ✓</span>}
           {dirty && <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Unsaved changes</span>}
           <div style={{ flex: 1 }} />
+          {sessionId && (
+            <ConfirmDelete label="Delete session" question="Delete this session with its notes, bugs, debrief and recordings?"
+              onConfirm={async () => { await api.deleteSession(sessionId); navigate(path('/debriefs'), { replace: true }) }} />
+          )}
           <Link to={path('/debriefs')} style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>All debriefs</Link>
         </div>
         <div style={{ marginLeft: 58 }}><ErrorLine message={saveError} /></div>

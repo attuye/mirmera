@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session as DBSession
 from app import models, schemas
 from app.ai.base import PROVIDER_NAMES
 from app.database import get_db
+from app.housekeeping import BusyError, delete_project
+from app.timeutil import utcnow
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -83,3 +85,35 @@ def update_project(project_id: str, payload: schemas.ProjectUpdate, db: DBSessio
     db.commit()
     db.refresh(project)
     return project
+
+
+@router.post("/{project_id}/archive", response_model=schemas.ProjectOut)
+def archive_project(project_id: str, db: DBSession = Depends(get_db)):
+    """Hide the project from the Projects page; nothing in it changes."""
+    project = _project_or_404(db, project_id)
+    project.archived_at = project.archived_at or utcnow()
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+@router.post("/{project_id}/unarchive", response_model=schemas.ProjectOut)
+def unarchive_project(project_id: str, db: DBSession = Depends(get_db)):
+    project = _project_or_404(db, project_id)
+    project.archived_at = None
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+@router.delete("/{project_id}", response_model=schemas.Deleted)
+def remove_project(project_id: str, confirm: str = "", db: DBSession = Depends(get_db)):
+    """Delete the project and everything in it, for good. `confirm` must be the
+    project's name, so a stray request can't wipe a project."""
+    project = _project_or_404(db, project_id)
+    if confirm.strip() != project.name:
+        raise HTTPException(422, "Type the project's name exactly to confirm.")
+    try:
+        return {"deleted": delete_project(db, project)}
+    except BusyError as err:
+        raise HTTPException(409, str(err)) from err

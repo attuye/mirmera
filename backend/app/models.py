@@ -23,6 +23,7 @@ class Project(Base):
     name = Column(String, nullable=False)
     created_at = Column(DateTime, default=utcnow)
     description = Column(Text, nullable=True)  # one line shown on the project card
+    archived_at = Column(DateTime, nullable=True)  # hidden from the Projects page until unarchived
 
     default_ai_provider = Column(String, default=lambda: settings.default_ai_provider)
     # What this testing is for, e.g. "Find release blockers in multi-currency checkout".

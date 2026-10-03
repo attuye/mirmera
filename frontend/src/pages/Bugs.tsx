@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import Sidebar from '../components/Sidebar'
-import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
+import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton, ConfirmDelete } from '../components/ui'
 import { api, BugFiling, BugListItem, BugReview, Evidence, ORACLES, OracleHeuristic, Project, Reproducibility } from '../api/client'
 import FileToTracker, { FilingLinks } from '../components/FileToTracker'
 import RegressionTestPanel from '../components/RegressionTestPanel'
@@ -37,6 +37,11 @@ export default function Bugs() {
       .catch((e) => setLoadError(errorText(e)))
       .finally(() => setLoading(false))
   }, [project.id])
+
+  function remove(bugId: string) {
+    setBugs((prev) => prev.filter((b) => b.id !== bugId))
+    setExpanded(null)
+  }
 
   function replace(updated: BugListItem) {
     setBugs((prev) => prev.map((b) => (b.id === updated.id ? updated : b)))
@@ -110,7 +115,7 @@ export default function Bugs() {
                 </div>
                 {isOpen && (
                   <div style={{ padding: '0 16px 16px', borderTop: '1px solid var(--border-soft)' }}>
-                    <BugDetail bug={b} onSaved={replace} project={project} onProject={setProject} />
+                    <BugDetail bug={b} onSaved={replace} onDeleted={() => remove(b.id)} project={project} onProject={setProject} />
                   </div>
                 )}
               </article>
@@ -124,9 +129,10 @@ export default function Bugs() {
 
 // ---------- detail: trail, report, review ----------
 
-function BugDetail({ bug, onSaved, project, onProject }: {
+function BugDetail({ bug, onSaved, onDeleted, project, onProject }: {
   bug: BugListItem
   onSaved: (b: BugListItem) => void
+  onDeleted: () => void
   project: Project
   onProject: (p: Project) => void
 }) {
@@ -176,6 +182,12 @@ function BugDetail({ bug, onSaved, project, onProject }: {
       {!editing && !bug.kind && <><BugStepsPanel bug={bug} /><IsolationPanel bug={bug} /></>}
       {!editing && <ReproductionPanel bug={bug} onTestCreated={() => setTestVersion((v) => v + 1)} />}
       <ErrorLine message={error} />
+      {!editing && (
+        <div style={{ marginTop: 18, paddingTop: 12, borderTop: '1px solid var(--border-soft)' }}>
+          <ConfirmDelete label="Delete bug" question="Delete this bug with its tests and runs? Filed issues stay in the tracker."
+            onConfirm={async () => { await api.deleteBug(bug.id); onDeleted() }} />
+        </div>
+      )}
     </div>
   )
 }

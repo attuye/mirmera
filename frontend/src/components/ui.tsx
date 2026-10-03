@@ -1,4 +1,5 @@
 /** Shared form controls and error display, matching the app's design tokens. */
+import { useState } from 'react'
 import { API_URL } from '../api/client'
 
 export const primaryButton = (disabled = false): React.CSSProperties => ({
@@ -25,3 +26,27 @@ export function ErrorLine({ message }: { message: string | null }) {
   return <div role="alert" style={{ color: 'var(--danger)', fontSize: 12.5, marginTop: 10 }}>{message}</div>
 }
 
+
+/** A delete button that asks once, inline: "Delete for good? Yes, delete / Cancel". */
+export function ConfirmDelete({ label, question, onConfirm, busyLabel = 'Deleting…' }: {
+  label: string; question: string; onConfirm: () => Promise<void>; busyLabel?: string
+}) {
+  const [asking, setAsking] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const danger: React.CSSProperties = { ...quietButton, color: 'var(--danger)', borderColor: 'var(--danger-bg)' }
+  if (!asking) return <button type="button" onClick={() => { setAsking(true); setError(null) }} style={danger}>{label}</button>
+  return (
+    <span role="group" aria-label={question} style={{ display: 'inline-flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 12.5, color: 'var(--danger)' }}>{question}</span>
+      <button type="button" disabled={busy} onClick={async () => {
+        setBusy(true); setError(null)
+        try { await onConfirm() } catch (e) { setError(errorText(e)); setBusy(false) }
+      }} style={{ ...primaryButton(busy), background: busy ? 'var(--border)' : 'var(--danger)', color: '#fff', padding: '6px 12px' }}>
+        {busy ? busyLabel : 'Yes, delete'}
+      </button>
+      <button type="button" disabled={busy} onClick={() => setAsking(false)} style={quietButton}>Cancel</button>
+      {error && <span role="alert" style={{ color: 'var(--danger)', fontSize: 12.5, flexBasis: '100%' }}>{error}</span>}
+    </span>
+  )
+}

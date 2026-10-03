@@ -49,6 +49,8 @@ export interface Project {
   app_url: string | null
   environments: Environment[]
   default_tester: string | null
+  /** Set while archived: hidden from the Projects page, still usable. */
+  archived_at: string | null
   created_at: string
 }
 
@@ -579,8 +581,28 @@ export interface IsolationRun {
   finished_at: string | null
 }
 
+/** What a delete removed, e.g. { sessions: 2, bugs: 3, evidence: 140 }. */
+export interface Deleted { deleted: Record<string, number> }
+
+/** "2 sessions, 3 bugs, 140 evidence items" from a delete's counts. */
+export function deletedText(d: Deleted): string {
+  const names: Record<string, [string, string]> = {
+    sessions: ['session', 'sessions'], bugs: ['bug', 'bugs'], notes: ['note', 'notes'], charters: ['charter', 'charters'],
+    risks: ['risk', 'risks'], evidence: ['evidence item', 'evidence items'], regression_tests: ['regression test', 'regression tests'],
+    debriefs: ['debrief', 'debriefs'], artifacts: ['artifact', 'artifacts'],
+  }
+  const parts = Object.entries(names).filter(([k]) => d.deleted[k]).map(([k, [one, many]]) => `${d.deleted[k]} ${d.deleted[k] === 1 ? one : many}`)
+  return parts.join(', ') || 'nothing else'
+}
+
 export const api = {
   listProjects: () => request<ProjectSummary[]>('/projects'),
+  archiveProject: (projectId: string) => request<Project>(`/projects/${projectId}/archive`, { method: 'POST' }),
+  unarchiveProject: (projectId: string) => request<Project>(`/projects/${projectId}/unarchive`, { method: 'POST' }),
+  deleteProject: (projectId: string, confirm: string) =>
+    request<Deleted>(`/projects/${projectId}?confirm=${encodeURIComponent(confirm)}`, { method: 'DELETE' }),
+  deleteSession: (sessionId: string) => request<Deleted>(`/sessions/${sessionId}`, { method: 'DELETE' }),
+  deleteBug: (bugId: string) => request<Deleted>(`/bugs/${bugId}`, { method: 'DELETE' }),
   getProject: (projectId: string) => request<Project>(`/projects/${projectId}`),
   createProject: (project: { name: string; description?: string; app_url?: string }) =>
     request<Project>('/projects', { method: 'POST', body: JSON.stringify(project) }),

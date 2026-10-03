@@ -84,6 +84,7 @@ class ProjectOut(BaseModel):
     app_url: Optional[str] = None
     environments: list[Environment] = []
     default_tester: Optional[str] = None
+    archived_at: Optional[datetime] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -1263,3 +1264,8 @@ class IsolationRunOut(BaseModel):
     @classmethod
     def _none_is_empty(cls, v):
         return v or []
+
+
+class Deleted(BaseModel):
+    """What a delete removed, e.g. {"sessions": 2, "bugs": 3, "evidence": 140}."""
+    deleted: dict[str, int]
