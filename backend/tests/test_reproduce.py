@@ -78,11 +78,20 @@ def test_the_agent_reproduces_a_recorded_bug_and_measures_it(client, recorded_bu
     assert client.get(f"/bugs/{recorded_bug['id']}/reproduction").json()["id"] == run["id"]
 
 
+def test_a_slow_backend_does_not_hide_the_bug(client, recorded_bug, monkeypatch):
+    """The failed request answers a second after the click: the claim is checked once it has."""
+    monkeypatch.setenv("MIRMERA_SECRET_PASSWORD", "s3cret-pass")
+    App.delay = 1.0
+    run = finished(client, start(client, recorded_bug, runs=1))
+    assert run["status"] == "reproduced", run["detail"]
+    assert run["reproducibility"]["reproduced"] == 1
+
+
 def test_an_intermittent_bug_is_measured_not_just_found(client, recorded_bug, monkeypatch):
     App.flaky = True  # Passport fails on every other request
     App.posts = 0
     run = finished(client, start(client, recorded_bug, runs=4))
-    assert run["status"] == "reproduced"
+    assert run["status"] == "reproduced", run["detail"]
     assert run["reproducibility"]["reproduced"] == 2  # requests 2-5: ok, fail, ok, fail
     assert run["detail"].endswith("(intermittent).")
 
@@ -120,7 +129,7 @@ def test_the_agent_stays_inside_the_app(client, recorded_bug, monkeypatch):
     goto, click, _ = run["steps"]
     assert goto["status"] == "refused" and "outside the app" in goto["detail"]
     assert "left the app" in click["detail"] and click["url"].startswith("http://127.0.0.1")
-    assert run["status"] == "not_reproduced" and run["detail"] == "The agent gave up: out of ideas"
+    assert (run["status"], run["detail"]) == ("not_reproduced", "The agent gave up: out of ideas")
 
 
 def test_an_unchecked_claim_is_refused_and_a_missing_secret_is_not_guessed(client, recorded_bug, monkeypatch):

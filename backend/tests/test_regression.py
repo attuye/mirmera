@@ -42,6 +42,7 @@ class App(BaseHTTPRequestHandler):
     fixed = False
     flaky = False  # Passport fails on every other request only: an intermittent bug
     posts = 0
+    delay = 0.0  # seconds before /api/verify answers: a slow backend, like a busy CI machine
 
     def do_GET(self):
         self._send(200 if self.path == "/" else 404, APP if self.path == "/" else b"", "text/html")
@@ -49,6 +50,7 @@ class App(BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
         App.posts += 1
+        time.sleep(App.delay)
         broken = body == b"Passport" and not App.fixed and (not App.flaky or App.posts % 2 == 1)
         self._send(500 if broken else 200, b'{"ok": %s}' % (b"false" if broken else b"true"), "application/json")
 
@@ -73,9 +75,9 @@ def app_url():
 
 @pytest.fixture(autouse=True)
 def bug_present():
-    App.fixed, App.flaky, App.posts = False, False, 0
+    App.fixed, App.flaky, App.posts, App.delay = False, False, 0, 0.0
     yield
-    App.fixed, App.flaky, App.posts = False, False, 0
+    App.fixed, App.flaky, App.posts, App.delay = False, False, 0, 0.0
 
 
 def wait_for(client, session, condition, timeout=10.0):
@@ -190,6 +192,15 @@ def test_replay_reproduces_the_bug_then_passes_once_fixed(client, recorded_bug, 
     assert replay(client, test)["outcome"] == "passes"
     latest = client.get(f"/bugs/{recorded_bug['id']}/regression-test").json()
     assert latest["replay"]["outcome"] == "passes" and latest["replayed_at"]
+
+
+def test_replay_waits_for_a_slow_answer_before_checking(client, recorded_bug, monkeypatch):
+    """/api/verify answers a second after the click; the check must not run before it does."""
+    monkeypatch.setenv("MIRMERA_SECRET_PASSWORD", "s3cret-pass")
+    test = generate(client, recorded_bug)
+    App.delay = 1.0
+    result = replay(client, test)
+    assert result["outcome"] == "reproduces", result
 
 
 def test_replay_against_another_base_url_reports_a_broken_step(client, recorded_bug):
