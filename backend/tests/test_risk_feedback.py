@@ -110,13 +110,15 @@ def test_guard_rails_on_what_the_model_returns(client, ended, monkeypatch):
     assert fb["warnings"] == ["Ignored a second suggestion for R1", "Ignored a suggestion for unknown risk R9"]
 
 
-def test_a_suggestion_without_evidence_is_refused(client, ended, monkeypatch):
+def test_a_suggestion_without_evidence_changes_nothing(client, ended, monkeypatch):
     provider = Scripted({"updates": [
         {"risk_ref": "R1", "impact": 5, "likelihood": 4, "reason": "Feels riskier", "evidence": []},
     ]})
-    assert suggest(client, ended, provider, monkeypatch).status_code == 502
-    assert len(provider.users) == 2  # one retry, then a clear error
-    assert client.get(f"/sessions/{ended['id']}/risk-updates").json()["changes"] == []
+    r = suggest(client, ended, provider, monkeypatch)
+    assert r.status_code == 200 and len(provider.users) == 1  # no retry needed: the rest of the reply is usable
+    r1 = by_ref(r.json())["R1"]
+    assert r1["status"] == "no_change"  # never proposed, so it can't be accepted by mistake
+    assert "not usable" in r1["reason"] and "evidence" in r1["reason"]
 
 
 # ---------- deciding ----------

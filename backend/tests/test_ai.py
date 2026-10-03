@@ -4,13 +4,15 @@ import json
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from app.ai import tasks
 from app.ai.base import LLMProvider, ProviderError, ProviderNotConfigured, UnknownProvider, get_provider
 from app.ai.llm_json import LLMOutputError, complete_json
 from app.ai.local_provider import LocalProvider
 from app.ai.mock_provider import MockProvider
-from app.schemas import DebriefDraft, LLMRegressionPlan
+from app.schemas import (CharterSuggestionList, DebriefDraft, LLMBugDraft, LLMDuplicateList, LLMRegressionPlan,
+                         LLMRiskList, LLMRiskUpdateList)
 
 VALID = {"coverage_summary": "Covered coupons", "open_questions": ["GBP?"]}
 
@@ -97,6 +99,56 @@ def test_a_plan_with_no_usable_check_is_still_refused_and_retried():
     plan = run(complete_json(p, "sys", "data", LLMRegressionPlan, task="regression_test"))
     assert len(p.calls) == 2 and "a url assertion needs expected" in p.calls[1]["user"]
     assert plan.assertions[0].expected == "/documents"
+
+
+# ---------- other replies: safe fallbacks instead of rejecting everything ----------
+
+BUG = {"kind": "bug", "title": "Passport verification fails", "summary": "500 on verify",
+       "steps_to_reproduce": ["Choose Passport", "Click Verify"], "expected": "Verified", "actual": "Error",
+       "severity": "high", "severity_rationale": "Blocks onboarding", "reproducibility": "always"}
+
+
+def test_a_bug_without_an_oracle_becomes_a_question_that_asks_for_one():
+    p = Scripted([json.dumps(BUG)])  # what the local model sent: kind "bug", no oracle
+    draft = run(complete_json(p, "sys", "data", LLMBugDraft, task="bug_report"))
+    assert len(p.calls) == 1
+    assert draft.kind == "question" and draft.oracle is None
+    assert draft.open_questions == [LLMBugDraft.NO_ORACLE_QUESTION]
+    with_oracle = {**BUG, "oracle": {"heuristic": "product", "explanation": "National ID verifies"}}
+    assert LLMBugDraft.model_validate(with_oracle).kind == "bug"
+
+
+def test_a_rescore_without_evidence_is_listed_as_unchanged():
+    reply = {"updates": [{"risk_ref": "R1", "impact": 5, "likelihood": 4, "reason": "Seen failing", "evidence": ["500 on verify"]},
+                         {"risk_ref": "R2", "impact": 4, "likelihood": 4, "reason": "Feels risky", "evidence": []},
+                         {"risk_ref": "R3", "impact": 9, "likelihood": 2, "reason": "Too high", "evidence": ["x"]}],
+             "unchanged": [{"risk_ref": "R4", "reason": "Not exercised"}]}
+    out = LLMRiskUpdateList.model_validate(reply)
+    assert [u.risk_ref for u in out.updates] == ["R1"]
+    assert [u.risk_ref for u in out.unchanged] == ["R4", "R2", "R3"]
+    assert "evidence" in out.unchanged[1].reason and "impact" in out.unchanged[2].reason
+    assert out.unchanged[1].reason.endswith("so the score stays as it is.")
+
+
+RISK = {"title": "Expired IDs pass", "failure_mode": "An expired ID verifies", "quality_criterion": "capability",
+        "elements": ["upload"], "impact": 5, "likelihood": 3, "rationale": "Spec says reject", "evidence": "stated"}
+
+
+def test_broken_items_in_a_list_are_dropped_and_the_rest_kept():
+    out = LLMRiskList.model_validate({"risks": [RISK, {**RISK, "title": "Bad", "impact": 0}]})
+    assert [r.title for r in out.risks] == ["Expired IDs pass"]
+    out = CharterSuggestionList.model_validate({"suggestions": [
+        {"mission_statement": "Explore upload", "rationale": "r", "risk_areas": [], "priority": "high"},
+        {"mission_statement": "Missing priority", "rationale": "r", "risk_areas": []}]})
+    assert [c.mission_statement for c in out.suggestions] == ["Explore upload"]
+    out = LLMDuplicateList.model_validate({"verdicts": [{"key": "1", "verdict": "related", "reason": "same page"},
+                                                        {"key": "2", "verdict": "maybe", "reason": "?"}]})
+    assert [v.key for v in out.verdicts] == ["1"]
+
+
+def test_a_list_with_nothing_usable_is_still_refused():
+    with pytest.raises(ValidationError):
+        LLMRiskList.model_validate({"risks": [{**RISK, "impact": 0}]})
 
 
 # ---------- provider registry and configuration ----------

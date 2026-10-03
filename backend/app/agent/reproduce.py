@@ -32,13 +32,14 @@ from urllib.parse import urlsplit
 
 from app import models, schemas
 from app.ai.base import LLMProvider, ProviderError
-from app.ai.llm_json import complete_json
+from app.ai.llm_json import LLMOutputError, complete_json
 from app.database import SessionLocal
 from app.evidence_text import _defang as defang
 from app.regression.plan import origin
 from app.regression.replay import Signals, _first_line, _locator, run_step
 from app.timeutil import utcnow
 
+MAX_BAD_REPLIES = 3  # unusable AI replies in a row before the run stops
 logger = logging.getLogger(__name__)
 
 PROMPT = (Path(__file__).resolve().parents[1] / "ai" / "prompts" / "reproduce_step.md").read_text(encoding="utf-8")
@@ -259,6 +260,7 @@ async def run_agent(run_id: str, ctx: BugContext, provider: LLMProvider, *, star
                 signals = Signals()
                 signals.attach(page)
                 seen: dict[str, int] = {}
+                bad_replies = 0  # unusable AI replies in a row
                 await page.goto(start_url, wait_until="domcontentloaded", timeout=30_000)
 
                 for n in range(1, max_steps + 1):
@@ -269,8 +271,21 @@ async def run_agent(run_id: str, ctx: BugContext, provider: LLMProvider, *, star
                         final = {"status": "not_reproduced", "detail": "Stopped: the run took longer than 10 minutes."}
                         break
                     observation = await observe(page, signals, seen)
-                    step = await complete_json(provider, PROMPT, _user_message(ctx, history, observation, max_steps - n + 1),
-                                               schemas.LLMAgentStep, task="reproduce_step", max_tokens=800)
+                    try:
+                        step = await complete_json(provider, PROMPT, _user_message(ctx, history, observation, max_steps - n + 1),
+                                                   schemas.LLMAgentStep, task="reproduce_step", max_tokens=800)
+                    except LLMOutputError as err:
+                        # A smaller model got one step's format wrong: record it as a failed step the
+                        # agent sees in its history, and let it try again, up to a limit.
+                        bad_replies += 1
+                        reason = str(err).split("Details: ", 1)[-1].splitlines()[:3]
+                        history.append({"n": n, "thought": "", "action": "(unusable reply)", "kind": "invalid",
+                                        "status": "failed", "detail": "; ".join(reason), "url": page.url})
+                        _save(run_id, steps=list(history))
+                        if bad_replies >= MAX_BAD_REPLIES:
+                            raise
+                        continue
+                    bad_replies = 0
                     a = step.action
                     entry = {"n": n, "thought": step.thought, "action": describe(a), "kind": a.kind,
                              "status": "ok", "detail": "", "url": page.url}

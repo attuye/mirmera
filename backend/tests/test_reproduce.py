@@ -191,3 +191,24 @@ def test_the_agent_action_contract_refuses(action):
     from app import schemas
     with pytest.raises(ValueError):
         schemas.AgentAction(**action)
+
+
+# ---------- a smaller model's unusable reply ----------
+
+BAD = step("Click it", kind="click")  # no locator: what a small local model sometimes sends
+
+
+def test_an_unusable_reply_is_a_failed_step_and_the_agent_carries_on(client, recorded_bug, monkeypatch):
+    provider = scripted(monkeypatch, [BAD, BAD, GIVE_UP])  # complete_json asks twice before giving up on a reply
+    run = finished(client, start(client, recorded_bug))
+    bad, stop = run["steps"]
+    assert (bad["action"], bad["status"]) == ("(unusable reply)", "failed") and "click needs a locator" in bad["detail"]
+    assert (run["status"], run["detail"]) == ("not_reproduced", "The agent gave up: out of ideas")
+    assert "(unusable reply) -> failed" in provider.users[-1]  # the agent saw its mistake
+
+
+def test_three_unusable_replies_in_a_row_stop_the_run(client, recorded_bug, monkeypatch):
+    scripted(monkeypatch, [BAD])
+    run = finished(client, start(client, recorded_bug))
+    assert run["status"] == "error" and "returned an unusable reply twice" in run["detail"]
+    assert [s["status"] for s in run["steps"]] == ["failed"] * 3
