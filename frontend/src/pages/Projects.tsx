@@ -114,10 +114,16 @@ export default function Projects() {
       <Sidebar />
       <main style={{ flex: 1, padding: '32px 40px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, maxWidth: 1000 }}>
-          <div>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+            <img src="/mirmera.svg" width={48} height={48} alt="" style={{ display: 'block', flexShrink: 0 }} />
+            <div>
             <h1 style={{ fontSize: 24, fontWeight: 600, margin: 0 }}>Projects</h1>
             <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
               One per app you test. Each has its own risks, charters, sessions, bugs and settings.
+            </div>
+            <div className="mono" style={{ fontSize: 11, color: 'var(--text-quiet)', marginTop: 6 }}>
+              Mirmera · ምርመራ · investigation
+            </div>
             </div>
           </div>
           {projects && projects.length > 0 && !creating && (

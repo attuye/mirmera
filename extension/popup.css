@@ -1,5 +1,7 @@
 body { width: 320px; margin: 0; padding: 12px 14px; font: 13px system-ui, sans-serif; color: #e8eaed; background: #131518; }
-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+header .logo { display: block; }
+header strong { margin-right: auto; }
 .pill { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #23262c; color: #9aa1ac; }
 .pill.rec { background: #3b1d21; color: #f0625d; font-weight: 600; }
 label { display: block; font-size: 11.5px; color: #9aa1ac; margin: 8px 0 4px; }
