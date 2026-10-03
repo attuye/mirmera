@@ -1,7 +1,9 @@
 /** Regression test for a reviewed bug: generate it from the recorded actions,
  *  read the plan and code, replay it to see whether it catches the bug. */
 import { useEffect, useState } from 'react'
-import { api, BugListItem, regressionDownloadUrl, RegressionTest, ReplayResult } from '../api/client'
+import { api, BugListItem, projectUrls, regressionDownloadUrl, RegressionTest, ReplayResult } from '../api/client'
+import { EnvironmentChoice } from './BrowserPanel'
+import { useProject } from '../project'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from './ui'
 
 const OUTCOME: Record<ReplayResult['outcome'], { label: string; fg: string; bg: string; hint: string }> = {
@@ -65,6 +67,8 @@ export default function RegressionTestPanel({ bug }: { bug: BugListItem }) {
   const [test, setTest] = useState<RegressionTest | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [knownFailing, setKnownFailing] = useState(true)
+  const { project } = useProject()
+  const environments = projectUrls(project)
   const [baseUrl, setBaseUrl] = useState('')
   const [showCode, setShowCode] = useState(true)
   const [copied, setCopied] = useState(false)
@@ -150,6 +154,7 @@ export default function RegressionTestPanel({ bug }: { bug: BugListItem }) {
             }}>{test.code}</pre>
           )}
 
+          <>
           <form onSubmit={(e) => { e.preventDefault(); run('replay') }}
             style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginTop: 12, flexWrap: 'wrap' }}>
             <label style={{ flex: 1, minWidth: 240 }}>
@@ -160,6 +165,8 @@ export default function RegressionTestPanel({ bug }: { bug: BugListItem }) {
               {busy === 'replay' ? 'Replaying…' : 'Replay test'}
             </button>
           </form>
+          {environments.length > 0 && <EnvironmentChoice environments={environments} current={baseUrl} onPick={setBaseUrl} />}
+          </>
           {test.replay && <Replay result={test.replay} />}
         </>
       )}

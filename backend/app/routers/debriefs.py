@@ -46,7 +46,7 @@ def save_outlook_charter(session_id: str, index: int, db: DBSession = Depends(ge
 
     original = debrief.session.charter
     charter = models.Charter(
-        product_id=original.product_id,
+        project_id=original.project_id,
         mission_statement=outlook[index]["charter"],
         rationale=outlook[index]["reason"],
         priority=original.priority,
@@ -75,10 +75,10 @@ def promote_observed_risk(
         raise HTTPException(409, "This observed risk is already a risk")
 
     text = observed[index]["text"]
-    product_id = debrief.session.charter.product_id
+    project_id = debrief.session.charter.project_id
     risk = models.Risk(
-        product_id=product_id,
-        ref=f"R{_next_ref_number(db, product_id)}",
+        project_id=project_id,
+        ref=f"R{_next_ref_number(db, project_id)}",
         title=payload.title or text[:80],
         failure_mode=text,
         quality_criterion=payload.quality_criterion,
@@ -102,13 +102,13 @@ def promote_observed_risk(
 list_router = APIRouter(tags=["debriefs"])
 
 
-@list_router.get("/products/{product_id}/debriefs", response_model=list[schemas.DebriefListItem])
-def list_debriefs(product_id: str, db: DBSession = Depends(get_db)):
+@list_router.get("/projects/{project_id}/debriefs", response_model=list[schemas.DebriefListItem])
+def list_debriefs(project_id: str, db: DBSession = Depends(get_db)):
     rows = (
         db.query(models.Debrief, models.Session, models.Charter)
         .join(models.Session, models.Debrief.session_id == models.Session.id)
         .join(models.Charter, models.Session.charter_id == models.Charter.id)
-        .filter(models.Charter.product_id == product_id)
+        .filter(models.Charter.project_id == project_id)
         .order_by(models.Debrief.created_at.desc())
         .all()
     )

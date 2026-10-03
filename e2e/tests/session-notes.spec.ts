@@ -3,10 +3,10 @@ import { expect, test } from './fixtures'
 // Guards the fix for notes that were silently lost when a tester logged entries
 // quickly, one after another (about 1 in 15 before the fix).
 test('notes logged in quick succession are all saved', async ({ page, api }) => {
-  const product = await api.product()
-  const charter = await api.charter(product.id, 'Explore fast note-taking')
+  const project = await api.project()
+  const charter = await api.charter(project.id, 'Explore fast note-taking')
   const session = await api.session(charter.id)
-  await page.goto(`/sessions/${session.id}`)
+  await page.goto(`/projects/${project.id}/sessions/${session.id}`)
 
   const box = page.getByPlaceholder('What are you observing?')
   const entries = Array.from({ length: 60 }, (_, i) => `Observation ${i + 1}`)
@@ -21,9 +21,9 @@ test('notes logged in quick succession are all saved', async ({ page, api }) => 
 })
 
 test('Ctrl+Enter logs the note', async ({ page, api }) => {
-  const product = await api.product()
-  const session = await api.session((await api.charter(product.id, 'Explore keyboard logging')).id)
-  await page.goto(`/sessions/${session.id}`)
+  const project = await api.project()
+  const session = await api.session((await api.charter(project.id, 'Explore keyboard logging')).id)
+  await page.goto(`/projects/${project.id}/sessions/${session.id}`)
 
   const box = page.getByPlaceholder('What are you observing?')
   await box.fill('Logged from the keyboard')
@@ -33,9 +33,9 @@ test('Ctrl+Enter logs the note', async ({ page, api }) => {
 })
 
 test('a note that fails to save stays in the box with a reason', async ({ page, api }) => {
-  const product = await api.product()
-  const session = await api.session((await api.charter(product.id, 'Explore failed saves')).id)
-  await page.goto(`/sessions/${session.id}`)
+  const project = await api.project()
+  const session = await api.session((await api.charter(project.id, 'Explore failed saves')).id)
+  await page.goto(`/projects/${project.id}/sessions/${session.id}`)
 
   // Simulate the backend being unreachable for saves only.
   await page.route('**/notes', (route) => (route.request().method() === 'POST' ? route.abort() : route.continue()))

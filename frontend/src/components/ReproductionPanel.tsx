@@ -1,7 +1,9 @@
 /** Reproduction agent on a bug: start it, follow its steps live, see what it
  *  proved (checked by Mirmera) and how reliably, turn the steps into a test. */
 import { useEffect, useRef, useState } from 'react'
-import { api, BugListItem, reproductionScreenshotUrl, ReproductionRun } from '../api/client'
+import { api, BugListItem, projectUrls, reproductionScreenshotUrl, ReproductionRun } from '../api/client'
+import { EnvironmentChoice } from './BrowserPanel'
+import { useProject } from '../project'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from './ui'
 
 const POLL_MS = 1500
@@ -27,6 +29,8 @@ function verdict(run: ReproductionRun): { label: string; fg: string; bg: string 
 export default function ReproductionPanel({ bug, onTestCreated }: { bug: BugListItem; onTestCreated: () => void }) {
   const [run, setRun] = useState<ReproductionRun | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const { project } = useProject()
+  const environments = projectUrls(project)
   const [baseUrl, setBaseUrl] = useState('')
   const [maxSteps, setMaxSteps] = useState(20)
   const [runs, setRuns] = useState(3)
@@ -84,6 +88,7 @@ export default function ReproductionPanel({ bug, onTestCreated }: { bug: BugList
       </div>
 
       {!running && (
+        <>
         <form onSubmit={(e) => { e.preventDefault(); startRun() }}
           style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <label style={{ flex: 1, minWidth: 220 }}>
@@ -103,6 +108,8 @@ export default function ReproductionPanel({ bug, onTestCreated }: { bug: BugList
             {busy === 'start' ? 'Starting…' : run ? 'Try again' : 'Reproduce with the agent'}
           </button>
         </form>
+        {environments.length > 0 && <EnvironmentChoice environments={environments} current={baseUrl} onPick={setBaseUrl} />}
+        </>
       )}
 
       {run && v && (

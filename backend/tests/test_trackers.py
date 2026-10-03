@@ -174,12 +174,12 @@ class Scripted(LLMProvider):
 
 
 @pytest.fixture
-def mocked(monkeypatch, tmp_path, client, product):
+def mocked(monkeypatch, tmp_path, client, project):
     monkeypatch.setattr(settings, "mock_trackers", True)
     monkeypatch.setattr(settings, "evidence_dir", str(tmp_path / "evidence"))
     mock_trackers.reset()
-    client.patch(f"/products/{product['id']}", json={"github_repo": "addisverify/kyc", "jira_project_key": "KYC"})
-    return product
+    client.patch(f"/projects/{project['id']}", json={"github_repo": "addisverify/kyc", "jira_project_key": "KYC"})
+    return project
 
 
 def reviewed_bug(client, session, title="Upload widget never loads", kind="bug"):
@@ -191,28 +191,28 @@ def reviewed_bug(client, session, title="Upload widget never loads", kind="bug")
     return client.patch(f"/bugs/{bug['id']}", json=review).json()
 
 
-def test_tracker_status_says_what_is_missing(client, product, monkeypatch):
+def test_tracker_status_says_what_is_missing(client, project, monkeypatch):
     monkeypatch.setattr(settings, "mock_trackers", False)
     monkeypatch.setattr(settings, "github_token", None)
-    status = {t["name"]: t for t in client.get(f"/products/{product['id']}/trackers").json()}
+    status = {t["name"]: t for t in client.get(f"/projects/{project['id']}/trackers").json()}
     assert status["github"]["configured"] is False
-    assert status["github"]["missing"] == ["GITHUB_TOKEN in backend/.env", "the product's GitHub repo"]
+    assert status["github"]["missing"] == ["GITHUB_TOKEN in backend/.env", "the project's GitHub repo"]
     assert status["jira"]["supports_attachments"] is True
 
 
-def test_product_targets_are_validated_and_can_be_cleared(client, product):
-    assert client.patch(f"/products/{product['id']}", json={"github_repo": "not a repo"}).status_code == 422
-    assert client.patch(f"/products/{product['id']}", json={"jira_project_key": "kyc"}).status_code == 422
-    p = client.patch(f"/products/{product['id']}", json={"github_repo": "addisverify/kyc"}).json()
+def test_project_targets_are_validated_and_can_be_cleared(client, project):
+    assert client.patch(f"/projects/{project['id']}", json={"github_repo": "not a repo"}).status_code == 422
+    assert client.patch(f"/projects/{project['id']}", json={"jira_project_key": "kyc"}).status_code == 422
+    p = client.patch(f"/projects/{project['id']}", json={"github_repo": "addisverify/kyc"}).json()
     assert p["github_repo"] == "addisverify/kyc"
-    assert client.patch(f"/products/{product['id']}", json={"github_repo": ""}).json()["github_repo"] is None
+    assert client.patch(f"/projects/{project['id']}", json={"github_repo": ""}).json()["github_repo"] is None
 
 
-def test_not_set_up_is_a_clear_503(client, session, product, monkeypatch):
+def test_not_set_up_is_a_clear_503(client, session, project, monkeypatch):
     monkeypatch.setattr(settings, "mock_trackers", True)
     bug = reviewed_bug(client, session)
     r = client.post(f"/bugs/{bug['id']}/duplicates", json={"tracker": "jira"})
-    assert r.status_code == 503 and "the product's Jira project key" in r.json()["detail"]
+    assert r.status_code == 503 and "the project's Jira project key" in r.json()["detail"]
 
 
 def test_only_reviewed_bugs_are_checked_or_filed(client, session, mocked):

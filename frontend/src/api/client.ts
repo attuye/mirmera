@@ -14,6 +14,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     try {
       const parsed = JSON.parse(body)
       if (typeof parsed.detail === 'string') detail = parsed.detail
+      // Validation errors come as a list: "app_url: Value error, must start with http:// or https://"
+      else if (Array.isArray(parsed.detail)) {
+        detail = parsed.detail
+          .map((d: { loc?: unknown[]; msg?: string }) => `${(d.loc ?? []).filter((l) => l !== 'body').join('.')}: ${d.msg ?? 'invalid'}`)
+          .join('; ')
+      }
     } catch {
       // not JSON; keep the raw body
     }
@@ -22,23 +28,54 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json()
 }
 
-export interface Product {
+/** A named address of the app under test, e.g. staging. */
+export interface Environment {
+  name: string
+  url: string
+}
+
+/** What a tester works on. Risks, charters, sessions and bugs all belong to one. */
+export interface Project {
   id: string
   name: string
   org_id: string
+  description: string | null
   default_ai_provider: string
   testing_mission: string | null
-  /** Where this product's bugs are filed; credentials live in backend/.env. */
+  /** Where this project's bugs are filed; credentials live in backend/.env. */
   github_repo: string | null
   jira_project_key: string | null
+  /** Default address for the recorded browser, reproduction agent and regression runs. */
+  app_url: string | null
+  environments: Environment[]
+  default_tester: string | null
   created_at: string
+}
+
+/** A project on the Projects page. */
+export interface ProjectSummary extends Project {
+  risk_count: number
+  charter_count: number
+  session_count: number
+  bug_count: number
+  last_activity: string | null
+}
+
+export type ProjectChanges = Partial<Pick<Project,
+  'name' | 'description' | 'testing_mission' | 'default_ai_provider' | 'github_repo' | 'jira_project_key' |
+  'app_url' | 'environments' | 'default_tester'>>
+
+/** Every address a project knows, default first, without repeats. */
+export function projectUrls(project: Project): Environment[] {
+  const all = [...(project.app_url ? [{ name: 'default', url: project.app_url }] : []), ...project.environments]
+  return all.filter((e, i) => all.findIndex((o) => o.url === e.url) === i)
 }
 
 export const AI_PROVIDERS = ['mock', 'claude', 'openai', 'local'] as const
 
 export interface Charter {
   id: string
-  product_id: string
+  project_id: string
   mission_statement: string
   rationale: string | null
   risk_areas: string[]
@@ -61,6 +98,7 @@ export interface CharterSuggestion {
 export interface SessionRecord {
   id: string
   charter_id: string
+  project_id: string | null
   tester_id: string
   started_at: string
   ended_at: string | null
@@ -363,7 +401,7 @@ export interface BugListItem extends Bug {
 
 export interface Artifact {
   id: string
-  product_id: string
+  project_id: string
   type: 'spec' | 'diff' | 'bug_import'
   label: string
   ai_summary: string | null
@@ -379,7 +417,7 @@ export interface ModelElement {
 
 export interface ProductModel {
   id: string
-  product_id: string
+  project_id: string
   summary: string
   elements: ModelElement[]
   unknowns: string[]
@@ -398,7 +436,7 @@ export const QUALITY_CRITERIA = [
 
 export interface Risk {
   id: string
-  product_id: string
+  project_id: string
   ref: string
   title: string
   failure_mode: string
@@ -497,18 +535,19 @@ export interface CharterInput {
 }
 
 export const api = {
-  listProducts: () => request<Product[]>('/products'),
-  createProduct: (name: string, org_id: string) =>
-    request<Product>('/products', { method: 'POST', body: JSON.stringify({ name, org_id }) }),
+  listProjects: () => request<ProjectSummary[]>('/projects'),
+  getProject: (projectId: string) => request<Project>(`/projects/${projectId}`),
+  createProject: (project: { name: string; description?: string; app_url?: string }) =>
+    request<Project>('/projects', { method: 'POST', body: JSON.stringify(project) }),
 
-  listCharters: (productId: string) => request<Charter[]>(`/products/${productId}/charters`),
-  suggestCharters: (productId: string, artifactIds: string[], provider?: string) =>
-    request<CharterSuggestion[]>(`/products/${productId}/charters/suggest`, {
+  listCharters: (projectId: string) => request<Charter[]>(`/projects/${projectId}/charters`),
+  suggestCharters: (projectId: string, artifactIds: string[], provider?: string) =>
+    request<CharterSuggestion[]>(`/projects/${projectId}/charters/suggest`, {
       method: 'POST',
       body: JSON.stringify({ artifact_ids: artifactIds, provider }),
     }),
-  saveCharter: (productId: string, charter: CharterInput) =>
-    request<Charter>(`/products/${productId}/charters`, { method: 'POST', body: JSON.stringify(charter) }),
+  saveCharter: (projectId: string, charter: CharterInput) =>
+    request<Charter>(`/projects/${projectId}/charters`, { method: 'POST', body: JSON.stringify(charter) }),
 
   startSession: (charter_id: string, tester_id: string) =>
     request<SessionRecord>('/sessions', { method: 'POST', body: JSON.stringify({ charter_id, tester_id }) }),
@@ -549,16 +588,16 @@ export const api = {
     request<RegressionTest>(`/bugs/${bugId}/regression-test`, { method: 'POST', body: JSON.stringify({ known_failing: knownFailing }) }),
   replayRegressionTest: (testId: string, baseUrl?: string) =>
     request<RegressionTest>(`/regression-tests/${testId}/replay`, { method: 'POST', body: JSON.stringify({ base_url: baseUrl || null }) }),
-  trackerStatus: (productId: string) => request<TrackerStatus[]>(`/products/${productId}/trackers`),
+  trackerStatus: (projectId: string) => request<TrackerStatus[]>(`/projects/${projectId}/trackers`),
   checkDuplicates: (bugId: string, tracker: TrackerName) =>
     request<DuplicateCheck>(`/bugs/${bugId}/duplicates`, { method: 'POST', body: JSON.stringify({ tracker }) }),
   filingPreview: (bugId: string, tracker: TrackerName) =>
     request<FilingPreview>(`/bugs/${bugId}/filing-preview?tracker=${tracker}`),
   fileBug: (bugId: string, req: FileRequest) =>
     request<{ filing: BugFiling; warnings: string[] }>(`/bugs/${bugId}/file`, { method: 'POST', body: JSON.stringify(req) }),
-  listAllBugs: (productId: string) => request<BugListItem[]>(`/products/${productId}/bugs`),
+  listAllBugs: (projectId: string) => request<BugListItem[]>(`/projects/${projectId}/bugs`),
   getDebrief: (sessionId: string) => request<Debrief>(`/sessions/${sessionId}/debrief`),
-  listDebriefs: (productId: string) => request<DebriefListItem[]>(`/products/${productId}/debriefs`),
+  listDebriefs: (projectId: string) => request<DebriefListItem[]>(`/projects/${projectId}/debriefs`),
   updateDebrief: (sessionId: string, changes: DebriefUpdate) =>
     request<Debrief>(`/sessions/${sessionId}/debrief`, { method: 'PATCH', body: JSON.stringify(changes) }),
   saveOutlookCharter: (sessionId: string, index: number) =>
@@ -566,30 +605,30 @@ export const api = {
   promoteObservedRisk: (sessionId: string, index: number, promotion: ObservedRiskPromotion) =>
     request<Debrief>(`/sessions/${sessionId}/debrief/risks-observed/${index}/risk`, { method: 'POST', body: JSON.stringify(promotion) }),
 
-  updateProduct: (productId: string, changes: Partial<Pick<Product, 'name' | 'testing_mission' | 'default_ai_provider' | 'github_repo' | 'jira_project_key'>>) =>
-    request<Product>(`/products/${productId}`, { method: 'PATCH', body: JSON.stringify(changes) }),
+  updateProject: (projectId: string, changes: ProjectChanges) =>
+    request<Project>(`/projects/${projectId}`, { method: 'PATCH', body: JSON.stringify(changes) }),
 
-  listArtifacts: (productId: string) => request<Artifact[]>(`/products/${productId}/artifacts`),
-  createArtifact: (productId: string, artifact: { type: Artifact['type']; label: string; raw_content: string }) =>
-    request<Artifact>(`/products/${productId}/artifacts`, { method: 'POST', body: JSON.stringify(artifact) }),
+  listArtifacts: (projectId: string) => request<Artifact[]>(`/projects/${projectId}/artifacts`),
+  createArtifact: (projectId: string, artifact: { type: Artifact['type']; label: string; raw_content: string }) =>
+    request<Artifact>(`/projects/${projectId}/artifacts`, { method: 'POST', body: JSON.stringify(artifact) }),
 
   // Resolves to null when no product model has been built yet.
-  getProductModel: (productId: string) =>
-    request<ProductModel>(`/products/${productId}/product-model`).catch((e: Error) => {
+  getProductModel: (projectId: string) =>
+    request<ProductModel>(`/projects/${projectId}/product-model`).catch((e: Error) => {
       if (e.message.startsWith('No product model yet')) return null
       throw e
     }),
-  buildProductModel: (productId: string, artifactIds: string[]) =>
-    request<ProductModel>(`/products/${productId}/product-model`, {
+  buildProductModel: (projectId: string, artifactIds: string[]) =>
+    request<ProductModel>(`/projects/${projectId}/product-model`, {
       method: 'POST', body: JSON.stringify({ artifact_ids: artifactIds }),
     }),
 
-  listRisks: (productId: string, status?: Risk['status']) =>
-    request<Risk[]>(`/products/${productId}/risks${status ? `?status=${status}` : ''}`),
-  analyzeRisks: (productId: string, maxRisks = 12) =>
-    request<Risk[]>(`/products/${productId}/risks/analyze`, { method: 'POST', body: JSON.stringify({ max_risks: maxRisks }) }),
-  createRisk: (productId: string, risk: RiskInput) =>
-    request<Risk>(`/products/${productId}/risks`, { method: 'POST', body: JSON.stringify(risk) }),
+  listRisks: (projectId: string, status?: Risk['status']) =>
+    request<Risk[]>(`/projects/${projectId}/risks${status ? `?status=${status}` : ''}`),
+  analyzeRisks: (projectId: string, maxRisks = 12) =>
+    request<Risk[]>(`/projects/${projectId}/risks/analyze`, { method: 'POST', body: JSON.stringify({ max_risks: maxRisks }) }),
+  createRisk: (projectId: string, risk: RiskInput) =>
+    request<Risk>(`/projects/${projectId}/risks`, { method: 'POST', body: JSON.stringify(risk) }),
   riskHistory: (riskId: string) => request<RiskChange[]>(`/risks/${riskId}/history`),
   getRiskUpdates: (sessionId: string) => request<SessionRiskFeedback>(`/sessions/${sessionId}/risk-updates`),
   suggestRiskUpdates: (sessionId: string) =>
@@ -606,8 +645,8 @@ export const api = {
   reviewBug: (bugId: string, review: BugReview) =>
     request<Bug>(`/bugs/${bugId}`, { method: 'PATCH', body: JSON.stringify(review) }),
 
-  chartersFromRisks: (productId: string, riskIds?: string[]) =>
-    request<ChartersFromRisks>(`/products/${productId}/charters/from-risks`, {
+  chartersFromRisks: (projectId: string, riskIds?: string[]) =>
+    request<ChartersFromRisks>(`/projects/${projectId}/charters/from-risks`, {
       method: 'POST', body: JSON.stringify({ risk_ids: riskIds }),
     }),
 }

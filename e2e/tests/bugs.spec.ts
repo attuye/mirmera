@@ -1,12 +1,12 @@
 import { expect, test } from './fixtures'
 
 test('review bugs: draft with AI, enforce the oracle, save as bug or question', async ({ page, api }) => {
-  const product = await api.product()
-  const charter = await api.charter(product.id, 'Explore ID upload with expired and blurry documents')
+  const project = await api.project()
+  const charter = await api.charter(project.id, 'Explore ID upload with expired and blurry documents')
   const session = await api.session(charter.id)
 
   await test.step('log notes and two bugs from the session screen', async () => {
-    await page.goto(`/sessions/${session.id}`)
+    await page.goto(`/projects/${project.id}/sessions/${session.id}`)
     const box = page.getByPlaceholder('What are you observing?')
     for (const note of ['Uploaded an ID that expired in 2023', 'Clicked Verify', 'Verification passed with a green tick']) {
       await box.fill(note)
@@ -25,7 +25,7 @@ test('review bugs: draft with AI, enforce the oracle, save as bug or question', 
   const blurry = page.getByRole('article', { name: 'Should blurry selfies be rejected?' })
 
   await test.step('both wait for review on the Bugs page', async () => {
-    await page.goto('/bugs')
+    await page.goto(`/projects/${project.id}/bugs`)
     await expect(expired.getByText('Needs review')).toBeVisible()
     await expect(blurry.getByText('Needs review')).toBeVisible()
   })

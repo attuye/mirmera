@@ -10,16 +10,16 @@ from app.database import get_db
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/products/{product_id}/artifacts", tags=["artifacts"])
+router = APIRouter(prefix="/projects/{project_id}/artifacts", tags=["artifacts"])
 
 
 @router.post("", response_model=schemas.ArtifactOut)
-async def add_artifact(product_id: str, payload: schemas.ArtifactCreate, db: DBSession = Depends(get_db)):
-    product = db.get(models.Product, product_id)
-    if not product:
-        raise HTTPException(404, "Product not found")
+async def add_artifact(project_id: str, payload: schemas.ArtifactCreate, db: DBSession = Depends(get_db)):
+    project = db.get(models.Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
 
-    artifact = models.Artifact(product_id=product_id, **payload.model_dump())
+    artifact = models.Artifact(project_id=project_id, **payload.model_dump())
     db.add(artifact)
     db.commit()
     db.refresh(artifact)
@@ -30,7 +30,7 @@ async def add_artifact(product_id: str, payload: schemas.ArtifactCreate, db: DBS
     # The reason is logged, so a misconfiguration doesn't go unnoticed.
     if artifact.raw_content:
         try:
-            provider = get_provider(product.default_ai_provider)
+            provider = get_provider(project.default_ai_provider)
             artifact.ai_summary = await tasks.summarize_artifact(
                 provider, raw_content=artifact.raw_content, artifact_type=artifact.type,
             )
@@ -43,5 +43,5 @@ async def add_artifact(product_id: str, payload: schemas.ArtifactCreate, db: DBS
 
 
 @router.get("", response_model=list[schemas.ArtifactOut])
-def list_artifacts(product_id: str, db: DBSession = Depends(get_db)):
-    return db.query(models.Artifact).filter(models.Artifact.product_id == product_id).all()
+def list_artifacts(project_id: str, db: DBSession = Depends(get_db)):
+    return db.query(models.Artifact).filter(models.Artifact.project_id == project_id).all()

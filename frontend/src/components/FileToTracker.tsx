@@ -2,7 +2,7 @@
  *  file a new issue or add this as a new occurrence to an existing one. */
 import { useEffect, useState } from 'react'
 import {
-  api, BugFiling, BugListItem, DuplicateCandidate, DuplicateCheck, FilingPreview, Product, TrackerName, TrackerStatus,
+  api, BugFiling, BugListItem, DuplicateCandidate, DuplicateCheck, FilingPreview, Project, TrackerName, TrackerStatus,
 } from '../api/client'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from './ui'
 
@@ -30,18 +30,18 @@ export function FilingLinks({ filings }: { filings: BugFiling[] }) {
   )
 }
 
-/** When a product has no repo / project yet: set it here. Secrets stay in .env. */
-function Setup({ status, product, onProduct }: { status: TrackerStatus; product: Product; onProduct: (p: Product) => void }) {
+/** When a project has no repo / Jira project yet: set it here. Secrets stay in .env. */
+function Setup({ status, project, onProject }: { status: TrackerStatus; project: Project; onProject: (p: Project) => void }) {
   const field = status.name === 'github' ? 'github_repo' : 'jira_project_key'
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const needsTarget = status.missing.some((m) => m.startsWith("the product's"))
-  const envMissing = status.missing.filter((m) => !m.startsWith("the product's"))
+  const needsTarget = status.missing.some((m) => m.startsWith("the project's"))
+  const envMissing = status.missing.filter((m) => !m.startsWith("the project's"))
 
   async function save() {
     setError(null)
     try {
-      onProduct(await api.updateProduct(product.id, { [field]: value.trim() }))
+      onProject(await api.updateProject(project.id, { [field]: value.trim() }))
     } catch (e) {
       setError(errorText(e))
     }
@@ -52,7 +52,7 @@ function Setup({ status, product, onProduct }: { status: TrackerStatus; product:
       {needsTarget && (
         <form onSubmit={(e) => { e.preventDefault(); save() }} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', margin: '4px 0 8px' }}>
           <label style={{ flex: 1, maxWidth: 320 }}>
-            <span style={fieldLabel}>{status.name === 'github' ? 'GitHub repo for this product' : 'Jira project key for this product'}</span>
+            <span style={fieldLabel}>{status.name === 'github' ? 'GitHub repo for this project' : 'Jira project key for this project'}</span>
             <input value={value} onChange={(e) => setValue(e.target.value)} style={input}
               placeholder={status.name === 'github' ? 'owner/repo' : 'e.g. KYC'} />
           </label>
@@ -93,10 +93,10 @@ function Candidate({ c, onPick, picked }: { c: DuplicateCandidate; onPick: () =>
   )
 }
 
-export default function FileToTracker({ bug, product, onProduct, onFiled }: {
+export default function FileToTracker({ bug, project, onProject, onFiled }: {
   bug: BugListItem
-  product: Product
-  onProduct: (p: Product) => void
+  project: Project
+  onProject: (p: Project) => void
   onFiled: (f: BugFiling) => void
 }) {
   const [statuses, setStatuses] = useState<TrackerStatus[] | null>(null)
@@ -111,11 +111,11 @@ export default function FileToTracker({ bug, product, onProduct, onFiled }: {
   const [warnings, setWarnings] = useState<string[]>([])
 
   useEffect(() => {
-    api.trackerStatus(product.id).then((s) => {
+    api.trackerStatus(project.id).then((s) => {
       setStatuses(s)
       setTracker((t) => t ?? (s.find((x) => x.configured)?.name ?? s[0]?.name ?? null))
     }).catch((e) => setError(errorText(e)))
-  }, [product.id, product.github_repo, product.jira_project_key])
+  }, [project.id, project.github_repo, project.jira_project_key])
 
   // A new tracker means a new search, a new preview and no pick.
   useEffect(() => {
@@ -170,7 +170,7 @@ export default function FileToTracker({ bug, product, onProduct, onFiled }: {
         {status?.is_mock && <span style={{ fontSize: 11, color: 'var(--warning)' }}>Mock trackers (MOCK_TRACKERS=true): nothing leaves this machine</span>}
       </div>
 
-      {status && !status.configured && <Setup status={status} product={product} onProduct={onProduct} />}
+      {status && !status.configured && <Setup status={status} project={project} onProject={onProject} />}
 
       {status?.configured && filed && (
         <div role="status" style={{ fontSize: 13 }}>

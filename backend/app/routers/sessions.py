@@ -167,12 +167,12 @@ def list_bugs(session_id: str, db: DBSession = Depends(get_db)):
     return db.query(models.Bug).filter(models.Bug.session_id == session_id).all()
 
 
-@bugs_list_router.get("/products/{product_id}/bugs", response_model=list[schemas.BugListItem])
-def list_all_bugs(product_id: str, db: DBSession = Depends(get_db)):
+@bugs_list_router.get("/projects/{project_id}/bugs", response_model=list[schemas.BugListItem])
+def list_all_bugs(project_id: str, db: DBSession = Depends(get_db)):
     rows = (
         db.query(models.Bug, models.Charter)
         .join(models.Charter, models.Bug.charter_id == models.Charter.id)
-        .filter(models.Charter.product_id == product_id)
+        .filter(models.Charter.project_id == project_id)
         .order_by(models.Bug.created_at.desc())
         .all()
     )
@@ -195,7 +195,7 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
     session.ended_at = utcnow()
     charter = db.get(models.Charter, session.charter_id)
     charter.status = "done"
-    product = db.get(models.Product, charter.product_id)
+    project = db.get(models.Project, charter.project_id)
 
     notes = db.query(models.Note).filter(models.Note.session_id == session_id).order_by(models.Note.timestamp).all()
     bugs = db.query(models.Bug).filter(models.Bug.session_id == session_id).all()
@@ -212,7 +212,7 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
     browser = browser_context(recorded, session.started_at, used=bool(recorded))
 
     try:
-        provider = get_provider(product.default_ai_provider)
+        provider = get_provider(project.default_ai_provider)
         draft = await tasks.draft_debrief(
             provider,
             charter_mission=charter.mission_statement,

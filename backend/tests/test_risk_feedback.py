@@ -20,23 +20,23 @@ class Scripted(LLMProvider):
         return self.reply
 
 
-def make_risk(client, product, title, impact, likelihood):
-    return client.post(f"/products/{product['id']}/risks", json={
+def make_risk(client, project, title, impact, likelihood):
+    return client.post(f"/projects/{project['id']}/risks", json={
         "title": title, "failure_mode": f"{title} for shoppers", "quality_criterion": "capability",
         "impact": impact, "likelihood": likelihood,
     }).json()
 
 
 @pytest.fixture
-def risks(client, product):
-    return make_risk(client, product, "Coupon lost on currency switch", 5, 2), \
-        make_risk(client, product, "Rounding differs by currency", 3, 3)
+def risks(client, project):
+    return make_risk(client, project, "Coupon lost on currency switch", 5, 2), \
+        make_risk(client, project, "Rounding differs by currency", 3, 3)
 
 
 @pytest.fixture
-def ended(client, product, risks):
+def ended(client, project, risks):
     """A session on a charter covering both risks: notes, one bug, ended."""
-    charter = client.post(f"/products/{product['id']}/charters", json={
+    charter = client.post(f"/projects/{project['id']}/charters", json={
         "mission_statement": "Explore coupons with currency switches", "risk_ids": [r["id"] for r in risks],
     }).json()
     s = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
@@ -56,13 +56,13 @@ def by_ref(feedback):
     return {c["risk_ref"]: c for c in feedback["changes"]}
 
 
-def risk_now(client, product, risk_id):
-    return next(r for r in client.get(f"/products/{product['id']}/risks").json() if r["id"] == risk_id)
+def risk_now(client, project, risk_id):
+    return next(r for r in client.get(f"/projects/{project['id']}/risks").json() if r["id"] == risk_id)
 
 
 # ---------- suggesting ----------
 
-def test_suggestions_need_an_ended_session_with_risks(client, product, risks, session):
+def test_suggestions_need_an_ended_session_with_risks(client, project, risks, session):
     assert suggest(client, session).status_code == 409  # still running
     client.post(f"/sessions/{session['id']}/end")
     r = suggest(client, session)  # ended, but its charter has no risks
@@ -121,31 +121,31 @@ def test_a_suggestion_without_evidence_is_refused(client, ended, monkeypatch):
 
 # ---------- deciding ----------
 
-def test_accepting_rescoring_the_risk_and_recording_it(client, product, risks, ended):
+def test_accepting_rescoring_the_risk_and_recording_it(client, project, risks, ended):
     change = by_ref(suggest(client, ended).json())["R1"]
     accepted = client.post(f"/risk-changes/{change['id']}/accept", json={"note": "Saw it twice"}).json()
     assert (accepted["status"], accepted["final_likelihood"], accepted["tester_note"]) == ("accepted", 3, "Saw it twice")
 
-    risk = risk_now(client, product, risks[0]["id"])
+    risk = risk_now(client, project, risks[0]["id"])
     assert (risk["likelihood"], risk["score"]) == (3, 15)
     assert risk["last_change"] == "Re-scored I5xL2 -> I5xL3 after a session"
     assert client.post(f"/risk-changes/{change['id']}/accept", json={}).status_code == 409
 
 
-def test_the_tester_can_accept_with_their_own_numbers(client, product, risks, ended):
+def test_the_tester_can_accept_with_their_own_numbers(client, project, risks, ended):
     change = by_ref(suggest(client, ended).json())["R2"]
     client.post(f"/risk-changes/{change['id']}/accept", json={"impact": 4, "likelihood": 5})
-    risk = risk_now(client, product, risks[1]["id"])
+    risk = risk_now(client, project, risks[1]["id"])
     assert (risk["impact"], risk["likelihood"]) == (4, 5)
     assert risk["last_change"].endswith("(adjusted by tester)")
     assert client.post(f"/risk-changes/{change['id']}/accept", json={"impact": 6}).status_code in (409, 422)
 
 
-def test_rejecting_keeps_the_score_and_the_reason(client, product, risks, ended):
+def test_rejecting_keeps_the_score_and_the_reason(client, project, risks, ended):
     change = by_ref(suggest(client, ended).json())["R1"]
     rejected = client.post(f"/risk-changes/{change['id']}/reject", json={"note": "Known issue, fixed in 2.4"}).json()
     assert (rejected["status"], rejected["tester_note"]) == ("rejected", "Known issue, fixed in 2.4")
-    assert risk_now(client, product, risks[0]["id"])["likelihood"] == 2
+    assert risk_now(client, project, risks[0]["id"])["likelihood"] == 2
 
 
 def test_a_stale_suggestion_cannot_be_accepted(client, risks, ended):
@@ -180,5 +180,5 @@ def test_history_holds_session_decisions_and_manual_rescores(client, risks, ende
 
 
 def test_editing_a_risk_without_rescoring_adds_no_history(client, risks):
-    client.patch(f"/risks/{risks[0]['id']}", json={"tester_notes": "Checked with product owner"})
+    client.patch(f"/risks/{risks[0]['id']}", json={"tester_notes": "Checked with project owner"})
     assert client.get(f"/risks/{risks[0]['id']}/history").json() == []

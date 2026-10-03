@@ -7,11 +7,13 @@ from fastapi.responses import JSONResponse
 
 from app.ai.base import ProviderError, ProviderNotConfigured, UnknownProvider
 from app.config import settings
-from app.database import Base, add_missing_columns, engine
-from app.routers import products, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension
+from app.database import Base, add_missing_columns, apply_renames, engine
+from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension
 from app.runner import RunnerConflict, RunnerUnavailable, manager as runner_manager
 from app.trackers import TrackerError, TrackerNotConfigured, UnknownTracker
 
+for change in apply_renames():  # moves renamed tables and columns, keeping their data
+    logging.getLogger(__name__).warning("Database upgraded: renamed %s", change)
 Base.metadata.create_all(bind=engine)  # creates new tables
 for column in add_missing_columns():  # adds new columns to existing tables
     logging.getLogger(__name__).warning("Database upgraded: added column %s", column)
@@ -75,7 +77,7 @@ async def runner_conflict(_: Request, err: RunnerConflict):
 
 
 app.include_router(extension.router)  # before sessions: /sessions/active must not match /sessions/{id}
-app.include_router(products.router)
+app.include_router(projects.router)
 app.include_router(artifacts.router)
 app.include_router(charters.router)
 app.include_router(sessions.router)

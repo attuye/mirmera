@@ -31,8 +31,8 @@ class Settings(BaseSettings):
     # They can contain whatever the tested app shows, so keep them out of git.
     evidence_dir: str = "./evidence"
 
-    # Issue trackers. Secrets live here only; which repo / project a product
-    # files to is set per product in the app.
+    # Issue trackers. Secrets live here only; which GitHub repo / Jira project
+    # each Mirmera project files to is set in the app (project settings).
     github_token: str | None = None  # fine-grained token with Issues: read and write
     github_api_url: str = "https://api.github.com"
     github_labels: str = ""  # comma-separated labels to add, e.g. "bug,from-mirmera" (must exist in the repo)

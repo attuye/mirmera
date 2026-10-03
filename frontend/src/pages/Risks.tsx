@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
+import { useProject, useProjectPath } from '../project'
 import RiskMatrix, { scoreBand } from '../components/RiskMatrix'
 import { RiskHistory } from '../components/RiskUpdates'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
 import {
-  AI_PROVIDERS, api, Artifact, ChartersFromRisks, ModelElement, Product, ProductModel,
+  AI_PROVIDERS, api, Artifact, ChartersFromRisks, ModelElement, Project, ProjectChanges, ProductModel,
   QUALITY_CRITERIA, Risk, RiskCharterDraft, RiskInput,
 } from '../api/client'
 
@@ -39,7 +40,7 @@ function Section({ step, title, intro, children }: { step: number; title: string
 // ---------- page ----------
 
 export default function RisksPage() {
-  const [product, setProduct] = useState<Product | null>(null)
+  const { project, setProject } = useProject()
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [model, setModel] = useState<ProductModel | null>(null)
   const [risks, setRisks] = useState<Risk[]>([])
@@ -47,29 +48,25 @@ export default function RisksPage() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  const refreshRisks = useCallback(async (productId: string) => {
-    const [active, gone] = await Promise.all([api.listRisks(productId), api.listRisks(productId, 'retired')])
+  const refreshRisks = useCallback(async (projectId: string) => {
+    const [active, gone] = await Promise.all([api.listRisks(projectId), api.listRisks(projectId, 'retired')])
     setRisks(active)
     setRetired(gone)
   }, [])
 
   useEffect(() => {
     async function load() {
-      const products = await api.listProducts()
-      const p = products[0]
-      if (!p) return
-      setProduct(p)
-      const [a, m] = await Promise.all([api.listArtifacts(p.id), api.getProductModel(p.id)])
+      const [a, m] = await Promise.all([api.listArtifacts(project.id), api.getProductModel(project.id)])
       setArtifacts(a)
       setModel(m)
-      await refreshRisks(p.id)
+      await refreshRisks(project.id)
     }
+    setLoading(true)
     load().catch((e) => setLoadError(errorText(e))).finally(() => setLoading(false))
-  }, [refreshRisks])
+  }, [project.id, refreshRisks])
 
   function replaceRisk(updated: Risk) {
-    if (!product) return
-    refreshRisks(product.id).catch(console.error)
+    refreshRisks(project.id).catch(console.error)
     setRisks((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
   }
 
@@ -79,28 +76,23 @@ export default function RisksPage() {
       <main style={{ flex: 1, padding: '32px 40px', maxWidth: 1180, minWidth: 0 }}>
         <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0 }}>Risks</h1>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '6px 0 0', maxWidth: 640, lineHeight: 1.5 }}>
-          Decide what is worth testing first. The AI proposes a model of the product and risks to explore;
+          Decide what is worth testing first. The AI proposes a model of the project and risks to explore;
           you decide which risks are real, how serious they are, and which ones become charters.
         </p>
 
         {loading && <div style={{ color: 'var(--text-secondary)', marginTop: 24 }}>Loading…</div>}
         <ErrorLine message={loadError} />
-        {!loading && !product && !loadError && (
-          <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginTop: 24 }}>
-            No product yet. Open the <Link to="/dashboard">dashboard</Link> to create one.
-          </div>
-        )}
 
-        {product && (
+        {!loading && (
           <>
-            <ProductSettings product={product} onSaved={setProduct} />
+            <MissionSettings project={project} onSaved={setProject} />
             <Section
               step={1}
-              title="Model the product"
+              title="Model the project"
               intro="Pick the specs, diffs or bug histories that describe what changed. The AI maps them to the product elements of the Heuristic Test Strategy Model and lists open questions for your team."
             >
               <ArtifactsAndModel
-                product={product}
+                project={project}
                 artifacts={artifacts}
                 model={model}
                 onArtifactAdded={(a) => setArtifacts((prev) => [...prev, a])}
@@ -113,13 +105,13 @@ export default function RisksPage() {
               intro="AI-proposed risks stay in review until you accept them. Re-score anything that doesn't match what you know, retire what doesn't apply, and add risks the AI missed."
             >
               <RiskReview
-                product={product}
+                project={project}
                 model={model}
                 risks={risks}
                 retired={retired}
-                onAnalyzed={() => refreshRisks(product.id)}
+                onAnalyzed={() => refreshRisks(project.id)}
                 onChanged={replaceRisk}
-                onAdded={() => refreshRisks(product.id)}
+                onAdded={() => refreshRisks(project.id)}
               />
             </Section>
             <Section
@@ -127,7 +119,7 @@ export default function RisksPage() {
               title="Plan charters"
               intro="Turn accepted risks into exploratory charters. Each draft says which risks it investigates, with starting ideas and the oracles to watch; save the ones you want to run."
             >
-              <CharterPlanner product={product} accepted={risks.filter((r) => r.status === 'accepted')} />
+              <CharterPlanner project={project} accepted={risks.filter((r) => r.status === 'accepted')} />
             </Section>
           </>
         )}
@@ -136,19 +128,19 @@ export default function RisksPage() {
   )
 }
 
-// ---------- product settings ----------
+// ---------- mission and AI provider (also on the Settings page) ----------
 
-function ProductSettings({ product, onSaved }: { product: Product; onSaved: (p: Product) => void }) {
-  const [mission, setMission] = useState(product.testing_mission ?? '')
+function MissionSettings({ project, onSaved }: { project: Project; onSaved: (p: Project) => void }) {
+  const [mission, setMission] = useState(project.testing_mission ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const dirty = mission.trim() !== (product.testing_mission ?? '')
+  const dirty = mission.trim() !== (project.testing_mission ?? '')
 
-  async function save(changes: Parameters<typeof api.updateProduct>[1]) {
+  async function save(changes: ProjectChanges) {
     setSaving(true)
     setError(null)
     try {
-      onSaved(await api.updateProduct(product.id, changes))
+      onSaved(await api.updateProject(project.id, changes))
     } catch (e) {
       setError(errorText(e))
     } finally {
@@ -159,7 +151,7 @@ function ProductSettings({ product, onSaved }: { product: Product; onSaved: (p: 
   return (
     <div style={{ display: 'flex', gap: 20, alignItems: 'flex-end', flexWrap: 'wrap', margin: '24px 0 26px' }}>
       <div style={{ flex: '1 1 420px' }}>
-        <label htmlFor="mission" style={fieldLabel}>Testing mission for {product.name}</label>
+        <label htmlFor="mission" style={fieldLabel}>Testing mission for {project.name}</label>
         <div style={{ display: 'flex', gap: 8 }}>
           <input
             id="mission"
@@ -178,7 +170,7 @@ function ProductSettings({ product, onSaved }: { product: Product; onSaved: (p: 
         <label htmlFor="provider" style={fieldLabel}>AI provider</label>
         <select
           id="provider"
-          value={product.default_ai_provider}
+          value={project.default_ai_provider}
           onChange={(e) => save({ default_ai_provider: e.target.value })}
           disabled={saving}
           style={{ ...input, width: 140 }}
@@ -193,8 +185,8 @@ function ProductSettings({ product, onSaved }: { product: Product; onSaved: (p: 
 
 // ---------- step 1: artifacts and product model ----------
 
-function ArtifactsAndModel({ product, artifacts, model, onArtifactAdded, onModelBuilt }: {
-  product: Product
+function ArtifactsAndModel({ project, artifacts, model, onArtifactAdded, onModelBuilt }: {
+  project: Project
   artifacts: Artifact[]
   model: ProductModel | null
   onArtifactAdded: (a: Artifact) => void
@@ -219,7 +211,7 @@ function ArtifactsAndModel({ product, artifacts, model, onArtifactAdded, onModel
     setBusy('add')
     setError(null)
     try {
-      const a = await api.createArtifact(product.id, { ...draft, label: draft.label.trim() })
+      const a = await api.createArtifact(project.id, { ...draft, label: draft.label.trim() })
       onArtifactAdded(a)
       setSelected((prev) => new Set(prev).add(a.id))
       setDraft({ type: 'spec', label: '', raw_content: '' })
@@ -235,7 +227,7 @@ function ArtifactsAndModel({ product, artifacts, model, onArtifactAdded, onModel
     setBusy('build')
     setError(null)
     try {
-      onModelBuilt(await api.buildProductModel(product.id, [...selected]))
+      onModelBuilt(await api.buildProductModel(project.id, [...selected]))
     } catch (e) {
       setError(errorText(e))
     } finally {
@@ -322,7 +314,7 @@ function ArtifactsAndModel({ product, artifacts, model, onArtifactAdded, onModel
       <div style={{ minWidth: 0 }}>
         {!model ? (
           <div style={{ fontSize: 13, color: 'var(--text-tertiary)', border: '1px dashed var(--border)', borderRadius: 10, padding: 18 }}>
-            The product model will appear here: what the product is made of, what it does, and what nobody has written down yet.
+            The product model will appear here: what the project is made of, what it does, and what nobody has written down yet.
           </div>
         ) : (
           <div>
@@ -366,8 +358,8 @@ function ArtifactsAndModel({ product, artifacts, model, onArtifactAdded, onModel
 
 // ---------- step 2: risk review ----------
 
-function RiskReview({ product, model, risks, retired, onAnalyzed, onChanged, onAdded }: {
-  product: Product
+function RiskReview({ project, model, risks, retired, onAnalyzed, onChanged, onAdded }: {
+  project: Project
   model: ProductModel | null
   risks: Risk[]
   retired: Risk[]
@@ -386,7 +378,7 @@ function RiskReview({ product, model, risks, retired, onAnalyzed, onChanged, onA
     setBusy(true)
     setError(null)
     try {
-      await api.analyzeRisks(product.id)
+      await api.analyzeRisks(project.id)
       await onAnalyzed()
     } catch (e) {
       setError(errorText(e))
@@ -414,7 +406,7 @@ function RiskReview({ product, model, risks, retired, onAnalyzed, onChanged, onA
       </div>
       <ErrorLine message={error} />
       {addingRisk && (
-        <AddRiskForm product={product} onAdded={async () => { await onAdded(); setAddingRisk(false) }} />
+        <AddRiskForm project={project} onAdded={async () => { await onAdded(); setAddingRisk(false) }} />
       )}
 
       {risks.length === 0 && !addingRisk ? (
@@ -573,7 +565,7 @@ function RiskCard({ risk, selected, onChanged, refCallback }: {
   )
 }
 
-function AddRiskForm({ product, onAdded }: { product: Product; onAdded: () => Promise<void> }) {
+function AddRiskForm({ project, onAdded }: { project: Project; onAdded: () => Promise<void> }) {
   const [risk, setRisk] = useState<RiskInput>({ title: '', failure_mode: '', quality_criterion: 'capability', impact: 3, likelihood: 3 })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -583,7 +575,7 @@ function AddRiskForm({ product, onAdded }: { product: Product; onAdded: () => Pr
     setBusy(true)
     setError(null)
     try {
-      await api.createRisk(product.id, { ...risk, title: risk.title.trim(), failure_mode: risk.failure_mode.trim() })
+      await api.createRisk(project.id, { ...risk, title: risk.title.trim(), failure_mode: risk.failure_mode.trim() })
       await onAdded()
     } catch (e) {
       setError(errorText(e))
@@ -626,7 +618,8 @@ function AddRiskForm({ product, onAdded }: { product: Product; onAdded: () => Pr
 
 // ---------- step 3: charters from risks ----------
 
-function CharterPlanner({ product, accepted }: { product: Product; accepted: Risk[] }) {
+function CharterPlanner({ project, accepted }: { project: Project; accepted: Risk[] }) {
+  const charterPath = useProjectPath()('/charters/suggest')
   const [excluded, setExcluded] = useState<Set<string>>(new Set())
   const [result, setResult] = useState<ChartersFromRisks | null>(null)
   const [saved, setSaved] = useState<Set<number>>(new Set())
@@ -647,7 +640,7 @@ function CharterPlanner({ product, accepted }: { product: Product; accepted: Ris
     setBusy(true)
     setError(null)
     try {
-      setResult(await api.chartersFromRisks(product.id, chosen.map((r) => r.id)))
+      setResult(await api.chartersFromRisks(project.id, chosen.map((r) => r.id)))
       setSaved(new Set())
     } catch (e) {
       setError(errorText(e))
@@ -659,7 +652,7 @@ function CharterPlanner({ product, accepted }: { product: Product; accepted: Ris
   async function save(d: RiskCharterDraft, index: number) {
     setError(null)
     try {
-      await api.saveCharter(product.id, {
+      await api.saveCharter(project.id, {
         mission_statement: d.mission_statement, rationale: d.rationale, priority: d.priority,
         source: 'risk-based', risk_ids: d.risk_ids, test_ideas: d.test_ideas, oracles: d.oracles,
         risk_areas: accepted.filter((r) => d.risk_ids.includes(r.id)).map((r) => r.title),
@@ -710,7 +703,7 @@ function CharterPlanner({ product, accepted }: { product: Product; accepted: Ris
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.45 }}>{d.mission_statement}</div>
                 {saved.has(i) ? (
-                  <Link to="/charters/suggest" style={{ fontSize: 12.5, whiteSpace: 'nowrap' }}>Saved. Start it from Charters</Link>
+                  <Link to={charterPath} style={{ fontSize: 12.5, whiteSpace: 'nowrap' }}>Saved. Start it from Charters</Link>
                 ) : (
                   <button onClick={() => save(d, i)} style={{ ...primaryButton(), padding: '6px 13px', whiteSpace: 'nowrap', height: 'fit-content' }}>
                     Save charter

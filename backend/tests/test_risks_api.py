@@ -21,33 +21,33 @@ class Scripted(LLMProvider):
 
 
 @pytest.fixture
-def artifact(client, product):
-    return client.post(f"/products/{product['id']}/artifacts", json={
+def artifact(client, project):
+    return client.post(f"/projects/{project['id']}/artifacts", json={
         "type": "diff", "label": "pr-482", "raw_content": "def apply_coupon(code): ...\ndef convert_currency(): ...",
     }).json()
 
 
 @pytest.fixture
-def modelled(client, product, artifact):
-    """A product with a product model built from one artifact."""
-    r = client.post(f"/products/{product['id']}/product-model", json={"artifact_ids": [artifact["id"]]})
+def modelled(client, project, artifact):
+    """A project with a product model built from one artifact."""
+    r = client.post(f"/projects/{project['id']}/product-model", json={"artifact_ids": [artifact["id"]]})
     assert r.status_code == 200
-    return product
+    return project
 
 
 @pytest.fixture
 def risks(client, modelled):
-    return client.post(f"/products/{modelled['id']}/risks/analyze", json={}).json()
+    return client.post(f"/projects/{modelled['id']}/risks/analyze", json={}).json()
 
 
 def accept(client, risk):
     return client.patch(f"/risks/{risk['id']}", json={"status": "accepted"}).json()
 
 
-# ---------- products ----------
+# ---------- projects ----------
 
-def test_product_mission_and_provider_can_be_updated(client, product):
-    r = client.patch(f"/products/{product['id']}", json={
+def test_project_mission_and_provider_can_be_updated(client, project):
+    r = client.patch(f"/projects/{project['id']}", json={
         "testing_mission": "Find release blockers in checkout", "default_ai_provider": "local",
     })
     assert r.status_code == 200
@@ -55,16 +55,16 @@ def test_product_mission_and_provider_can_be_updated(client, product):
     assert r.json()["default_ai_provider"] == "local"
 
 
-def test_unknown_provider_is_rejected_on_update(client, product):
-    r = client.patch(f"/products/{product['id']}", json={"default_ai_provider": "gpt"})
+def test_unknown_provider_is_rejected_on_update(client, project):
+    r = client.patch(f"/projects/{project['id']}", json={"default_ai_provider": "gpt"})
     assert r.status_code == 400
-    assert client.get(f"/products/{product['id']}").json()["default_ai_provider"] == "mock"
+    assert client.get(f"/projects/{project['id']}").json()["default_ai_provider"] == "mock"
 
 
 # ---------- product model ----------
 
-def test_product_model_is_built_and_records_provenance(client, product, artifact):
-    r = client.post(f"/products/{product['id']}/product-model", json={"artifact_ids": [artifact["id"]]})
+def test_project_model_is_built_and_records_provenance(client, project, artifact):
+    r = client.post(f"/projects/{project['id']}/product-model", json={"artifact_ids": [artifact["id"]]})
     model = r.json()
     assert r.status_code == 200
     assert {e["name"] for e in model["elements"]} >= {"apply_coupon", "convert_currency"}
@@ -72,29 +72,29 @@ def test_product_model_is_built_and_records_provenance(client, product, artifact
     assert model["unknowns"]
     assert (model["ai_provider"], model["prompt_version"]) == ("mock", "product-model-v1")
     assert model["artifact_ids"] == [artifact["id"]]
-    assert client.get(f"/products/{product['id']}/product-model").json()["id"] == model["id"]
+    assert client.get(f"/projects/{project['id']}/product-model").json()["id"] == model["id"]
 
 
-def test_product_model_needs_artifacts_from_this_product(client, product):
-    r = client.post(f"/products/{product['id']}/product-model", json={"artifact_ids": ["nope"]})
+def test_project_model_needs_artifacts_from_this_project(client, project):
+    r = client.post(f"/projects/{project['id']}/product-model", json={"artifact_ids": ["nope"]})
     assert r.status_code == 400
 
 
-def test_no_product_model_yet_is_404(client, product):
-    assert client.get(f"/products/{product['id']}/product-model").status_code == 404
+def test_no_product_model_yet_is_404(client, project):
+    assert client.get(f"/projects/{project['id']}/product-model").status_code == 404
 
 
-def test_huge_artifacts_are_truncated_and_reported(client, product):
-    big = client.post(f"/products/{product['id']}/artifacts",
+def test_huge_artifacts_are_truncated_and_reported(client, project):
+    big = client.post(f"/projects/{project['id']}/artifacts",
                       json={"type": "spec", "label": "huge-spec.md", "raw_content": "x" * 20_000}).json()
-    r = client.post(f"/products/{product['id']}/product-model", json={"artifact_ids": [big["id"]]})
+    r = client.post(f"/projects/{project['id']}/product-model", json={"artifact_ids": [big["id"]]})
     assert r.json()["truncated_artifacts"] == ["huge-spec.md"]
 
 
 # ---------- risk analysis ----------
 
-def test_risk_analysis_needs_a_product_model(client, product):
-    r = client.post(f"/products/{product['id']}/risks/analyze", json={})
+def test_risk_analysis_needs_a_product_model(client, project):
+    r = client.post(f"/projects/{project['id']}/risks/analyze", json={})
     assert r.status_code == 409
 
 
@@ -114,21 +114,21 @@ def test_second_analysis_continues_numbering_and_sees_existing_risks(client, mod
         "impact": 2, "likelihood": 3, "rationale": "r", "evidence": "inferred",
     }]})
     monkeypatch.setattr("app.routers.risks.get_provider", lambda name: provider)
-    new = client.post(f"/products/{modelled['id']}/risks/analyze", json={}).json()
+    new = client.post(f"/projects/{modelled['id']}/risks/analyze", json={}).json()
     assert [r["ref"] for r in new] == ["R4"]
     assert risks[0]["title"] in provider.users[0]  # told what already exists
 
 
 def test_risk_list_is_sorted_and_hides_retired(client, modelled, risks):
     client.patch(f"/risks/{risks[0]['id']}", json={"status": "retired"})
-    listed = client.get(f"/products/{modelled['id']}/risks").json()
+    listed = client.get(f"/projects/{modelled['id']}/risks").json()
     assert [r["ref"] for r in listed] == ["R2", "R3"]
-    retired = client.get(f"/products/{modelled['id']}/risks", params={"status": "retired"}).json()
+    retired = client.get(f"/projects/{modelled['id']}/risks", params={"status": "retired"}).json()
     assert [r["ref"] for r in retired] == ["R1"]
 
 
-def test_manual_risk_is_accepted_and_labelled_as_tester(client, product):
-    r = client.post(f"/products/{product['id']}/risks", json={
+def test_manual_risk_is_accepted_and_labelled_as_tester(client, project):
+    r = client.post(f"/projects/{project['id']}/risks", json={
         "title": "Coupon reuse", "failure_mode": "One-time coupon works twice",
         "quality_criterion": "capability", "impact": 4, "likelihood": 2,
     }).json()
@@ -160,14 +160,14 @@ def test_unknown_risk_is_404(client):
 # ---------- charters from risks ----------
 
 def test_charters_need_accepted_risks(client, modelled, risks):
-    r = client.post(f"/products/{modelled['id']}/charters/from-risks", json={})
+    r = client.post(f"/projects/{modelled['id']}/charters/from-risks", json={})
     assert r.status_code == 400  # all three are still only proposed
 
 
 def test_charters_are_drafted_from_accepted_risks_only(client, modelled, risks):
     for risk in risks[:2]:
         accept(client, risk)
-    out = client.post(f"/products/{modelled['id']}/charters/from-risks", json={}).json()
+    out = client.post(f"/projects/{modelled['id']}/charters/from-risks", json={}).json()
     assert len(out["charters"]) == 1
     draft = out["charters"][0]
     assert draft["risk_refs"] == ["R1", "R2"]
@@ -188,7 +188,7 @@ def test_invented_risk_refs_are_dropped_with_a_warning(client, modelled, risks, 
          "risk_refs": ["R42"], "test_ideas": ["a"], "oracles": ["world"], "priority": "low"},
     ]})
     monkeypatch.setattr("app.routers.risks.get_provider", lambda name: provider)
-    out = client.post(f"/products/{modelled['id']}/charters/from-risks", json={}).json()
+    out = client.post(f"/projects/{modelled['id']}/charters/from-risks", json={}).json()
     assert [c["risk_refs"] for c in out["charters"]] == [["R1"]]
     assert len(out["warnings"]) == 3  # R99 ignored, R42 ignored, ghost charter dropped
     assert out["uncovered_risk_refs"] == ["R2", "R3"]
@@ -196,8 +196,8 @@ def test_invented_risk_refs_are_dropped_with_a_warning(client, modelled, risks, 
 
 def test_saved_charter_keeps_its_risks_and_ideas(client, modelled, risks):
     accept(client, risks[0])
-    draft = client.post(f"/products/{modelled['id']}/charters/from-risks", json={}).json()["charters"][0]
-    saved = client.post(f"/products/{modelled['id']}/charters", json={
+    draft = client.post(f"/projects/{modelled['id']}/charters/from-risks", json={}).json()["charters"][0]
+    saved = client.post(f"/projects/{modelled['id']}/charters", json={
         "mission_statement": draft["mission_statement"], "rationale": draft["rationale"],
         "priority": draft["priority"], "source": "risk-based",
         "risk_ids": draft["risk_ids"], "test_ideas": draft["test_ideas"], "oracles": draft["oracles"],
@@ -209,9 +209,9 @@ def test_saved_charter_keeps_its_risks_and_ideas(client, modelled, risks):
     assert client.get(f"/charters/{charter['id']}").json()["risk_ids"] == [risks[0]["id"]]
 
 
-def test_charter_cannot_link_risks_from_another_product(client, product, risks):
-    other = client.post("/products", json={"name": "Other", "org_id": "x"}).json()
-    r = client.post(f"/products/{other['id']}/charters", json={
+def test_charter_cannot_link_risks_from_another_project(client, project, risks):
+    other = client.post("/projects", json={"name": "Other", "org_id": "x"}).json()
+    r = client.post(f"/projects/{other['id']}/charters", json={
         "mission_statement": "Explore", "risk_ids": [risks[0]["id"]],
     })
     assert r.status_code == 400

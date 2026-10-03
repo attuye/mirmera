@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import Sidebar from '../components/Sidebar'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
-import { api, BugFiling, BugListItem, BugReview, Evidence, ORACLES, OracleHeuristic, Product, Reproducibility } from '../api/client'
+import { api, BugFiling, BugListItem, BugReview, Evidence, ORACLES, OracleHeuristic, Project, Reproducibility } from '../api/client'
 import FileToTracker, { FilingLinks } from '../components/FileToTracker'
 import RegressionTestPanel from '../components/RegressionTestPanel'
 import ReproductionPanel from '../components/ReproductionPanel'
+import { useProject } from '../project'
 import { Screenshot, SignalList } from '../components/Evidence'
 
 const SEVERITY_COLOR: Record<string, string> = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-tertiary)' }
@@ -25,15 +26,15 @@ export default function Bugs() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
-  const [product, setProduct] = useState<Product | null>(null)
+  const { project, setProject } = useProject()
 
   useEffect(() => {
-    api.listProducts()
-      .then((ps) => { setProduct(ps[0] ?? null); return ps[0] ? api.listAllBugs(ps[0].id) : [] })
+    setLoading(true)
+    api.listAllBugs(project.id)
       .then(setBugs)
       .catch((e) => setLoadError(errorText(e)))
       .finally(() => setLoading(false))
-  }, [])
+  }, [project.id])
 
   function replace(updated: BugListItem) {
     setBugs((prev) => prev.map((b) => (b.id === updated.id ? updated : b)))
@@ -107,7 +108,7 @@ export default function Bugs() {
                 </div>
                 {isOpen && (
                   <div style={{ padding: '0 16px 16px', borderTop: '1px solid var(--border-soft)' }}>
-                    <BugDetail bug={b} onSaved={replace} product={product} onProduct={setProduct} />
+                    <BugDetail bug={b} onSaved={replace} project={project} onProject={setProject} />
                   </div>
                 )}
               </article>
@@ -121,11 +122,11 @@ export default function Bugs() {
 
 // ---------- detail: trail, report, review ----------
 
-function BugDetail({ bug, onSaved, product, onProduct }: {
+function BugDetail({ bug, onSaved, project, onProject }: {
   bug: BugListItem
   onSaved: (b: BugListItem) => void
-  product: Product | null
-  onProduct: (p: Product) => void
+  project: Project
+  onProject: (p: Project) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [drafting, setDrafting] = useState(false)
@@ -156,10 +157,8 @@ function BugDetail({ bug, onSaved, product, onProduct }: {
       ) : bug.kind ? (
         <>
           <Report bug={bug} onEdit={() => setEditing(true)} />
-          {product && (
-            <FileToTracker bug={bug} product={product} onProduct={onProduct}
-              onFiled={(f: BugFiling) => onSaved({ ...bug, filings: [...bug.filings, f] })} />
-          )}
+          <FileToTracker bug={bug} project={project} onProject={onProject}
+            onFiled={(f: BugFiling) => onSaved({ ...bug, filings: [...bug.filings, f] })} />
           {bug.kind === 'bug' && <RegressionTestPanel key={testVersion} bug={bug} />}
         </>
       ) : (

@@ -100,9 +100,9 @@ def test_trail_does_not_change_when_more_notes_are_added(client, session):
     assert stored["id"] == bug["id"]
 
 
-def test_product_bug_list_includes_the_charter_mission(client, product, session):
+def test_project_bug_list_includes_the_charter_mission(client, project, session):
     client.post(f"/sessions/{session['id']}/bugs", json={"title": "Bug", "severity": "high"})
-    bugs = client.get(f"/products/{product['id']}/bugs").json()
+    bugs = client.get(f"/projects/{project['id']}/bugs").json()
     assert len(bugs) == 1
     assert bugs[0]["charter_mission"] == "Explore checkout with coupons"
     assert bugs[0]["severity"] == "high"
@@ -110,14 +110,14 @@ def test_product_bug_list_includes_the_charter_mission(client, product, session)
 
 # ---------- debriefs ----------
 
-def test_tester_edit_is_kept_separately_from_the_ai_draft(client, product, session):
+def test_tester_edit_is_kept_separately_from_the_ai_draft(client, project, session):
     sid = session["id"]
     client.post(f"/sessions/{sid}/end")
     updated = client.patch(f"/sessions/{sid}/debrief", json={"final_text": "My own summary"}).json()
     assert updated["final_text"] == "My own summary"
     assert "Mock debrief" in updated["ai_draft"]
 
-    listed = client.get(f"/products/{product['id']}/debriefs").json()
+    listed = client.get(f"/projects/{project['id']}/debriefs").json()
     assert listed[0]["coverage_summary"] == "My own summary"
 
 

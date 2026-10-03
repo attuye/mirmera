@@ -6,13 +6,13 @@ const TARGET = 'http://localhost:5190/'
 // the recorded actions (none here), then claims the symptom the recording
 // points to; Mirmera checks it and reruns the steps to measure reliability.
 test('reproduction agent: reproduce a logged bug, follow its steps, make a test from them', async ({ page, api }) => {
-  const product = await api.product()
-  const charter = await api.charter(product.id, 'Explore the documents page on a slow backend')
+  const project = await api.project()
+  const charter = await api.charter(project.id, 'Explore the documents page on a slow backend')
   const session = await api.session(charter.id)
   const title = 'Documents API answers 500 on load'
 
   await test.step('log the bug in the recorded browser', async () => {
-    await page.goto(`/sessions/${session.id}`)
+    await page.goto(`/projects/${project.id}/sessions/${session.id}`)
     const panel = page.getByRole('complementary', { name: 'Browser' })
     await panel.getByLabel('App URL').fill(TARGET)
     await panel.getByRole('button', { name: 'Open browser' }).click()
@@ -27,7 +27,7 @@ test('reproduction agent: reproduce a logged bug, follow its steps, make a test 
   const agent = row.getByRole('region', { name: 'Reproduction agent' })
 
   await test.step('start the agent on the unreviewed bug and see it reproduce, checked and measured', async () => {
-    await page.goto('/bugs')
+    await page.goto(`/projects/${project.id}/bugs`)
     await row.getByRole('button', { name: new RegExp(title) }).click()
     await agent.getByLabel('Reruns').fill('2')
     await agent.getByRole('button', { name: 'Reproduce with the agent' }).click()

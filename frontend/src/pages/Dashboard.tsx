@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
-import { api, Charter, Product } from '../api/client'
+import TesterField, { useTesterName } from '../components/TesterField'
+import { ErrorLine, errorText } from '../components/ui'
+import { api, Charter } from '../api/client'
+import { useProject, useProjectPath } from '../project'
 
 const PRIORITY_COLOR: Record<string, string> = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-tertiary)' }
 const STATUS_STYLE: Record<string, { bg: string; fg: string }> = {
@@ -11,43 +14,41 @@ const STATUS_STYLE: Record<string, { bg: string; fg: string }> = {
 }
 
 export default function Dashboard() {
-  const [product, setProduct] = useState<Product | null>(null)
+  const { project } = useProject()
+  const path = useProjectPath()
   const [charters, setCharters] = useState<Charter[]>([])
   const [loading, setLoading] = useState(true)
+  const [tester, setTester] = useTesterName(project)
+  const [error, setError] = useState<string | null>(null)
 
   const navigate = useNavigate()
 
   async function openCharter(c: Charter) {
+    setError(null)
     if (c.status === 'active') {
       try {
         const session = await api.getActiveSession(c.id)
-        navigate(`/sessions/${session.id}`)
+        navigate(path(`/sessions/${session.id}`))
       } catch {
         console.warn('Charter marked active but no open session found')
       }
       return
     }
     if (c.status === 'proposed') {
-      const session = await api.startSession(c.id, 'attu')
-      navigate(`/sessions/${session.id}`)
+      if (!tester.trim()) { setError('Enter your name under "Testing as" first.'); return }
+      try {
+        const session = await api.startSession(c.id, tester.trim())
+        navigate(path(`/sessions/${session.id}`))
+      } catch (e) {
+        setError(errorText(e))
+      }
     }
   }
 
   useEffect(() => {
-    async function load() {
-      // Scaffold convenience: use the first product, or create one on first run.
-      let products = await api.listProducts()
-      if (products.length === 0) {
-        await api.createProduct('AddisVerify KYC Platform', 'org_default')
-        products = await api.listProducts()
-      }
-      const p = products[0]
-      setProduct(p)
-      setCharters(await api.listCharters(p.id))
-      setLoading(false)
-    }
-    load().catch(console.error)
-  }, [])
+    setLoading(true)
+    api.listCharters(project.id).then(setCharters).catch((e) => setError(errorText(e))).finally(() => setLoading(false))
+  }, [project.id])
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
@@ -56,10 +57,11 @@ export default function Dashboard() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28 }}>
           <div>
             <div className="mono" style={{ fontSize: 11, color: 'var(--text-quiet)', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6 }}>Project</div>
-            <div style={{ fontSize: 24, fontWeight: 600 }}>{product?.name ?? '—'}</div>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>Context-driven exploratory testing workspace</div>
+            <h1 style={{ fontSize: 24, fontWeight: 600, margin: 0 }}>{project.name}</h1>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>{project.description || 'Context-driven exploratory testing workspace'}</div>
+            {project.app_url && <div className="mono" style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 6 }}>{project.app_url}</div>}
           </div>
-          <Link to="/charters/suggest" style={{
+          <Link to={path('/charters/suggest')} style={{
             background: 'var(--accent)', color: '#0C0D0F', fontSize: 13.5, fontWeight: 600,
             padding: '11px 18px', borderRadius: 8,
           }}>+ New Session</Link>
@@ -69,10 +71,15 @@ export default function Dashboard() {
           <div style={{ color: 'var(--text-secondary)' }}>Loading…</div>
         ) : (
           <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 12, padding: '20px 22px', maxWidth: 700 }}>
-            <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 14 }}>Charters</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+              <div style={{ fontSize: 14.5, fontWeight: 600 }}>Charters</div>
+              <TesterField value={tester} onChange={setTester} />
+            </div>
+            <ErrorLine message={error} />
             {charters.length === 0 && (
-              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                No charters yet. <Link to="/charters/suggest">Generate some from an artifact →</Link>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                No charters yet. Start with <Link to={path('/risks')}>Risks</Link> to plan charters from what could go wrong,
+                or <Link to={path('/charters/suggest')}>generate some from a diff</Link>.
               </div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

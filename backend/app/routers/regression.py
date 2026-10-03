@@ -61,8 +61,8 @@ async def generate(bug_id: str, payload: schemas.RegressionRequest, db: DBSessio
         actions = actions[-MAX_ACTIONS:]
 
     session = bug.session
-    product = db.get(models.Product, bug.charter.product_id)
-    provider = get_provider(payload.provider or product.default_ai_provider)
+    project = db.get(models.Project, bug.charter.project_id)
+    provider = get_provider(payload.provider or project.default_ai_provider)
     evidence = [e for e in runner_api.evidence_for_bug(db, bug) if e.kind != "action"]
     plan = await tasks.plan_regression_test(
         provider,

@@ -1,10 +1,10 @@
 import { expect, test } from './fixtures'
 
 test('PROOF debrief: review the draft, add feelings, turn outlook and risks into real work', async ({ page, api }) => {
-  // Its own product: promoting a risk here must not take R1 from the risks spec.
-  const product = await api.newProduct('AddisVerify Liveness')
+  // Its own project: promoting a risk here must not take R1 from the risks spec.
+  const project = await api.newProject('AddisVerify Liveness')
   const mission = 'Explore selfie liveness with printed photos and screens'
-  const charter = await api.charter(product.id, mission)
+  const charter = await api.charter(project.id, mission)
   const session = await api.session(charter.id)
   await api.note(session.id, 'test', 'Held a printed photo up to the camera')
   await api.note(session.id, 'setup', 'Camera permission prompt blocked the page')
@@ -12,7 +12,7 @@ test('PROOF debrief: review the draft, add feelings, turn outlook and risks into
   await api.bug(session.id, 'Printed photo passes liveness check')
 
   await test.step('ending the session opens the drafted debrief', async () => {
-    await page.goto(`/sessions/${session.id}`)
+    await page.goto(`/projects/${project.id}/sessions/${session.id}`)
     await page.getByRole('button', { name: 'End Session' }).click()
     await expect(page).toHaveURL(new RegExp(`/sessions/${session.id}/debrief$`))
     await expect(page.getByText('AI draft — review before saving')).toBeVisible()
@@ -42,7 +42,7 @@ test('PROOF debrief: review the draft, add feelings, turn outlook and risks into
     await outlook.getByRole('button', { name: 'Save as charter' }).click()
     await expect(outlook.getByRole('link', { name: /Saved as charter/ })).toBeVisible()
     await expect(outlook.getByRole('button', { name: 'Save as charter' })).toHaveCount(0)
-    const followUps = (await api.charters(product.id)).filter((c) => c.source === 'follow-up')
+    const followUps = (await api.charters(project.id)).filter((c) => c.source === 'follow-up')
     expect(followUps).toHaveLength(1)
     expect(followUps[0].mission_statement).toContain(mission.slice(0, 40))
   })
@@ -57,7 +57,7 @@ test('PROOF debrief: review the draft, add feelings, turn outlook and risks into
     await expect(outlook.getByText('score 20')).toBeVisible()
     await outlook.getByRole('button', { name: 'Add to risk list' }).click()
     await expect(outlook.getByRole('link', { name: /Added to risks/ })).toBeVisible()
-    const risk = (await api.risks(product.id)).find((r) => r.title === 'Liveness accepts printed photos')
+    const risk = (await api.risks(project.id)).find((r) => r.title === 'Liveness accepts printed photos')
     expect(risk).toMatchObject({ score: 20, status: 'accepted', source: 'session' })
   })
 

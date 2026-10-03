@@ -36,9 +36,9 @@ async def draft_report(bug_id: str, payload: schemas.BugDraftRequest, db: DBSess
     reviewed fields stay untouched until the tester saves their version."""
     bug = _bug_or_404(db, bug_id)
     charter = bug.charter
-    product = db.get(models.Product, charter.product_id)
+    project = db.get(models.Project, charter.project_id)
 
-    provider = get_provider(payload.provider or product.default_ai_provider)
+    provider = get_provider(payload.provider or project.default_ai_provider)
     runner_api.sync_signals(db, bug.session_id)  # include anything the open browser saw since the last poll
     browser = browser_context(
         runner_api.evidence_for_bug(db, bug), bug.session.started_at,

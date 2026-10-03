@@ -2,6 +2,7 @@
  *  and a risk's score history (on the Risks page). */
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useProjectPath } from '../project'
 import { api, RiskChange, SessionRiskFeedback } from '../api/client'
 import { scoreBand } from './RiskMatrix'
 import { utcDate } from './Evidence'
@@ -125,6 +126,7 @@ function SuggestionCard({ change, onDecided }: { change: RiskChange; onDecided: 
 
 /** Debrief section: ask for suggestions, then decide on each one. */
 export function SessionRiskUpdates({ sessionId }: { sessionId: string }) {
+  const path = useProjectPath()
   const [feedback, setFeedback] = useState<SessionRiskFeedback | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -164,7 +166,7 @@ export function SessionRiskUpdates({ sessionId }: { sessionId: string }) {
       {feedback.unreviewed_bugs > 0 && (
         <div style={{ fontSize: 12, color: 'var(--warning)', marginBottom: 10 }}>
           {feedback.unreviewed_bugs} bug{feedback.unreviewed_bugs === 1 ? '' : 's'} from this session not reviewed yet.
-          Suggestions are better once each is saved as a bug or a question: <Link to="/bugs">review bugs</Link>.
+          Suggestions are better once each is saved as a bug or a question: <Link to={path('/bugs')}>review bugs</Link>.
         </div>
       )}
       {feedback.warnings.map((w, i) => <div key={i} style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 6 }}>{w}</div>)}
@@ -194,6 +196,7 @@ const HISTORY_LABEL: Record<RiskChange['status'], string> = {
 
 /** Risks page: how a risk's score changed, and why. Loaded when opened. */
 export function RiskHistory({ riskId, version }: { riskId: string; version: string }) {
+  const path = useProjectPath()
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState<RiskChange[] | null>(null)
 
@@ -218,7 +221,7 @@ export function RiskHistory({ riskId, version }: { riskId: string; version: stri
                   <ScoreChange from={[c.from_impact, c.from_likelihood]} to={to} />
                   <span style={{ color: 'var(--text-secondary)' }}>
                     {c.source === 'tester' ? 'Re-scored by you' : HISTORY_LABEL[c.status]}
-                    {c.source === 'ai' && c.session_id && <> · <Link to={`/sessions/${c.session_id}/debrief`}>session</Link></>}
+                    {c.source === 'ai' && c.session_id && <> · <Link to={path(`/sessions/${c.session_id}/debrief`)}>session</Link></>}
                   </span>
                 </div>
                 {c.source === 'ai' && c.reason && <div style={{ color: 'var(--text-tertiary)', marginTop: 2 }}>{c.reason}</div>}

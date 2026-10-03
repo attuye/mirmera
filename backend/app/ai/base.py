@@ -51,7 +51,7 @@ class LLMProvider(ABC):
 
 
 def get_provider(name: str) -> LLMProvider:
-    """Resolve a provider by name: a product's default_ai_provider,
+    """Resolve a provider by name: a project's default_ai_provider,
     or a per-request override (see routers/charters.py)."""
     if name == "mock":
         from app.ai.mock_provider import MockProvider
