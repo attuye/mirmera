@@ -1148,6 +1148,7 @@ class LLMAgentStep(BaseModel):
 
 
 class ReproduceRequest(BaseModel):
+    replay_known_steps: bool = True  # replay Steps to the bug first (no AI); the AI explores only if needed
     base_url: Optional[str] = Field(default=None, pattern=r"^https?://")
     provider: Optional[str] = None
     max_steps: int = Field(default=20, ge=3, le=40)

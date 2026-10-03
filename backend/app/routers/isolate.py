@@ -28,15 +28,6 @@ def _run_or_404(db: DBSession, run_id: str) -> models.IsolationRun:
     return run
 
 
-def default_symptom(bug: models.Bug, st: bug_steps.BugSteps) -> dict | None:
-    """The failed request the steps lead to, else the text the report says actually shows."""
-    if st.reach:
-        return {"kind": "failed_request", "value": st.reach}
-    if (bug.actual or "").strip():
-        return {"kind": "text", "value": bug.actual.strip()[:300]}
-    return None
-
-
 @router.post("/bugs/{bug_id}/isolation", response_model=schemas.IsolationRunOut)
 def start(bug_id: str, payload: schemas.IsolateRequest, db: DBSession = Depends(get_db)):
     bug = _bug_or_404(db, bug_id)
@@ -48,7 +39,7 @@ def start(bug_id: str, payload: schemas.IsolateRequest, db: DBSession = Depends(
     st, _ = bug_steps.steps_for(db, bug)
     if not st.steps or st.steps[0]["type"] != "goto":
         raise HTTPException(409, "There are no steps to replay. Add them under Steps to the bug first.")
-    symptom = payload.symptom.model_dump() if payload.symptom else default_symptom(bug, st)
+    symptom = payload.symptom.model_dump() if payload.symptom else bug_steps.bug_symptom(bug, st)
     if not symptom:
         raise HTTPException(409, "Say what shows the bug: a text on the page (or review the bug and fill in "
                                  "what actually happens).")

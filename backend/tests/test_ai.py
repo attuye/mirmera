@@ -193,6 +193,45 @@ def test_local_provider_sends_system_user_and_schema():
     assert seen["stream"] is False
 
 
+def test_local_provider_switches_thinking_off_and_drops_inline_reasoning():
+    sent = []
+
+    def handler(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"message": {"content": "<think>Let me consider…</think>\n{\"ok\": true}"}})
+
+    reply = run(LocalProvider(transport=httpx.MockTransport(handler)).complete("sys", "user"))
+    assert sent[0]["think"] is False
+    assert reply == '{"ok": true}'
+
+
+def test_local_provider_asks_again_without_the_switch_when_ollama_refuses_it():
+    sent = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        sent.append(body)
+        if "think" in body:
+            return httpx.Response(400, json={"error": "invalid think value"})
+        return httpx.Response(200, json={"message": {"content": "{}"}})
+
+    assert run(LocalProvider(transport=httpx.MockTransport(handler)).complete("sys", "user")) == "{}"
+    assert ["think" in b for b in sent] == [True, False]
+
+
+def test_thinking_can_be_switched_back_on(monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings, "local_model_think", True)
+    sent = []
+
+    def handler(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, json={"message": {"content": "{}"}})
+
+    run(LocalProvider(transport=httpx.MockTransport(handler)).complete("sys", "user"))
+    assert "think" not in sent[0]
+
+
 def test_local_provider_explains_a_missing_model():
     p = LocalProvider(transport=httpx.MockTransport(lambda r: httpx.Response(404, json={"error": "model not found"})))
     with pytest.raises(ProviderNotConfigured, match="ollama pull"):
