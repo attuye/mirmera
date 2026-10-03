@@ -9,6 +9,7 @@ semantics as the rendered TypeScript test, to check what it does today:
 
 It runs on the runner's background event loop, in its own browser, separate
 from the tester's recorded browser."""
+import asyncio
 import os
 import time
 from urllib.parse import urlsplit
@@ -119,14 +120,38 @@ class Signals:
         self.console_errors: list[str] = []
         self.page_errors: list[str] = []
         self.failed: list[str] = []
+        self.in_flight = 0  # requests sent and not yet answered
 
     def attach(self, page) -> None:
+        page.on("request", lambda r: self._count(+1))
+        page.on("requestfinished", lambda r: self._count(-1))
+        page.on("requestfailed", lambda r: self._count(-1))
         page.on("console", lambda m: m.type == "error" and not m.text.startswith("Failed to load resource")
                 and self.console_errors.append(m.text))
         page.on("pageerror", lambda e: self.page_errors.append(str(e)))
         page.on("response", lambda r: r.status >= 400 and self.failed.append(f"{r.request.method} {r.url} -> {r.status}"))
         page.on("requestfailed", lambda r: "ERR_ABORTED" not in (r.failure or "")
                 and self.failed.append(f"{r.method} {r.url} -> {r.failure}"))
+
+    def _count(self, change: int) -> None:
+        self.in_flight = max(0, self.in_flight + change)
+
+    async def settle(self, quiet_ms: int = 500, timeout_ms: int = 3_000) -> None:
+        """Waits until no request has been in flight for quiet_ms, so the answer to
+        what the last click sent is in before anyone looks; at most timeout_ms, so a
+        page that never goes quiet (polling) only costs that.
+        (Playwright's "networkidle" can't do this: once a page has reached it on load,
+        it returns at once, even with a request just sent.)"""
+        deadline = time.monotonic() + timeout_ms / 1000
+        quiet_since = None
+        while time.monotonic() < deadline:
+            if self.in_flight:
+                quiet_since = None
+            elif quiet_since is None:
+                quiet_since = time.monotonic()
+            elif time.monotonic() - quiet_since >= quiet_ms / 1000:
+                return
+            await asyncio.sleep(0.05)
 
 
 async def run_step(page, step: dict, plan_base: str | None, base_url: str | None) -> str | None:
@@ -168,10 +193,7 @@ async def replay(plan: dict, *, base_url: str | None, headless: bool = True, exe
                     break
 
             if not stopped:
-                try:
-                    await page.wait_for_load_state("networkidle", timeout=5_000)
-                except Exception:
-                    pass
+                await signals.settle(timeout_ms=5_000)
                 for a, result in zip(plan["assertions"], checks):
                     ok, detail = await _check(page, a, signals.console_errors, signals.failed, signals.page_errors)
                     result["status"], result["detail"] = ("passed" if ok else "failed"), detail

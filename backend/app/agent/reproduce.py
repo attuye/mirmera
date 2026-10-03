@@ -120,7 +120,10 @@ async def observe(page, signals: Signals, seen: dict[str, int]) -> str:
                         ("page error", signals.page_errors)):
         new += [f"[{name}] {x}" for x in items[seen.get(name, 0):]]
         seen[name] = len(items)
-    title = await page.title() if not page.is_closed() else ""
+    try:  # a navigation still finishing (e.g. after going back) destroys the page's context
+        title = await page.title() if not page.is_closed() else ""
+    except Exception:
+        title = "(still loading)"
     return defang(
         f"URL: {page.url}\nTitle: {title}\n"
         f"New since the last step:\n{chr(10).join(new) or '(nothing)'}\n"
@@ -134,6 +137,7 @@ async def verify(page, symptom: schemas.Symptom | dict, signals: Signals) -> tup
     """Checks the symptom against what really happened. Never trusts the claim."""
     s = symptom if isinstance(symptom, dict) else symptom.model_dump()
     kind, value = s["kind"], s["value"]
+    await signals.settle()  # a request the last click sent may still be on its way back
     if kind == "failed_request":
         hits = [x for x in signals.failed if value in x]
         return (True, hits[0]) if hits else (False, f"no failed request matching '{value}' was seen")
@@ -185,6 +189,18 @@ async def act(page, a: schemas.AgentAction, origins: set[str]) -> tuple[str, str
     return "ok", ""
 
 
+async def _back_into_app(page, last_url: str, signals: Signals) -> None:
+    """Goes back after the page left the app; if going back fails, reopens the last page inside it."""
+    try:
+        await page.go_back(timeout=10_000)
+    except Exception:
+        try:
+            await page.goto(last_url, wait_until="domcontentloaded", timeout=30_000)
+        except Exception:
+            logger.warning("Could not return to %s after leaving the app", last_url)
+    await signals.settle()
+
+
 def _user_message(ctx: BugContext, history: list[dict], observation: str, steps_left: int) -> str:
     lines = [f"{h['n']}. {h['action']} -> {h['status']}{': ' + h['detail'] if h['detail'] else ''}"
              for h in history[-HISTORY_LIMIT:]]
@@ -214,11 +230,7 @@ async def _reruns(plan: dict, symptom: dict, runs: int, headless: bool, executab
                     skipped = await run_step(page, step, None, None)
                     if skipped:
                         raise RuntimeError(f"step skipped: {skipped}")
-                try:
-                    await page.wait_for_load_state("networkidle", timeout=5_000)
-                except Exception:
-                    pass
-                ok, detail = await verify(page, symptom, signals)
+                ok, detail = await verify(page, symptom, signals)  # verify waits for the page to settle
                 results.append({"run": i + 1, "reproduced": ok, "detail": detail})
             except Exception as err:
                 results.append({"run": i + 1, "reproduced": False, "detail": f"could not run: {_first_line(err)}"})
@@ -281,9 +293,10 @@ async def run_agent(run_id: str, ctx: BugContext, provider: LLMProvider, *, star
                         entry["status"], entry["detail"] = await act(page, a, origins)
                     except Exception as err:
                         entry["status"], entry["detail"] = "failed", _first_line(err)
+                    await signals.settle()  # the agent sees what its action caused
                     if not page.is_closed() and not in_app(page.url, origins):
                         left = page.url
-                        await page.go_back(timeout=10_000)
+                        await _back_into_app(page, entry["url"], signals)
                         entry["detail"] = (entry["detail"] + "; " if entry["detail"] else "") + \
                             f"that left the app ({origin(left)}), so the browser went back"
                     if entry["status"] == "ok" and (ps := plan_step(a)):
