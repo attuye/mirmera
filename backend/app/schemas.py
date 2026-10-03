@@ -1,7 +1,8 @@
 """Pydantic schemas — request/response shapes, and the AI provider's structured output contracts."""
+import logging
 import re
 from datetime import datetime
-from typing import Optional, Literal
+from typing import ClassVar, Optional, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -154,6 +155,13 @@ class CharterSuggestion(BaseModel):
 
 class CharterSuggestionList(BaseModel):
     suggestions: list[CharterSuggestion]
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_broken_items(cls, data):
+        data, dropped = keep_valid(data, "suggestions", CharterSuggestion)
+        _log_dropped("charter suggestion", dropped)
+        return data
 
 class DebriefDraft(BaseModel):
     coverage_summary: str
@@ -403,6 +411,36 @@ RiskStatus = Literal["proposed", "accepted", "retired"]
 
 
 # AI contracts
+#
+# Smaller models (the local provider) often get one item of a reply wrong. Where
+# a safe fallback exists, the contracts below repair the reply instead of
+# rejecting all of it: a broken item in a list of proposals is dropped, a bug
+# without an oracle becomes a question, a re-score without evidence becomes
+# "unchanged". Nothing is made up. A reply with nothing usable left still fails,
+# and the AI is asked again with the error.
+
+def keep_valid(data, field: str, model: type[BaseModel]) -> tuple[dict, list[tuple[object, str]]]:
+    """Splits data[field] into items that validate as `model` and (item, reason) for
+    those that don't. Returns data unchanged when nothing (or everything) is broken,
+    so the normal validation error and retry still happen."""
+    if not isinstance(data, dict) or not isinstance(data.get(field), list):
+        return data, []
+    kept, dropped = [], []
+    for raw in data[field]:
+        try:
+            model.model_validate(raw)
+            kept.append(raw)
+        except ValidationError as err:
+            dropped.append((raw, err.errors()[0]["msg"].removeprefix("Value error, ")))
+    if not kept or not dropped:
+        return data, []
+    return {**data, field: kept}, dropped
+
+
+def _log_dropped(what: str, dropped: list) -> None:
+    for _, reason in dropped:
+        logging.getLogger(__name__).warning("AI reply: dropped a %s that was incomplete (%s)", what, reason)
+
 
 class ModelElement(BaseModel):
     category: SFDIPOT
@@ -431,6 +469,13 @@ class LLMRisk(BaseModel):
 class LLMRiskList(BaseModel):
     risks: list[LLMRisk]
 
+    @model_validator(mode="before")
+    @classmethod
+    def drop_broken_items(cls, data):
+        data, dropped = keep_valid(data, "risks", LLMRisk)
+        _log_dropped("risk", dropped)
+        return data
+
 
 class LLMRiskCharter(BaseModel):
     target: str
@@ -445,6 +490,13 @@ class LLMRiskCharter(BaseModel):
 
 class LLMRiskCharterList(BaseModel):
     charters: list[LLMRiskCharter]
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_broken_items(cls, data):
+        data, dropped = keep_valid(data, "charters", LLMRiskCharter)
+        _log_dropped("charter", dropped)
+        return data
 
 
 # API shapes
@@ -575,6 +627,20 @@ class LLMBugDraft(BaseModel):
     # check them. Empty when the browser wasn't used or nothing was relevant.
     evidence_used: list[str] = []
 
+    NO_ORACLE_QUESTION: ClassVar[str] = ("The AI drafted this as a bug but named no oracle. Which expectation "
+                                         "does it break (a spec, a comparable product, the product's own behaviour elsewhere)?")
+
+    @model_validator(mode="before")
+    @classmethod
+    def no_oracle_means_question(cls, data):
+        """A bug must name its oracle; without one it is a question. Smaller models
+        sometimes call it a bug anyway: keep the draft, as a question that asks for
+        the oracle, instead of rejecting it."""
+        if isinstance(data, dict) and data.get("kind") == "bug" and not data.get("oracle"):
+            questions = data.get("open_questions") if isinstance(data.get("open_questions"), list) else []
+            return {**data, "kind": "question", "open_questions": [*questions, cls.NO_ORACLE_QUESTION]}
+        return data
+
     @model_validator(mode="after")
     def bug_needs_oracle(self):
         if self.kind == "bug" and self.oracle is None:
@@ -684,6 +750,29 @@ class LLMRiskUpdateList(BaseModel):
     updates: list[LLMRiskUpdate] = []
     unchanged: list[LLMRiskUnchanged] = []
 
+    @model_validator(mode="before")
+    @classmethod
+    def unsupported_updates_are_unchanged(cls, data):
+        """A re-score needs quoted evidence and scores from 1 to 5. One that lacks them
+        is not applied: it is listed as unchanged, with the reason, so no score moves
+        without evidence and the rest of the reply still counts."""
+        if not isinstance(data, dict) or not isinstance(data.get("updates"), list):
+            return data
+        kept, unchanged = [], list(data.get("unchanged") or []) if isinstance(data.get("unchanged"), list) else []
+        for raw in data["updates"]:
+            try:
+                LLMRiskUpdate.model_validate(raw)
+                kept.append(raw)
+            except ValidationError as err:
+                ref = raw.get("risk_ref") if isinstance(raw, dict) else None
+                if not ref:
+                    continue  # nothing to attach it to
+                problem = err.errors()[0]
+                field = ".".join(str(x) for x in problem["loc"]) or "reply"
+                unchanged.append({"risk_ref": str(ref), "reason": f"The AI suggested a new score but it was not usable "
+                                  f"({field}: {problem['msg']}), so the score stays as it is."})
+        return {**data, "updates": kept, "unchanged": unchanged}
+
 
 class RiskSuggestRequest(BaseModel):
     provider: Optional[str] = None
@@ -757,6 +846,13 @@ class LLMDuplicate(BaseModel):
 class LLMDuplicateList(BaseModel):
     """AI contract: one verdict per candidate issue."""
     verdicts: list[LLMDuplicate] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_broken_items(cls, data):
+        data, dropped = keep_valid(data, "verdicts", LLMDuplicate)
+        _log_dropped("duplicate verdict", dropped)
+        return data
 
 
 class TrackerStatus(BaseModel):
