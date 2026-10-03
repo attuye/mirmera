@@ -1219,3 +1219,46 @@ class ExtensionScreenshot(BaseModel):
     caption: Optional[str] = Field(default=None, max_length=500)
     bug_id: Optional[str] = None
     url: Optional[str] = Field(default=None, max_length=4000)
+
+
+# ---------- isolate the bug ----------
+
+class IsolationSymptom(BaseModel):
+    """What shows the bug: a request that fails, or a text on the page."""
+    kind: Literal["failed_request", "text"]
+    value: str = Field(min_length=1, max_length=300)
+
+    @field_validator("value")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("is required")
+        return v
+
+
+class IsolateRequest(BaseModel):
+    base_url: Optional[str] = Field(default=None, pattern=r"^https?://")
+    symptom: Optional[IsolationSymptom] = None  # default: the failed request, else the report's "actual"
+
+
+class IsolationRunOut(BaseModel):
+    id: str
+    bug_id: str
+    status: str
+    base_url: str
+    symptom: dict
+    baseline: Optional[dict] = None
+    variants: list[dict] = []
+    total: int
+    summary: Optional[dict] = None
+    detail: Optional[str] = None
+    created_at: datetime
+    finished_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("variants", mode="before")
+    @classmethod
+    def _none_is_empty(cls, v):
+        return v or []

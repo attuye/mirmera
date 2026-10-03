@@ -560,6 +560,25 @@ export interface CharterInput {
   oracles?: string[]
 }
 
+// ---- Isolate the bug ----------------------------------------------------------
+
+export interface IsolationSymptom { kind: 'failed_request' | 'text'; value: string }
+export type VariantResult = 'bug' | 'gone' | 'inconclusive' | 'error'
+export interface IsolationRun {
+  id: string
+  bug_id: string
+  status: 'running' | 'done' | 'not_reproduced' | 'cancelled' | 'error'
+  base_url: string
+  symptom: IsolationSymptom
+  baseline: { result: VariantResult; detail: string } | null
+  variants: { n: number; step: number; field: string; change: string; result: VariantResult; detail: string }[]
+  total: number
+  summary: { depends_on: { field: string; gone_with: string[] }[]; irrelevant: string[]; inconclusive: string[] } | null
+  detail: string | null
+  created_at: string
+  finished_at: string | null
+}
+
 export const api = {
   listProjects: () => request<ProjectSummary[]>('/projects'),
   getProject: (projectId: string) => request<Project>(`/projects/${projectId}`),
@@ -609,6 +628,11 @@ export const api = {
     request<ReproductionRun>(`/reproduction-runs/${runId}/cancel`, { method: 'POST' }),
   regressionFromReproduction: (runId: string) =>
     request<RegressionTest>(`/reproduction-runs/${runId}/regression-test`, { method: 'POST', body: JSON.stringify({}) }),
+  latestIsolation: (bugId: string) => request<IsolationRun | null>(`/bugs/${bugId}/isolation`),
+  getIsolation: (runId: string) => request<IsolationRun>(`/isolation-runs/${runId}`),
+  startIsolation: (bugId: string, opts: { base_url?: string; symptom?: IsolationSymptom }) =>
+    request<IsolationRun>(`/bugs/${bugId}/isolation`, { method: 'POST', body: JSON.stringify(opts) }),
+  cancelIsolation: (runId: string) => request<IsolationRun>(`/isolation-runs/${runId}/cancel`, { method: 'POST' }),
   getBugSteps: (bugId: string) => request<BugSteps>(`/bugs/${bugId}/steps`),
   saveBugSteps: (bugId: string, steps: BugStep[]) =>
     request<BugSteps>(`/bugs/${bugId}/steps`, { method: 'PUT', body: JSON.stringify({ steps }) }),

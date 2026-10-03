@@ -91,6 +91,17 @@ test('regression test: generate from the recording, read the code, replay it to 
     await panel.getByRole('button', { name: 'Replay test' }).click()
     await expect(panel.getByRole('status', { name: 'Replay result' })).toContainText('Reproduces the bug', { timeout: 30_000 })
 
+    // Isolate: vary the search text; the documents request fails whatever is typed.
+    const iso = row.getByRole('region', { name: 'Isolate the bug' })
+    await iso.getByLabel('What shows the bug').selectOption('failed_request')
+    await iso.getByLabel('Request URL contains').fill('/api/documents')
+    await iso.getByRole('button', { name: 'Isolate the bug' }).click()
+    const isolation = iso.getByRole('status', { name: 'Isolation result' })
+    await expect(isolation).toContainText('Done', { timeout: 30_000 })
+    await expect(isolation.getByRole('row', { name: 'label "Search documents": left empty instead of "passport"' })).toContainText('Still fails')
+    await expect(isolation.getByLabel('What the bug depends on')).toContainText('No single change made it go away')
+    await expect(isolation.getByLabel('What the bug depends on')).toContainText('Didn\'t matter: label "Search documents"')
+
     await steps.getByRole('button', { name: 'Go back to the recording' }).click()
     await expect(steps).toContainText('The AI picks from these')
     await expect(steps.getByRole('listitem')).toHaveCount(1)
