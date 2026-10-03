@@ -108,8 +108,14 @@ def test_a_fixed_app_is_not_reproduced_and_the_claim_is_refused(client, recorded
 
 def test_the_found_steps_become_a_regression_test(client, recorded_bug, monkeypatch):
     monkeypatch.setenv("MIRMERA_SECRET_PASSWORD", "s3cret-pass")
-    run = finished(client, start(client, recorded_bug, runs=1))
-    test = client.post(f"/reproduction-runs/{run['id']}/regression-test", json={}).json()
+    # The steps come from the replay of Steps to the bug (the default path), so this test
+    # doesn't depend on the mock agent's steps; those are covered above.
+    r = client.post(f"/bugs/{recorded_bug['id']}/reproduce", json={"runs": 1})
+    run = finished(client, r.json())
+    assert run["status"] == "reproduced", run["detail"]
+    r = client.post(f"/reproduction-runs/{run['id']}/regression-test", json={})
+    assert r.status_code == 200, r.text
+    test = r.json()
     code = test["code"]
     assert 'failedRequests.filter((r) => r.includes("/api/verify"))' in code
     assert 'await page.getByLabel("Full name", { exact: true }).fill("Abebe Kebede")' in code
