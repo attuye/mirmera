@@ -57,4 +57,7 @@ async def complete_json(
     try:
         return _parse(raw, model_cls)
     except (ValidationError, ValueError) as err:
-        raise LLMOutputError(f"{provider.name} returned an invalid reply twice: {err}") from err
+        raise LLMOutputError(
+            f"The AI ({provider.name}) returned an unusable reply twice. Try again; if it keeps happening, "
+            f"a larger model or another AI provider (project Settings) usually helps. Details: {err}"
+        ) from err

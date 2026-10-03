@@ -10,7 +10,7 @@ from app.ai.base import LLMProvider, ProviderError, ProviderNotConfigured, Unkno
 from app.ai.llm_json import LLMOutputError, complete_json
 from app.ai.local_provider import LocalProvider
 from app.ai.mock_provider import MockProvider
-from app.schemas import DebriefDraft
+from app.schemas import DebriefDraft, LLMRegressionPlan
 
 VALID = {"coverage_summary": "Covered coupons", "open_questions": ["GBP?"]}
 
@@ -63,6 +63,40 @@ def test_two_invalid_replies_raise_a_provider_error():
     with pytest.raises(LLMOutputError) as info:
         run(complete_json(p, "sys", "data", DebriefDraft, task="debrief"))
     assert isinstance(info.value, ProviderError)  # so the API turns it into a 502
+
+
+def test_two_invalid_replies_say_what_to_try():
+    p = Scripted(["no json", "still none"])
+    with pytest.raises(LLMOutputError, match=r"The AI \(scripted\) returned an unusable reply twice. Try again"):
+        run(complete_json(p, "sys", "data", DebriefDraft, task="debrief"))
+
+
+# ---------- regression plans: one incomplete check doesn't sink the plan ----------
+
+PLAN = {"test_title": "Passport verification works", "steps": [{"kind": "recorded", "action_index": 0}],
+        "assumptions": ["The success message text is a guess"]}
+GOOD = {"kind": "no_failed_requests", "url_contains": "/api/verify", "why": "Verify must not fail"}
+URL_WITHOUT_EXPECTED = {"kind": "url", "why": "Ends up on the documents page"}  # what a local model sent
+
+
+def test_an_incomplete_check_is_dropped_and_listed_in_assumptions():
+    p = Scripted([json.dumps({**PLAN, "assertions": [GOOD, URL_WITHOUT_EXPECTED]})])
+    plan = run(complete_json(p, "sys", "data", LLMRegressionPlan, task="regression_test"))
+    assert len(p.calls) == 1  # no retry needed
+    assert [a.kind for a in plan.assertions] == ["no_failed_requests"]
+    assert plan.assumptions == [
+        "The success message text is a guess",
+        "Mirmera dropped a check the AI left incomplete (a url assertion needs expected): "
+        "Ends up on the documents page. Add it by hand if it matters.",
+    ]
+
+
+def test_a_plan_with_no_usable_check_is_still_refused_and_retried():
+    p = Scripted([json.dumps({**PLAN, "assertions": [URL_WITHOUT_EXPECTED]}),
+                  json.dumps({**PLAN, "assertions": [{**URL_WITHOUT_EXPECTED, "expected": "/documents"}]})])
+    plan = run(complete_json(p, "sys", "data", LLMRegressionPlan, task="regression_test"))
+    assert len(p.calls) == 2 and "a url assertion needs expected" in p.calls[1]["user"]
+    assert plan.assertions[0].expected == "/documents"
 
 
 # ---------- provider registry and configuration ----------
