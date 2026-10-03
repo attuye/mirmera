@@ -1003,27 +1003,64 @@ class LLMRegressionPlan(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def drop_incomplete_assertions(cls, data):
-        """One incomplete check (a url check without the URL, a text check without a
-        locator) should not throw away a plan whose other checks are fine, which
-        smaller local models often produce. Incomplete checks are dropped and listed
-        in assumptions, so the tester sees what is missing. If no check survives,
-        validation fails as before and the AI is asked again."""
-        if not isinstance(data, dict) or not isinstance(data.get("assertions"), list):
-            return data
-        kept, dropped = [], []
-        for raw in data["assertions"]:
-            try:
-                PlanAssertion.model_validate(raw)
-                kept.append(raw)
-            except ValidationError as err:
-                reason = err.errors()[0]["msg"].removeprefix("Value error, ")
-                why = raw.get("why") if isinstance(raw, dict) else None
-                dropped.append(f"Mirmera dropped a check the AI left incomplete ({reason})"
-                               + (f": {why}" if why else "") + ". Add it by hand if it matters.")
-        if not kept or not dropped:
-            return data
-        assumptions = data.get("assumptions") if isinstance(data.get("assumptions"), list) else []
-        return {**data, "assertions": kept, "assumptions": [*assumptions, *dropped]}
+        return drop_incomplete_assertions(data)
+
+
+def drop_incomplete_assertions(data):
+    """One incomplete check (a url check without the URL, a text check without a
+    locator) should not throw away a reply whose other checks are fine, which
+    smaller local models often produce. Incomplete checks are dropped and listed
+    in assumptions, so the tester sees what is missing. If no check survives,
+    validation fails as before and the AI is asked again."""
+    if not isinstance(data, dict) or not isinstance(data.get("assertions"), list):
+        return data
+    kept, dropped = [], []
+    for raw in data["assertions"]:
+        try:
+            PlanAssertion.model_validate(raw)
+            kept.append(raw)
+        except ValidationError as err:
+            reason = err.errors()[0]["msg"].removeprefix("Value error, ")
+            why = raw.get("why") if isinstance(raw, dict) else None
+            dropped.append(f"Mirmera dropped a check the AI left incomplete ({reason})"
+                           + (f": {why}" if why else "") + ". Add it by hand if it matters.")
+    if not kept or not dropped:
+        return data
+    assumptions = data.get("assumptions") if isinstance(data.get("assumptions"), list) else []
+    return {**data, "assertions": kept, "assumptions": [*assumptions, *dropped]}
+
+
+class LLMRegressionChecks(BaseModel):
+    """AI contract when the steps are fixed (picked by Mirmera or edited by the
+    tester): only what to assert afterwards."""
+    test_title: str = Field(min_length=3)
+    assertions: list[PlanAssertion] = Field(min_length=1)
+    assumptions: list[str] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_incomplete_assertions(cls, data):
+        return drop_incomplete_assertions(data)
+
+
+class BugStep(BaseModel):
+    """A step to the bug: open a page, or one recorded-style action."""
+    type: Literal["goto", "action"]
+    url: Optional[str] = None
+    action: Optional[dict] = None
+    summary: Optional[str] = None  # filled by the server
+
+
+class BugStepsOut(BaseModel):
+    steps: list[BugStep]
+    source: Literal["edited", "recording", "ai"]
+    note: str
+    anchor: Optional[str] = None  # the failed request the steps lead to
+    recorded_actions: int  # actions recorded for this bug (since the previous bug)
+
+
+class BugStepsUpdate(BaseModel):
+    steps: list[dict] = Field(max_length=60)
 
 
 class RegressionRequest(BaseModel):

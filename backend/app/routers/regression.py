@@ -11,6 +11,7 @@ from app.config import settings
 from app.database import get_db
 from app.evidence_text import _defang as defang
 from app.evidence_text import browser_context
+from app.regression import steps as bug_steps
 from app.regression.plan import MAX_ACTIONS, action_lines, origin, resolve, slug
 from app.regression.render import render
 from app.regression.replay import replay as run_replay
@@ -21,7 +22,6 @@ from app.timeutil import utcnow
 from app.trackers.report import ORACLE_NAMES
 
 router = APIRouter(tags=["regression tests"])
-BUG_GRACE_SECONDS = 5  # actions recorded just after logging the bug still count
 
 
 def _latest(db: DBSession, bug_id: str) -> models.RegressionTest | None:
@@ -29,12 +29,83 @@ def _latest(db: DBSession, bug_id: str) -> models.RegressionTest | None:
             .order_by(models.RegressionTest.created_at.desc()).first())
 
 
-def _recorded_before(db: DBSession, bug: models.Bug, kind: str) -> list[models.Evidence]:
-    from datetime import timedelta
-    return (db.query(models.Evidence)
-            .filter(models.Evidence.session_id == bug.session_id, models.Evidence.kind == kind,
-                    models.Evidence.captured_at <= bug.created_at + timedelta(seconds=BUG_GRACE_SECONDS))
-            .order_by(models.Evidence.captured_at).all())
+def _norm(text: str | None) -> str:
+    return " ".join((text or "").lower().split())
+
+
+def drop_bug_assertions(assertions: list[dict], actual: str | None) -> tuple[list[dict], list[str]]:
+    """A check that expects what the report says ACTUALLY happens asserts the bug: it passes
+    while the bug exists and fails once it is fixed. Those are dropped, with the reason."""
+    bad_text = _norm(actual)
+    kept, notes = [], []
+    for a in assertions:
+        shown = a.get("expected") if a["kind"] in ("text", "value") else (
+            (a.get("locator") or {}).get("value") or (a.get("locator") or {}).get("name") if a["kind"] == "visible" else None)
+        s = _norm(shown)
+        if bad_text and len(s) >= 6 and (s in bad_text or bad_text in s):
+            notes.append(f'Mirmera dropped a check that expected "{shown}", which is what the report says actually '
+                         f"happens: it would pass while the bug exists. ({a.get('why', '')})".replace(" ()", ""))
+        else:
+            kept.append(a)
+    return kept, notes
+
+
+def skipped_actions(plan: schemas.LLMRegressionPlan, actions: list[models.Evidence]) -> list[str]:
+    """Recorded actions the AI left out between the first and the last action it kept."""
+    used = sorted({s.action_index for s in plan.steps if s.kind == "recorded" and 0 <= (s.action_index or 0) < len(actions)})
+    if len(used) < 2:
+        return []
+    missing = [i for i in range(used[0], used[-1] + 1) if i not in used]
+    if not missing:
+        return []
+    shown = "; ".join(actions[i].summary for i in missing[:6]) + (f"; and {len(missing) - 6} more" if len(missing) > 6 else "")
+    return [f"The AI left out {len(missing)} recorded action(s) between the steps it kept: {shown}. "
+            "If the test does not reach the bug, edit the steps and add them back."]
+
+
+def _report(bug: models.Bug) -> dict:
+    return {"title": bug.title, "steps": bug.steps_to_reproduce or [], "expected": bug.expected,
+            "actual": bug.actual, "oracle": bug.oracle_heuristic, "why_its_a_problem": bug.oracle_explanation,
+            "severity": bug.severity}
+
+
+def _steps_out(db: DBSession, bug: models.Bug) -> schemas.BugStepsOut:
+    st, rec = bug_steps.steps_for(db, bug)
+    return schemas.BugStepsOut(
+        steps=[schemas.BugStep(**s, summary=bug_steps.describe_step(s)) if s["type"] == "goto"
+               else schemas.BugStep(type="action", url=s.get("url"), action=s["action"], summary=bug_steps.describe_step(s))
+               for s in st.steps],
+        source=st.source, note=st.note, anchor=st.anchor, recorded_actions=len(rec.actions))
+
+
+@router.get("/bugs/{bug_id}/steps", response_model=schemas.BugStepsOut)
+def get_steps(bug_id: str, db: DBSession = Depends(get_db)):
+    """The steps to this bug: edited by the tester, picked by Mirmera from the recording,
+    or (when Mirmera can't tell) the recorded actions the AI will pick from."""
+    bug = _bug_or_404(db, bug_id)
+    runner_api.sync_signals(db, bug.session_id)
+    return _steps_out(db, bug)
+
+
+@router.put("/bugs/{bug_id}/steps", response_model=schemas.BugStepsOut)
+def save_steps(bug_id: str, payload: schemas.BugStepsUpdate, db: DBSession = Depends(get_db)):
+    """Save the tester's steps; the regression test and the agent use them as they are."""
+    bug = _bug_or_404(db, bug_id)
+    try:
+        bug.edited_steps = bug_steps.clean_steps(payload.steps)
+    except bug_steps.StepError as err:
+        raise HTTPException(422, str(err)) from err
+    db.commit()
+    return _steps_out(db, bug)
+
+
+@router.delete("/bugs/{bug_id}/steps", response_model=schemas.BugStepsOut)
+def reset_steps(bug_id: str, db: DBSession = Depends(get_db)):
+    """Forget the tester's edits and go back to the steps from the recording."""
+    bug = _bug_or_404(db, bug_id)
+    bug.edited_steps = None
+    db.commit()
+    return _steps_out(db, bug)
 
 
 @router.get("/bugs/{bug_id}/regression-test", response_model=schemas.RegressionTestOut | None)
@@ -50,41 +121,58 @@ async def generate(bug_id: str, payload: schemas.RegressionRequest, db: DBSessio
         raise HTTPException(409, "Only a reviewed bug can get a regression test: it needs the oracle that says what "
                                  "should happen. Review it as a bug first (a question has no oracle yet).")
     runner_api.sync_signals(db, bug.session_id)
-    actions = _recorded_before(db, bug, "action")
-    pages = list(dict.fromkeys(e.url for e in _recorded_before(db, bug, "navigation") if e.url))
-    if not actions and not pages:
+    st, rec = bug_steps.steps_for(db, bug)
+    if not st.steps:
         raise HTTPException(409, "Nothing was recorded for this bug. Regression tests are built from the recorded "
-                                 "browser: open it on the session screen and reproduce the bug there.")
-    warnings = []
-    if len(actions) > MAX_ACTIONS:
-        warnings.append(f"Only the last {MAX_ACTIONS} of {len(actions)} recorded actions were considered.")
-        actions = actions[-MAX_ACTIONS:]
-
+                                 "browser: open it on the session screen and reproduce the bug there, or add the "
+                                 "steps yourself under Steps to the bug.")
     session = bug.session
     project = db.get(models.Project, bug.charter.project_id)
     provider = get_provider(payload.provider or project.default_ai_provider)
     evidence = [e for e in runner_api.evidence_for_bug(db, bug) if e.kind != "action"]
-    plan = await tasks.plan_regression_test(
-        provider,
-        report={"title": bug.title, "steps": bug.steps_to_reproduce or [], "expected": bug.expected,
-                "actual": bug.actual, "oracle": bug.oracle_heuristic, "why_its_a_problem": bug.oracle_explanation,
-                "severity": bug.severity},
-        actions=[defang(line) for line in action_lines(actions, session.started_at)],
-        pages=pages,
-        browser=browser_context(evidence, session.started_at, used=True),
-    )
-    base_url = origin(pages[0]) if pages else None
-    resolved, plan_warnings = resolve(plan, actions, pages, base_url)
+    browser = browser_context(evidence, session.started_at, used=True)
+    warnings: list[str] = []
+
+    if st.fixed:  # the steps are known: the AI writes only the checks
+        checks = await tasks.write_regression_checks(
+            provider, report=_report(bug), browser=browser,
+            steps=[f"{i}. {defang(bug_steps.describe_step(s))}" for i, s in enumerate(st.steps, 1)])
+        first = st.steps[0]["url"]
+        resolved = {"title": checks.test_title, "base_url": origin(first), "steps": st.steps,
+                    "assertions": [a.model_dump(exclude_none=True) for a in checks.assertions],
+                    "assumptions": checks.assumptions}
+        prompt_version = tasks.PROMPT_VERSIONS["regression_checks"]
+    else:  # no anchor in the recording: the AI picks steps from this bug's own actions
+        actions = rec.actions
+        if len(actions) > MAX_ACTIONS:
+            warnings.append(f"Only the last {MAX_ACTIONS} of {len(actions)} recorded actions were considered.")
+            actions = actions[-MAX_ACTIONS:]
+        plan = await tasks.plan_regression_test(
+            provider, report=_report(bug), pages=rec.pages, browser=browser,
+            actions=[defang(line) for line in action_lines(actions, session.started_at)])
+        resolved, plan_warnings = resolve(plan, actions, rec.pages, origin(rec.pages[0]) if rec.pages else None)
+        warnings += plan_warnings + skipped_actions(plan, actions)
+        prompt_version = tasks.PROMPT_VERSIONS["regression_test"]
+
+    kept, dropped = drop_bug_assertions(resolved["assertions"], bug.actual)
+    if not kept:
+        raise HTTPException(502, "Every check the AI wrote expects what the report says actually happens, so the test "
+                                 "would pass while the bug exists. Try again, or use a stronger AI provider.")
+    resolved["assertions"] = kept
+    resolved["assumptions"] = [*resolved["assumptions"], *dropped]
+    if st.reach:
+        resolved["reach"] = {"url_contains": st.reach, "recorded": st.anchor}
+    base_url = resolved["base_url"]
     issue_links = [f"{f.issue_key} {f.issue_url}" for f in bug.filings]
     oracle = f"{ORACLE_NAMES.get(bug.oracle_heuristic, bug.oracle_heuristic)}. {bug.oracle_explanation or ''}".strip()
     code = render(resolved, bug_title=bug.title, oracle=oracle, issue_links=issue_links,
-                  provenance=f"{provider.name}/{provider.model}, {tasks.PROMPT_VERSIONS['regression_test']}",
+                  provenance=f"{provider.name}/{provider.model}, {prompt_version}",
                   known_failing=payload.known_failing)
 
     test = models.RegressionTest(
         bug_id=bug.id, plan=resolved, code=code, filename=f"{slug(bug.title)}.spec.ts", base_url=base_url,
-        known_failing=payload.known_failing, warnings=warnings + plan_warnings,
-        ai_provider=provider.name, ai_model=provider.model, prompt_version=tasks.PROMPT_VERSIONS["regression_test"],
+        known_failing=payload.known_failing, warnings=warnings,
+        ai_provider=provider.name, ai_model=provider.model, prompt_version=prompt_version,
     )
     db.add(test)
     db.commit()

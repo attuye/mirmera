@@ -13,7 +13,7 @@ from app.ai.llm_json import complete_json
 from app.evidence_text import NOT_USED
 from app.schemas import (
     CharterSuggestion, CharterSuggestionList, LLMDebrief,
-    LLMBugDraft, LLMDuplicateList, LLMRegressionPlan, LLMProductModel, LLMRiskUpdateList, LLMRisk, LLMRiskCharter, LLMRiskCharterList, LLMRiskList,
+    LLMBugDraft, LLMDuplicateList, LLMRegressionChecks, LLMRegressionPlan, LLMProductModel, LLMRiskUpdateList, LLMRisk, LLMRiskCharter, LLMRiskCharterList, LLMRiskList,
 )
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -29,6 +29,7 @@ PROMPT_VERSIONS = {
     "risk_update": "risk-update-v1",
     "duplicate_check": "duplicate-check-v1",
     "regression_test": "regression-test-v2",
+    "regression_checks": "regression-checks-v1",
 }
 PLANNING_TOKENS = 4000
 MAX_ARTIFACT_CHARS = 15_000
@@ -198,6 +199,20 @@ async def check_duplicates(provider: LLMProvider, *, report: dict, candidates: l
     )
     return await complete_json(
         provider, load_prompt("duplicate_check.md"), user, LLMDuplicateList, task="duplicate_check",
+    )
+
+
+async def write_regression_checks(provider: LLMProvider, *, report: dict, steps: list[str],
+                                  browser: str) -> LLMRegressionChecks:
+    """The steps are fixed (picked by Mirmera from the recording, or edited by the
+    tester); the AI writes only what the test asserts afterwards."""
+    user = (
+        f"<report>\n{json.dumps(report, indent=2, ensure_ascii=False)}\n</report>\n\n"
+        f"<steps>\n{chr(10).join(steps)}\n</steps>\n\n"
+        f"<browser>\n{browser}\n</browser>"
+    )
+    return await complete_json(
+        provider, load_prompt("regression_checks.md"), user, LLMRegressionChecks, task="regression_checks",
     )
 
 

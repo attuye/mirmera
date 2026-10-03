@@ -5,6 +5,7 @@ import { api, BugFiling, BugListItem, BugReview, Evidence, ORACLES, OracleHeuris
 import FileToTracker, { FilingLinks } from '../components/FileToTracker'
 import RegressionTestPanel from '../components/RegressionTestPanel'
 import ReproductionPanel from '../components/ReproductionPanel'
+import BugStepsPanel from '../components/BugStepsPanel'
 import { useProject } from '../project'
 import { Screenshot, SignalList } from '../components/Evidence'
 
@@ -159,6 +160,7 @@ function BugDetail({ bug, onSaved, project, onProject }: {
           <Report bug={bug} onEdit={() => setEditing(true)} />
           <FileToTracker bug={bug} project={project} onProject={onProject}
             onFiled={(f: BugFiling) => onSaved({ ...bug, filings: [...bug.filings, f] })} />
+          <BugStepsPanel bug={bug} />
           {bug.kind === 'bug' && <RegressionTestPanel key={testVersion} bug={bug} />}
         </>
       ) : (
@@ -169,6 +171,7 @@ function BugDetail({ bug, onSaved, project, onProject }: {
           <button onClick={() => setEditing(true)} style={quietButton}>Write it myself</button>
         </div>
       )}
+      {!editing && !bug.kind && <BugStepsPanel bug={bug} />}
       {!editing && <ReproductionPanel bug={bug} onTestCreated={() => setTestVersion((v) => v + 1)} />}
       <ErrorLine message={error} />
     </div>

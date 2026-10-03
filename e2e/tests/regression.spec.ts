@@ -7,6 +7,7 @@ const TARGET = 'http://localhost:5190/'
 // the request succeeds"; recorded clicks and typing are covered by the backend
 // tests with a real form.
 test('regression test: generate from the recording, read the code, replay it to see it catch the bug', async ({ page, api, request }) => {
+  test.setTimeout(120_000)  // three replays in a real browser
   const project = await api.project()
   const charter = await api.charter(project.id, 'Explore the document list after login')
   const session = await api.session(charter.id)
@@ -56,6 +57,43 @@ test('regression test: generate from the recording, read the code, replay it to 
     const result = panel.getByRole('status', { name: 'Replay result' })
     await expect(result).toContainText('Reproduces the bug', { timeout: 30_000 })
     await expect(result).toContainText(`GET ${TARGET}api/documents -> 500`)
+  })
+
+  await test.step('edit the steps: add a search, save, and the test replays exactly those', async () => {
+    const steps = row.getByRole('region', { name: 'Steps to the bug' })
+    await expect(steps).toContainText('The AI picks from these')  // no request failed after an action: Mirmera can't anchor
+    await steps.getByRole('button', { name: /Steps to the bug/ }).click()
+    await expect(steps.getByRole('listitem')).toHaveCount(1)
+
+    await steps.getByRole('button', { name: '+ Add step' }).click()
+    let form = steps.getByRole('form', { name: 'New step' })
+    await form.getByRole('combobox', { name: 'Step', exact: true }).selectOption('fill')
+    await form.getByLabel('Find it by').selectOption('label')
+    await form.getByLabel('Which one').fill('Search documents')
+    await form.getByLabel('Text to type').fill('passport')
+    await form.getByRole('button', { name: 'Add step' }).click()
+
+    await steps.getByRole('button', { name: '+ Add step' }).click()
+    form = steps.getByRole('form', { name: 'New step' })
+    await form.getByLabel('Name', { exact: true }).fill('Search')  // click a button named Search: the defaults
+    await form.getByRole('button', { name: 'Add step' }).click()
+    await expect(steps.getByRole('listitem', { name: 'fill label "Search documents" = "passport"' })).toBeVisible()
+    await expect(steps).toContainText('Unsaved changes')
+
+    await steps.getByRole('button', { name: 'Save steps' }).click()
+    await expect(steps.getByRole('status')).toContainText('Generate the regression test again')
+    await expect(steps).toContainText('Edited by you')
+
+    await panel.getByRole('button', { name: 'Generate again' }).click()
+    const code = panel.getByLabel('Test code')
+    await expect(code).toContainText('await page.getByLabel("Search documents", { exact: true }).fill("passport")')
+    await expect(code).toContainText('await page.getByRole("button", { name: "Search", exact: true }).click()')
+    await panel.getByRole('button', { name: 'Replay test' }).click()
+    await expect(panel.getByRole('status', { name: 'Replay result' })).toContainText('Reproduces the bug', { timeout: 30_000 })
+
+    await steps.getByRole('button', { name: 'Go back to the recording' }).click()
+    await expect(steps).toContainText('The AI picks from these')
+    await expect(steps.getByRole('listitem')).toHaveCount(1)
   })
 
   await test.step('replay against a server that is down: broken, and says which step', async () => {

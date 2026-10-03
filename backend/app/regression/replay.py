@@ -6,6 +6,9 @@ semantics as the rendered TypeScript test, to check what it does today:
               (fixed, not reproducible this way, or the assertions miss it)
   broken      a step could not run (element not found, page changed...)
   incomplete  a step was skipped (a secret or a file the replay doesn't have)
+  misses_bug  every step ran, but the request the bug was recorded on (e.g.
+              POST /api/verify -> 500) was never sent: the steps don't reach the
+              bug, so whatever the assertions say proves nothing
 
 It runs on the runner's background event loop, in its own browser, separate
 from the tester's recorded browser."""
@@ -121,9 +124,10 @@ class Signals:
         self.page_errors: list[str] = []
         self.failed: list[str] = []
         self.in_flight = 0  # requests sent and not yet answered
+        self.requested: list[str] = []  # every request URL, to check a test reaches the bug
 
     def attach(self, page) -> None:
-        page.on("request", lambda r: self._count(+1))
+        page.on("request", lambda r: (self._count(+1), self.requested.append(r.url)))
         page.on("requestfinished", lambda r: self._count(-1))
         page.on("requestfailed", lambda r: self._count(-1))
         page.on("console", lambda m: m.type == "error" and not m.text.startswith("Failed to load resource")
@@ -200,13 +204,20 @@ async def replay(plan: dict, *, base_url: str | None, headless: bool = True, exe
         finally:
             await browser.close()
 
+    reach = plan.get("reach")
+    reached = None
+    if reach and not any(s["status"] in ("failed", "skipped") for s in steps):
+        reached = any(reach["url_contains"] in urlsplit(u).path for u in signals.requested)
     if any(s["status"] == "failed" for s in steps):
         outcome = "broken"
     elif any(s["status"] == "skipped" for s in steps):
         outcome = "incomplete"
+    elif reached is False:
+        outcome = "misses_bug"
     elif any(c["status"] == "failed" for c in checks):
         outcome = "reproduces"
     else:
         outcome = "passes"
     return {"outcome": outcome, "base_url": base_url or plan_base, "steps": steps, "assertions": checks,
+            **({"reach": {**reach, "reached": reached}} if reach and reached is not None else {}),
             "duration_ms": int((time.monotonic() - started) * 1000)}
