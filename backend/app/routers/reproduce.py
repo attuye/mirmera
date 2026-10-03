@@ -87,6 +87,11 @@ def start(bug_id: str, payload: schemas.ReproduceRequest, db: DBSession = Depend
         pages=pages,
         signals=browser_context(evidence, bug.session.started_at, used=bool(evidence)) if evidence else "",
     )
+    # The known steps are replayed first (no AI); the bug is checked by what shows it.
+    replay = list(st.steps) if payload.replay_known_steps and st.steps and st.steps[0]["type"] == "goto" else None
+    found = bug_steps.bug_symptom(bug, st)
+    symptom = ({"kind": "failed_request" if found["kind"] == "failed_request" else "text_visible", "value": found["value"]}
+               if found else None)
     run = models.ReproductionRun(
         bug_id=bug.id, status="running", base_url=base_url, start_url=start_url,
         max_steps=payload.max_steps, runs=payload.runs, steps=[],
@@ -101,7 +106,7 @@ def start(bug_id: str, payload: schemas.ReproduceRequest, db: DBSession = Depend
     asyncio.run_coroutine_threadsafe(
         agent.run_agent(run.id, ctx, provider, start_url=start_url, origins=origins, max_steps=payload.max_steps,
                         runs=payload.runs, headless=True, executable_path=settings.runner_chromium_path,
-                        screenshot_path=shot),
+                        screenshot_path=shot, replay_steps=replay, replay_symptom=symptom),
         manager.loop._get(),
     )
     return _out(run)

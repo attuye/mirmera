@@ -37,7 +37,8 @@ GIVE_UP = step("Nothing more to try", kind="give_up", reason="out of ideas")
 
 
 def start(client, bug, **body):
-    r = client.post(f"/bugs/{bug['id']}/reproduce", json=body)
+    """The tests below are about the AI's own steps, so the known steps are not replayed first."""
+    r = client.post(f"/bugs/{bug['id']}/reproduce", json={"replay_known_steps": False, **body})
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -212,3 +213,52 @@ def test_three_unusable_replies_in_a_row_stop_the_run(client, recorded_bug, monk
     run = finished(client, start(client, recorded_bug))
     assert run["status"] == "error" and "returned an unusable reply twice" in run["detail"]
     assert [s["status"] for s in run["steps"]] == ["failed"] * 3
+
+
+# ---------- the known steps are replayed first ----------
+
+class NoAI(LLMProvider):
+    """Fails the test if the agent asks the AI anything."""
+    name, model = "no-ai", "none"
+
+    async def complete(self, system, user, **kwargs):
+        raise AssertionError("the AI should not have been asked")
+
+
+def replaying(client, bug, **body):
+    r = client.post(f"/bugs/{bug['id']}/reproduce", json=body)  # replay_known_steps defaults to on
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_replaying_the_known_steps_reproduces_without_the_ai(client, recorded_bug, monkeypatch):
+    monkeypatch.setenv("MIRMERA_SECRET_PASSWORD", "s3cret-pass")
+    monkeypatch.setattr("app.routers.reproduce.get_provider", lambda name: NoAI())
+    run = finished(client, replaying(client, recorded_bug, runs=2))
+    assert run["status"] == "reproduced", run["detail"]
+    kinds = [s["kind"] for s in run["steps"]]
+    assert set(kinds[:-1]) == {"replay"} and kinds[-1] == "reproduced"
+    assert run["steps"][-1]["status"] == "verified" and "/api/verify -> 500" in run["steps"][-1]["detail"]
+    assert run["symptom"]["kind"] == "failed_request" and "no AI step was needed" in run["symptom"]["explanation"]
+    assert run["reproducibility"]["reproduced"] == 2  # the reruns replay the same steps
+    assert run["detail"] == "Reproduced, and 2 of 2 reruns reproduced it again."
+
+
+def test_when_the_replay_does_not_show_it_the_ai_takes_over(client, recorded_bug, monkeypatch):
+    monkeypatch.setenv("MIRMERA_SECRET_PASSWORD", "s3cret-pass")
+    App.fixed = True
+    provider = scripted(monkeypatch, [GIVE_UP])
+    run = finished(client, replaying(client, recorded_bug))
+    check = next(s for s in run["steps"] if s["kind"] == "reproduced")
+    assert check["status"] == "not verified" and check["detail"].endswith("the AI takes over from here")
+    assert run["status"] == "not_reproduced" and run["detail"] == "The agent gave up: out of ideas"
+    assert "the AI takes over from here" in provider.users[0]  # the AI sees what the replay did
+
+
+def test_a_step_the_replay_cannot_run_hands_over_to_the_ai(client, recorded_bug, monkeypatch):
+    monkeypatch.delenv("MIRMERA_SECRET_PASSWORD", raising=False)  # the password step is skipped
+    scripted(monkeypatch, [GIVE_UP])
+    run = finished(client, replaying(client, recorded_bug))
+    skipped = next(s for s in run["steps"] if s["status"] == "skipped")
+    assert "MIRMERA_SECRET_PASSWORD" in skipped["detail"] and skipped["detail"].endswith("the AI takes over from here")
+    assert run["status"] == "not_reproduced" and run["detail"] == "The agent gave up: out of ideas"

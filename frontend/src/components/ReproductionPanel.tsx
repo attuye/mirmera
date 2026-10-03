@@ -34,6 +34,7 @@ export default function ReproductionPanel({ bug, onTestCreated }: { bug: BugList
   const [baseUrl, setBaseUrl] = useState('')
   const [maxSteps, setMaxSteps] = useState(20)
   const [runs, setRuns] = useState(3)
+  const [replayFirst, setReplayFirst] = useState(true)
   const [busy, setBusy] = useState<null | 'start' | 'cancel' | 'test'>(null)
   const [error, setError] = useState<string | null>(null)
   const [testMade, setTestMade] = useState(false)
@@ -55,7 +56,7 @@ export default function ReproductionPanel({ bug, onTestCreated }: { bug: BugList
   async function startRun() {
     setBusy('start'); setError(null); setTestMade(false)
     try {
-      setRun(await api.startReproduction(bug.id, { base_url: baseUrl.trim() || undefined, max_steps: maxSteps, runs }))
+      setRun(await api.startReproduction(bug.id, { base_url: baseUrl.trim() || undefined, max_steps: maxSteps, runs, replay_known_steps: replayFirst }))
     } catch (e) { setError(errorText(e)) } finally { setBusy(null) }
   }
 
@@ -83,7 +84,7 @@ export default function ReproductionPanel({ bug, onTestCreated }: { bug: BugList
       <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 8 }}>
         <h3 style={{ fontSize: 13.5, fontWeight: 600, margin: 0 }}>Reproduction agent</h3>
         <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-          An AI tries to reproduce this bug in a headless browser, inside your app only. Mirmera checks what it claims.
+          Replays the steps to the bug first; if that doesn't show it, an AI explores in a headless browser, inside your app only. Mirmera checks every claim.
         </span>
       </div>
 
@@ -109,6 +110,10 @@ export default function ReproductionPanel({ bug, onTestCreated }: { bug: BugList
           </button>
         </form>
         {environments.length > 0 && <EnvironmentChoice environments={environments} current={baseUrl} onPick={setBaseUrl} />}
+        <label style={{ display: 'flex', gap: 7, alignItems: 'center', fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
+          <input type="checkbox" checked={replayFirst} onChange={(e) => setReplayFirst(e.target.checked)} />
+          Replay the steps to the bug first (no AI; max steps count only the AI's steps)
+        </label>
         </>
       )}
 
@@ -138,6 +143,7 @@ export default function ReproductionPanel({ bug, onTestCreated }: { bug: BugList
               <li key={s.n} style={{ listStyle: 'none', fontSize: 12.5, padding: '5px 0', borderTop: '1px solid var(--border-soft)', display: 'flex', gap: 8 }}>
                 <span className="mono" style={{ width: 22, color: 'var(--text-quiet)', flexShrink: 0 }}>{s.n}.</span>
                 <span style={{ minWidth: 0, flex: 1 }}>
+                  {s.kind === 'replay' && <span className="mono" style={{ fontSize: 10.5, color: 'var(--info)', marginRight: 6 }}>REPLAY</span>}
                   <span>{s.action}</span>
                   <span className="mono" style={{ fontSize: 11, color: STEP_COLOR[s.status] ?? 'var(--text-secondary)', marginLeft: 8 }}>{s.status}</span>
                   <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-tertiary)' }}>{s.thought}</span>

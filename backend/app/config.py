@@ -22,6 +22,8 @@ class Settings(BaseSettings):
 
     local_model_base_url: str = "http://localhost:11434"
     local_model_name: str = "qwen3:8b"
+    # Let thinking models (qwen3...) reason before answering: slower, and replies can come back empty.
+    local_model_think: bool = False
 
     # Browser session runner (Playwright). Headed by default: the tester tests in
     # that window. Headless is for automated tests and CI.

@@ -171,3 +171,13 @@ def clean_steps(raw: list) -> list[dict]:
 
 def describe_step(step: dict) -> str:
     return f"open {step['url']}" if step["type"] == "goto" else (step["action"].get("summary") or describe_action(step["action"]))
+
+
+def bug_symptom(bug: models.Bug, st: BugSteps) -> dict | None:
+    """What shows the bug: the failed request the steps lead to, else the text the
+    report says actually shows. {"kind": "failed_request" | "text", "value"}."""
+    if st.reach:
+        return {"kind": "failed_request", "value": st.reach}
+    if (bug.actual or "").strip():
+        return {"kind": "text", "value": bug.actual.strip()[:300]}
+    return None

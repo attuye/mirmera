@@ -603,7 +603,7 @@ export const api = {
   bugEvidence: (bugId: string) => request<Evidence[]>(`/bugs/${bugId}/evidence`),
   latestReproduction: (bugId: string) => request<ReproductionRun | null>(`/bugs/${bugId}/reproduction`),
   getReproduction: (runId: string) => request<ReproductionRun>(`/reproduction-runs/${runId}`),
-  startReproduction: (bugId: string, opts: { base_url?: string; max_steps: number; runs: number }) =>
+  startReproduction: (bugId: string, opts: { base_url?: string; max_steps: number; runs: number; replay_known_steps?: boolean }) =>
     request<ReproductionRun>(`/bugs/${bugId}/reproduce`, { method: 'POST', body: JSON.stringify(opts) }),
   cancelReproduction: (runId: string) =>
     request<ReproductionRun>(`/reproduction-runs/${runId}/cancel`, { method: 'POST' }),

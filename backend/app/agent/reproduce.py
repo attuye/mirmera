@@ -228,7 +228,7 @@ async def _reruns(plan: dict, symptom: dict, runs: int, headless: bool, executab
             signals.attach(page)
             try:
                 for step in plan["steps"]:
-                    skipped = await run_step(page, step, None, None)
+                    skipped = await run_step(page, step, plan.get("recorded_base"), plan.get("base_url"))
                     if skipped:
                         raise RuntimeError(f"step skipped: {skipped}")
                 ok, detail = await verify(page, symptom, signals)  # verify waits for the page to settle
@@ -242,9 +242,48 @@ async def _reruns(plan: dict, symptom: dict, runs: int, headless: bool, executab
     return {"runs": runs, "reproduced": sum(r["reproduced"] for r in results), "results": results}
 
 
+async def _replay_known(page, signals: Signals, steps: list[dict], symptom: dict | None, plan_base: str,
+                       base_url: str, history: list[dict], run_id: str) -> tuple[list[dict], dict | None]:
+    """Replays the steps to the bug Mirmera already has (edited by the tester, picked from
+    the recording, or the recorded actions), then checks what shows the bug. Returns the
+    steps that ran, and the verified symptom when the bug showed. No AI involved."""
+    from app.regression.steps import describe_step
+    ran: list[dict] = []
+    for step in steps:
+        entry = {"n": len(history) + 1, "thought": "Replaying the steps to the bug (no AI)", "action": describe_step(step),
+                 "kind": "replay", "status": "ok", "detail": "", "url": page.url}
+        try:
+            skipped = await run_step(page, step, plan_base, base_url)
+        except Exception as err:
+            skipped = _first_line(err)
+            entry["status"] = "failed"
+        if skipped:
+            entry["status"], entry["detail"] = entry["status"] if entry["status"] == "failed" else "skipped", \
+                f"{skipped}; the AI takes over from here"
+            history.append(entry)
+            _save(run_id, steps=list(history))
+            return ran, None
+        history.append(entry)
+        ran.append(step)
+        _save(run_id, steps=list(history))
+    if not symptom:
+        return ran, None
+    ok, detail = await verify(page, symptom, signals)
+    shown = (f"a failed request to {symptom['value']}" if symptom["kind"] == "failed_request" else f'"{symptom["value"]}" on the page')
+    history.append({"n": len(history) + 1, "thought": "Checking whether the bug shows after replaying the steps",
+                    "action": f"check for {shown}", "kind": "reproduced", "url": page.url,
+                    "status": "verified" if ok else "not verified",
+                    "detail": detail if ok else f"{detail}; the AI takes over from here"})
+    _save(run_id, steps=list(history))
+    if not ok:
+        return ran, None
+    return ran, {**symptom, "explanation": "Replaying the steps to the bug showed it; no AI step was needed.", "evidence": detail}
+
+
 async def run_agent(run_id: str, ctx: BugContext, provider: LLMProvider, *, start_url: str, origins: set[str],
                     max_steps: int, runs: int, headless: bool, executable_path: str | None,
-                    screenshot_path: Path) -> None:
+                    screenshot_path: Path, replay_steps: list[dict] | None = None,
+                    replay_symptom: dict | None = None) -> None:
     from playwright.async_api import async_playwright
 
     ACTIVE.add(run_id)
@@ -261,9 +300,18 @@ async def run_agent(run_id: str, ctx: BugContext, provider: LLMProvider, *, star
                 signals.attach(page)
                 seen: dict[str, int] = {}
                 bad_replies = 0  # unusable AI replies in a row
-                await page.goto(start_url, wait_until="domcontentloaded", timeout=30_000)
+                ran: list[dict] = []
+                if replay_steps:  # known steps first: often the bug shows without any AI step
+                    ran, found = await _replay_known(page, signals, replay_steps, replay_symptom, origin(replay_steps[0]["url"]),
+                                                     origin(start_url), history, run_id)
+                    if ran:
+                        plan_steps = list(ran)
+                    if found:
+                        final = {"status": "reproduced", "symptom": found}
+                if not ran:
+                    await page.goto(start_url, wait_until="domcontentloaded", timeout=30_000)
 
-                for n in range(1, max_steps + 1):
+                for n in (range(1, max_steps + 1) if not final else ()):
                     if _cancelled(run_id):
                         final = {"status": "cancelled", "detail": "Cancelled by the tester."}
                         break
@@ -279,7 +327,7 @@ async def run_agent(run_id: str, ctx: BugContext, provider: LLMProvider, *, star
                         # agent sees in its history, and let it try again, up to a limit.
                         bad_replies += 1
                         reason = str(err).split("Details: ", 1)[-1].splitlines()[:3]
-                        history.append({"n": n, "thought": "", "action": "(unusable reply)", "kind": "invalid",
+                        history.append({"n": len(history) + 1, "thought": "", "action": "(unusable reply)", "kind": "invalid",
                                         "status": "failed", "detail": "; ".join(reason), "url": page.url})
                         _save(run_id, steps=list(history))
                         if bad_replies >= MAX_BAD_REPLIES:
@@ -287,7 +335,7 @@ async def run_agent(run_id: str, ctx: BugContext, provider: LLMProvider, *, star
                         continue
                     bad_replies = 0
                     a = step.action
-                    entry = {"n": n, "thought": step.thought, "action": describe(a), "kind": a.kind,
+                    entry = {"n": len(history) + 1, "thought": step.thought, "action": describe(a), "kind": a.kind,
                              "status": "ok", "detail": "", "url": page.url}
 
                     if a.kind == "give_up":
@@ -319,7 +367,8 @@ async def run_agent(run_id: str, ctx: BugContext, provider: LLMProvider, *, star
                     history.append(entry)
                     _save(run_id, steps=list(history))
                 else:
-                    final = {"status": "not_reproduced", "detail": f"Ran out of steps ({max_steps}) without reproducing it."}
+                    if not final:
+                        final = {"status": "not_reproduced", "detail": f"Ran out of steps ({max_steps}) without reproducing it."}
 
                 try:
                     screenshot_path.parent.mkdir(parents=True, exist_ok=True)
@@ -332,6 +381,7 @@ async def run_agent(run_id: str, ctx: BugContext, provider: LLMProvider, *, star
 
             if final.get("status") == "reproduced":
                 plan = {"title": ctx.report.get("title", "reproduction"), "base_url": origin(start_url),
+                        "recorded_base": origin(replay_steps[0]["url"]) if replay_steps else None,
                         "steps": plan_steps, "assertions": [], "assumptions": []}
                 final["plan"] = plan
                 _save(run_id, steps=list(history), detail=f"Reproduced. Rerunning the steps {runs} time(s)…")
