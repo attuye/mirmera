@@ -166,3 +166,9 @@ def test_the_extension_uses_the_same_recorder_as_the_recorded_browser():
     root = Path(__file__).resolve().parents[2]
     assert (root / "extension" / "recorder.js").read_text() == (root / "backend" / "app" / "recorder.js").read_text(), \
         "extension/recorder.js differs from backend/app/recorder.js: copy the backend file over"
+
+
+def test_the_extension_uses_the_same_logo_as_the_app():
+    root = Path(__file__).resolve().parents[2]
+    assert (root / "extension" / "icons" / "mirmera.svg").read_bytes() == (root / "frontend" / "public" / "mirmera.svg").read_bytes(), \
+        "extension/icons/mirmera.svg differs from frontend/public/mirmera.svg: copy the frontend file over"

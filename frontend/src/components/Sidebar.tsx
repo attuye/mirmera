@@ -64,11 +64,8 @@ export default function Sidebar() {
       width: 232, flexShrink: 0, background: 'var(--panel-alt)', borderRight: '1px solid var(--border)',
       display: 'flex', flexDirection: 'column', padding: '28px 20px',
     }}>
-      <Link to="/projects" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 32, color: 'inherit' }}>
-        <div style={{
-          width: 28, height: 28, borderRadius: 7, background: 'var(--accent)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: '#0C0D0F', fontSize: 15,
-        }}>M</div>
+      <Link to="/projects" title="Mirmera (ምርመራ): investigation" aria-label="Mirmera home" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 32, color: 'inherit' }}>
+        <img src="/mirmera.svg" width={32} height={32} alt="" style={{ display: 'block', flexShrink: 0 }} />
         <div>
           <div style={{ fontWeight: 600, fontSize: 14 }}>AddisVerify</div>
           <div className="mono" style={{ fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Mirmera</div>
