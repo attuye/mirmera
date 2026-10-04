@@ -24,6 +24,9 @@ import { ProjectLayout, SessionRedirect, lastProjectId } from './project'
 import { AuthProvider, RequireAuth } from './auth'
 import SignIn from './pages/SignIn'
 import Account from './pages/Account'
+import MembersPage from './pages/MembersPage'
+import InvitePage from './pages/InvitePage'
+import { ForgotPassword, ResetPassword } from './pages/PasswordPages'
 
 /** "/" opens the project used last in this browser, or the Projects page. */
 function Home() {
@@ -37,9 +40,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <AuthProvider>
       <Routes>
         <Route path="/signin" element={<SignIn />} />
+        <Route path="/invite/:token" element={<InvitePage />} />
+        <Route path="/forgot" element={<ForgotPassword />} />
+        <Route path="/reset/:token" element={<ResetPassword />} />
         <Route element={<RequireAuth />}>
         <Route path="/" element={<Home />} />
         <Route path="/account" element={<Account />} />
+        <Route path="/workspaces/:workspaceId/members" element={<MembersPage />} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/projects/:projectId" element={<ProjectLayout />}>
           <Route index element={<Navigate to="dashboard" replace />} />

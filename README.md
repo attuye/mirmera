@@ -49,8 +49,19 @@ members of its workspace; an id from another workspace answers 404. Roles in a w
 **Account** (bottom of the sidebar) has your name, password, workspaces (add one per client or team, switch, rename)
 and tokens for the Chrome extension. Passwords are hashed with scrypt; sign-in uses an httpOnly cookie, and only a
 hash of each sign-in or extension token is stored. Ten wrong passwords for an email or address lock sign-in for 15
-minutes. Behind HTTPS, set `COOKIE_SECURE=true`. Inviting teammates and per-workspace keys come next; until then the
-tracker, AI and Telegram keys in `backend/.env` are shared by every workspace on this server.
+minutes. Behind HTTPS, set `COOKIE_SECURE=true`. Per-workspace keys come next; until then the tracker, AI and Telegram
+keys in `backend/.env` are shared by every workspace on this server.
+
+**Members** (Account → a workspace → **Members**): admins invite by email with a role. The invitation is emailed when
+SMTP is set up (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` in `backend/.env`); either way the
+admin gets the link to send. The link works for 7 days, once, and only for that email: the invited person signs in, or
+creates an account from the link (this works even with `ALLOW_SIGNUPS=false`). Inviting the same email again replaces
+the old link. Admins change roles and remove people (their sessions and bugs stay); only an owner can make or change an
+owner, and a workspace always keeps at least one owner. Anyone can **Leave**.
+
+**Forgot your password?** on the sign-in page emails a reset link (an hour, once); choosing a new password signs out
+every browser. It answers the same whether or not the email has an account. Without SMTP, the link is written to the
+backend's log for whoever runs the server to pass on. Set `PUBLIC_APP_URL` so links point at your app's address.
 
 ### Recorded browser
 
@@ -414,8 +425,8 @@ This is the Phase 1 scaffold from the scoping discussion:
 - ✅ User stories: import from Jira or GitHub, link risks and charters, see the testing under each and what is left
 - ✅ Sprints: dates and stories, everything tested in those dates (inside and outside the plan), report and coverage per sprint
 - ✅ Accounts and workspaces: sign up and in, every route checked against the workspace and role, extension tokens
+- ✅ Members: invitations by email or link, roles, removing and leaving, password reset
 - ✅ Notifications: Telegram and Slack messages for fixes that didn't hold, regression problems and high bugs
 
 Not yet built:
-- Invitations and member roles in the app, password reset by email
 - Per-workspace keys for GitHub, Jira, AI providers and Telegram (today they're in `backend/.env`, shared)

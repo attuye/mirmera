@@ -50,6 +50,36 @@ class Membership(Base):
     user = relationship("User", back_populates="memberships")
 
 
+class Invitation(Base):
+    """An invitation to join a workspace with a role. The link holds a random token; only
+    its hash is stored. Accepting needs an account with the invited email."""
+    __tablename__ = "invitations"
+    id = Column(String, primary_key=True, default=gen_id)
+    workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=False, index=True)
+    email = Column(String, nullable=False)  # lower-case
+    role = Column(String, nullable=False, default="tester")
+    token_hash = Column(String, nullable=False, unique=True, index=True)
+    invited_by = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    accepted_at = Column(DateTime, nullable=True)
+
+    workspace = relationship("Workspace")
+    inviter = relationship("User")
+
+
+class PasswordReset(Base):
+    """A one-time link to choose a new password; valid for an hour, deleted once used."""
+    __tablename__ = "password_resets"
+    id = Column(String, primary_key=True, default=gen_id)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String, nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=utcnow)
+    expires_at = Column(DateTime, nullable=False)
+
+    user = relationship("User")
+
+
 class AuthToken(Base):
     """A signed-in browser (kind "session", sent as a cookie) or an API token for the
     Chrome extension (kind "api", sent as a Bearer header). Only a hash is stored."""

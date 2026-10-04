@@ -1,7 +1,7 @@
 /** Sign in, or create an account with its own workspace. The very first account also takes
  *  over the projects made before accounts existed. */
 import { useEffect, useState } from 'react'
-import { Navigate, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useSearchParams } from 'react-router-dom'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton } from '../components/ui'
 import { api, AuthConfig } from '../api/client'
 import { useAuth } from '../auth'
@@ -65,6 +65,7 @@ export default function SignIn() {
             type: 'password', required: true, autoComplete: mode === 'signin' ? 'current-password' : 'new-password',
             minLength: mode === 'signup' ? 10 : undefined,
           })}
+          {mode === 'signin' && <Link to="/forgot" style={{ fontSize: 12, marginTop: -6, alignSelf: 'flex-end' }}>Forgot your password?</Link>}
           {mode === 'signup' && <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: -6 }}>At least 10 characters; a short phrase is easier to remember.</div>}
           {mode === 'signup' && field('workspace_name', 'Workspace (your team or company)', { placeholder: 'e.g. AddisVerify', maxLength: 100 })}
           <ErrorLine message={error} />

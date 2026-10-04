@@ -11,7 +11,8 @@ from app.database import SessionLocal
 from app.main import app
 from tests.conftest import PASSWORD, sign_up
 
-OPEN = {"/health", "/auth/config", "/auth/signup", "/auth/login", "/auth/logout"}
+OPEN = {"/health", "/auth/config", "/auth/signup", "/auth/login", "/auth/logout", "/auth/forgot", "/auth/reset",
+        "/invitations/{token}", "/invitations/{token}/signup"}  # an invitation or reset link is the credential
 
 
 def test_every_route_needs_signing_in(anon):

@@ -13,6 +13,16 @@ class Settings(BaseSettings):
     # Set true when Mirmera is served over HTTPS, so the sign-in cookie is never sent in clear.
     cookie_secure: bool = False
 
+    # Email, for invitations and password resets. Without SMTP_HOST nothing is sent:
+    # invitation links are shown to whoever invites, and reset links go to the server log.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str = "Mirmera <no-reply@localhost>"
+    smtp_starttls: bool = True
+    mock_email: bool = False  # keep emails in memory instead of sending (tests)
+
     # Frontend origins allowed to call the API, comma-separated.
     cors_origins: str = "http://localhost:5173"
 

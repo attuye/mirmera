@@ -1733,3 +1733,54 @@ class ApiTokenOut(BaseModel):
 
 class ApiTokenCreated(ApiTokenOut):
     token: str  # shown once
+
+
+# ---- Members and invitations -----------------------------------------------------------
+
+Role = Literal["viewer", "tester", "admin", "owner"]
+
+
+class InvitationIn(BaseModel):
+    email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    role: Role = "tester"
+
+
+class InvitationCreated(BaseModel):
+    id: str
+    email: str
+    role: str
+    link: str  # for the admin to send when email isn't set up
+    emailed: bool
+
+
+class InvitationView(BaseModel):
+    workspace_name: str
+    email: str
+    role: str
+    invited_by: Optional[str]
+    has_account: bool
+
+
+class InvitedSignUp(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class RoleChange(BaseModel):
+    role: Role
+
+
+class MembersOut(BaseModel):
+    workspace: dict  # {"id", "name"}
+    members: list[dict]  # [{"user_id", "name", "email", "role", "joined_at"}]
+    invitations: list[dict]  # [{"id", "email", "role", "created_at", "expires_at", "expired", "invited_by"}]
+    email_configured: bool
+
+
+class ForgotPassword(BaseModel):
+    email: str = Field(max_length=254)
+
+
+class ResetPassword(BaseModel):
+    token: str = Field(max_length=200)
+    password: str = Field(max_length=200)

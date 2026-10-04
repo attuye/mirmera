@@ -1,6 +1,6 @@
 /** Your account: name, password, workspaces, and API tokens for the Chrome extension. */
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import { utcDate } from '../components/Evidence'
 import { ConfirmDelete, ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
@@ -87,6 +87,7 @@ function Workspaces() {
               <>
                 <span style={{ flex: 1 }}>{w.name}{workspace?.id === w.id && <span style={{ fontSize: 11, color: 'var(--accent)' }}> · current</span>}</span>
                 <span className="mono" style={{ fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>{w.role}</span>
+                <Link to={`/workspaces/${w.id}/members`} style={{ ...quietButton, fontSize: 12, padding: '3px 9px' }}>Members</Link>
                 {workspace?.id !== w.id && <button onClick={() => setWorkspace(w.id)} style={{ ...quietButton, fontSize: 12, padding: '3px 9px' }}>Switch</button>}
                 {(w.role === 'owner' || w.role === 'admin') && <button onClick={() => setRenaming({ id: w.id, name: w.name })} style={{ ...quietButton, fontSize: 12, padding: '3px 9px' }}>Rename</button>}
               </>
