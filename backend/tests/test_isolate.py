@@ -113,3 +113,15 @@ def test_without_steps_or_a_symptom_it_says_what_is_missing(client, session):
     client.put(f"/bugs/{bug['id']}/steps", json={"steps": [{"type": "goto", "url": "http://localhost:4000/"}]})
     r = client.post(f"/bugs/{bug['id']}/isolation", json={})
     assert r.status_code == 409 and "Say what shows the bug" in r.json()["detail"]
+
+
+def test_a_finished_run_is_saved_before_it_stops_counting_as_active(monkeypatch):
+    """A status read between the two must never see a running run nobody works on."""
+    import asyncio
+    from app.regression import isolate as engine
+    seen = []
+    monkeypatch.setattr(engine, "_save", lambda run_id, **f: seen.append(("save", run_id in engine.ACTIVE, f.get("status"))))
+    monkeypatch.setattr("playwright.async_api.async_playwright", lambda: (_ for _ in ()).throw(RuntimeError("no browser")))
+    asyncio.run(engine.run_isolation("r1", [], {"kind": "text", "value": "x"}, base_url="http://x", plan_base="http://x",
+                                     headless=True, executable_path=None))
+    assert seen[-1] == ("save", True, "error") and "r1" not in engine.ACTIVE

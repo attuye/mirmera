@@ -397,5 +397,7 @@ async def run_agent(run_id: str, ctx: BugContext, provider: LLMProvider, *, star
         logger.exception("Reproduction run %s failed", run_id)
         final = {"status": "error", "detail": f"The run failed: {_first_line(err)}"}
     finally:
-        ACTIVE.discard(run_id)
-        _save(run_id, steps=list(history), finished_at=utcnow(), **final)
+        try:  # saved before it stops counting as active, so a read in between never sees an orphan
+            _save(run_id, steps=list(history), finished_at=utcnow(), **final)
+        finally:
+            ACTIVE.discard(run_id)
