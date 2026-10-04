@@ -163,6 +163,17 @@ check on a timer while the backend runs. With `MOCK_TRACKERS=true`, close a mock
 issue with `POST /mock-trackers/issue-state`
 (`{"tracker": "github", "target": "owner/repo", "issue_key": "#3"}`).
 
+### Test-idea nudges
+
+While a session runs, **Test ideas** under the note box suggests what to try next, from what this session has
+done (no AI, so it's instant and works offline). Each idea says why it appeared and names the heuristic behind it:
+failures the browser recorded that no bug or note covers yet (shown first), the charter's risks and test ideas no
+note mentions, fields filled only with ordinary values (boundary and odd inputs chosen by field type: dates,
+numbers, emails, phones, text; never for secret fields), choices made one way, uploads, submit buttons
+(double-click, Back, refresh, timeout), pages other sessions opened but never tried, and halfway through with
+nothing found. Click a suggestion to start a note with it; **Tried it** logs a test note; **Not now** hides the
+idea for the rest of the session.
+
 ### Coverage map
 
 The **Coverage** page shows where the testing actually went. Every page the recorded browser (or the Chrome

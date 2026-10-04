@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, Note } from '../api/client'
 import Sidebar from '../components/Sidebar'
 import { errorText, ConfirmDelete } from '../components/ui'
 import BrowserPanel, { useRunner } from '../components/BrowserPanel'
 import { Screenshot, clock } from '../components/Evidence'
+import TestIdeas from '../components/TestIdeas'
 import { useProject, useProjectPath, useSessionProject } from '../project'
 
 const TAGS: { key: Note['tag']; label: string; color: string }[] = [
@@ -62,6 +63,7 @@ export default function ActiveSession() {
   const elapsed = useElapsed(startedAt, !ending, paused, pausedAt, totalPausedSeconds)
   const [charterMission, setCharterMission] = useState('')
   const runner = useRunner(sessionId)
+  const box = useRef<HTMLTextAreaElement>(null)
 
   // Notes and bugs can also arrive from the Chrome extension's popup: refresh while it records.
   const extensionActive = !!runner.status?.extension_active
@@ -173,6 +175,7 @@ export default function ActiveSession() {
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
             <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 11, padding: '14px 16px', marginBottom: 16 }}>
               <textarea
+                ref={box}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); logEntry() } }}
@@ -209,6 +212,12 @@ export default function ActiveSession() {
             {logError && (
               <div role="alert" style={{ color: 'var(--danger)', fontSize: 12.5, margin: '-6px 0 12px' }}>{logError}</div>
             )}
+            {sessionId && (
+              <TestIdeas sessionId={sessionId} disabled={ending || paused} refreshKey={notes.length}
+                onNote={(note) => setNotes((prev) => [...prev, note])}
+                onUse={(text) => { setTag('test'); setDraft(text); box.current?.focus() }} />
+            )}
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, overflowY: 'auto' }}>
               {timeline.map((item) => item.type === 'note' ? (
                 <div key={item.note.id} style={{ display: 'flex', gap: 12, padding: '10px 4px', borderBottom: '1px solid #17191D' }}>

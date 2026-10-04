@@ -1409,6 +1409,20 @@ class CoverageMap(BaseModel):
     gaps: list[str]
 
 
+class NudgeOut(BaseModel):
+    id: str
+    kind: str  # problem | risk | idea | field | choice | upload | submit | page | time
+    title: str
+    why: str
+    heuristic: str
+    suggestions: list[str]
+    priority: int
+
+
+class NudgeTried(BaseModel):
+    note: str = Field(min_length=1, max_length=2000)
+
+
 class AIProviderStatus(BaseModel):
     name: str
     configured: bool
