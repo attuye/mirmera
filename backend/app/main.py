@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from app.ai.base import ProviderError, ProviderNotConfigured, UnknownProvider
 from app.config import settings
 from app.database import Base, add_missing_columns, apply_renames, engine
-from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension, isolate, suite, retests, report, ai
+from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension, isolate, suite, retests, report, coverage, ai
 from app.runner import RunnerConflict, RunnerUnavailable, manager as runner_manager
 from app.trackers import TrackerError, TrackerNotConfigured, UnknownTracker
 
@@ -101,6 +101,7 @@ app.include_router(isolate.router)
 app.include_router(suite.router)
 app.include_router(retests.router)
 app.include_router(report.router)
+app.include_router(coverage.router)
 app.include_router(ai.router)
 
 

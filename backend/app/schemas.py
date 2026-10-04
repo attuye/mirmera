@@ -1372,6 +1372,43 @@ class ProjectReport(BaseModel):
     blocks: list[dict]
 
 
+class CoveragePage(BaseModel):
+    path: str  # ids collapsed: /orders/:id
+    hosts: list[str]
+    sessions: int
+    testers: list[str]
+    charters: list[str]
+    visits: int
+    actions: int
+    controls: list[str]  # 'click button "Verify"', without values typed
+    problems: list[dict]  # [{"summary", "count"}]
+    bugs: list[dict]  # [{"id", "title", "severity", "kind"}] logged while on this page
+    first_seen: Optional[datetime] = None
+    last_seen: Optional[datetime] = None
+    flags: list[str]  # not_tried | problems_without_bug | stale | one_tester
+
+
+class CoverageArea(BaseModel):
+    category: str
+    name: str
+    description: str = ""
+    risks: list[str]
+    sessions: int
+    last_tested: Optional[datetime] = None
+
+
+class CoverageMap(BaseModel):
+    project_id: str
+    since: Optional[datetime] = None
+    generated_at: datetime
+    sessions: int
+    recorded_sessions: int  # sessions with a recorded browser or the extension
+    stale_days: int
+    pages: list[CoveragePage]
+    areas: list[CoverageArea]
+    gaps: list[str]
+
+
 class AIProviderStatus(BaseModel):
     name: str
     configured: bool

@@ -12,6 +12,7 @@ import DebriefsList from './pages/Debriefs'
 import Bugs from './pages/Bugs'
 import Regression from './pages/Regression'
 import ReportPage from './pages/Report'
+import CoveragePage from './pages/Coverage'
 import RisksPage from './pages/Risks'
 import { ProjectLayout, SessionRedirect, lastProjectId } from './project'
 
@@ -38,6 +39,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="bugs" element={<Bugs />} />
           <Route path="regression" element={<Regression />} />
           <Route path="report" element={<ReportPage />} />
+          <Route path="coverage" element={<CoveragePage />} />
           <Route path="settings" element={<ProjectSettings />} />
         </Route>
         {/* Links from before projects */}

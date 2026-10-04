@@ -661,6 +661,39 @@ export interface Retest {
   finished_at: string | null
 }
 export interface RetestCheck { checked: number; filed: number; retests: Retest[]; problems: string[] }
+// ---- Coverage map ---------------------------------------------------------------
+
+export type CoverageFlag = 'not_tried' | 'problems_without_bug' | 'stale' | 'one_tester'
+export interface CoveragePage {
+  path: string
+  hosts: string[]
+  sessions: number
+  testers: string[]
+  charters: string[]
+  visits: number
+  actions: number
+  controls: string[]
+  problems: { summary: string; count: number }[]
+  bugs: { id: string; title: string; severity: string; kind: string | null }[]
+  first_seen: string | null
+  last_seen: string | null
+  flags: CoverageFlag[]
+}
+export interface CoverageArea {
+  category: string; name: string; description: string; risks: string[]; sessions: number; last_tested: string | null
+}
+export interface CoverageMap {
+  project_id: string
+  since: string | null
+  generated_at: string
+  sessions: number
+  recorded_sessions: number
+  stale_days: number
+  pages: CoveragePage[]
+  areas: CoverageArea[]
+  gaps: string[]
+}
+
 // ---- Test report ---------------------------------------------------------------
 
 export type ReportCell = string | { text: string; href: string } | (string | { text: string; href: string })[]
@@ -705,6 +738,8 @@ export const api = {
   suiteHistory: (projectId: string) => request<SuiteRun[]>(`/projects/${projectId}/suite-runs`),
   checkClosedIssues: (projectId: string, base_url?: string) =>
     request<RetestCheck>(`/projects/${projectId}/retests/check`, { method: 'POST', body: JSON.stringify({ base_url }) }),
+  getCoverage: (projectId: string, since?: string) =>
+    request<CoverageMap>(`/projects/${projectId}/coverage${since ? `?since=${since}` : ''}`),
   getReport: (projectId: string, since?: string, until?: string) =>
     request<ProjectReport>(`/projects/${projectId}/report${periodQuery(since, until)}`),
   listRetests: (projectId: string) => request<Retest[]>(`/projects/${projectId}/retests`),
