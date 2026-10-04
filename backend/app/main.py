@@ -1,14 +1,15 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.ai.base import ProviderError, ProviderNotConfigured, UnknownProvider
+from app.auth import guard
 from app.config import settings
 from app.database import Base, add_missing_columns, apply_renames, engine
-from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension, isolate, suite, retests, report, coverage, nudges, notifications, stories, sprints, ai
+from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension, isolate, suite, retests, report, coverage, nudges, notifications, stories, sprints, ai, members, auth as auth_routes
 from app.runner import RunnerConflict, RunnerUnavailable, manager as runner_manager
 from app.trackers import TrackerError, TrackerNotConfigured, UnknownTracker
 
@@ -38,7 +39,9 @@ app.add_middleware(
     allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,  # the sign-in cookie
 )
+GUARDED = [Depends(guard)]  # every route below checks who is calling and their role in the project's workspace
 
 # AI provider problems become clear errors instead of a bare 500.
 # The most specific handler wins, so these three cover every ProviderError.
@@ -82,31 +85,33 @@ async def runner_conflict(_: Request, err: RunnerConflict):
     return JSONResponse(status_code=409, content={"detail": str(err)})
 
 
-app.include_router(extension.router)  # before sessions: /sessions/active must not match /sessions/{id}
-app.include_router(projects.router)
-app.include_router(artifacts.router)
-app.include_router(charters.router)
-app.include_router(sessions.router)
-app.include_router(debriefs.router)
-app.include_router(debriefs.list_router)
-app.include_router(sessions.bugs_list_router)
-app.include_router(risks.router)
-app.include_router(bugs.router)
-app.include_router(runner.router)
-app.include_router(risk_feedback.router)
-app.include_router(trackers.router)
-app.include_router(regression.router)
-app.include_router(reproduce.router)
-app.include_router(isolate.router)
-app.include_router(suite.router)
-app.include_router(retests.router)
-app.include_router(report.router)
-app.include_router(coverage.router)
-app.include_router(nudges.router)
-app.include_router(notifications.router)
-app.include_router(stories.router)
-app.include_router(sprints.router)
-app.include_router(ai.router)
+app.include_router(auth_routes.router)  # signing in can't require being signed in
+app.include_router(members.router)  # checks membership itself; invitation links work signed out
+app.include_router(extension.router, dependencies=GUARDED)  # before sessions: /sessions/active must not match /sessions/{id}
+app.include_router(projects.router, dependencies=GUARDED)
+app.include_router(artifacts.router, dependencies=GUARDED)
+app.include_router(charters.router, dependencies=GUARDED)
+app.include_router(sessions.router, dependencies=GUARDED)
+app.include_router(debriefs.router, dependencies=GUARDED)
+app.include_router(debriefs.list_router, dependencies=GUARDED)
+app.include_router(sessions.bugs_list_router, dependencies=GUARDED)
+app.include_router(risks.router, dependencies=GUARDED)
+app.include_router(bugs.router, dependencies=GUARDED)
+app.include_router(runner.router, dependencies=GUARDED)
+app.include_router(risk_feedback.router, dependencies=GUARDED)
+app.include_router(trackers.router, dependencies=GUARDED)
+app.include_router(regression.router, dependencies=GUARDED)
+app.include_router(reproduce.router, dependencies=GUARDED)
+app.include_router(isolate.router, dependencies=GUARDED)
+app.include_router(suite.router, dependencies=GUARDED)
+app.include_router(retests.router, dependencies=GUARDED)
+app.include_router(report.router, dependencies=GUARDED)
+app.include_router(coverage.router, dependencies=GUARDED)
+app.include_router(nudges.router, dependencies=GUARDED)
+app.include_router(notifications.router, dependencies=GUARDED)
+app.include_router(stories.router, dependencies=GUARDED)
+app.include_router(sprints.router, dependencies=GUARDED)
+app.include_router(ai.router, dependencies=GUARDED)
 
 
 @app.get("/health")

@@ -54,7 +54,7 @@ def _unique_environments(envs: Optional[list[Environment]]) -> Optional[list[Env
 
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    org_id: str = "local"
+    org_id: Optional[str] = None  # the workspace; leave out when you have only one
     description: Optional[str] = Field(default=None, max_length=300)
     app_url: Optional[str] = None
 
@@ -1678,3 +1678,109 @@ class SprintDetail(SprintSummary):
     outside_charters: list[dict]  # [{"id", "mission_statement", "sessions", "minutes", "stories"}]
     high_unexplored: list[dict]  # [{"id", "ref", "title", "score", "in_sprint"}]
     left_list: list[dict]  # [{"text", "to", "action"}]
+
+
+# ---- Accounts ----------------------------------------------------------------------
+
+class SignUp(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    password: str = Field(min_length=1, max_length=200)
+    workspace_name: Optional[str] = Field(default=None, max_length=100)
+
+
+class SignIn(BaseModel):
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=200)
+
+
+class AccountUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(max_length=200)
+    new_password: str = Field(max_length=200)
+
+
+class WorkspaceIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class Me(BaseModel):
+    user: dict  # {"id", "name", "email"}
+    workspaces: list[dict]  # [{"id", "name", "role"}]
+
+
+class AuthConfig(BaseModel):
+    allow_signups: bool
+    has_users: bool
+    unowned_projects: int  # projects the first account will take over
+
+
+class ApiTokenCreate(BaseModel):
+    label: str = Field(min_length=1, max_length=80)
+
+
+class ApiTokenOut(BaseModel):
+    id: str
+    label: Optional[str]
+    created_at: datetime
+    last_used_at: Optional[datetime]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ApiTokenCreated(ApiTokenOut):
+    token: str  # shown once
+
+
+# ---- Members and invitations -----------------------------------------------------------
+
+Role = Literal["viewer", "tester", "admin", "owner"]
+
+
+class InvitationIn(BaseModel):
+    email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    role: Role = "tester"
+
+
+class InvitationCreated(BaseModel):
+    id: str
+    email: str
+    role: str
+    link: str  # for the admin to send when email isn't set up
+    emailed: bool
+
+
+class InvitationView(BaseModel):
+    workspace_name: str
+    email: str
+    role: str
+    invited_by: Optional[str]
+    has_account: bool
+
+
+class InvitedSignUp(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class RoleChange(BaseModel):
+    role: Role
+
+
+class MembersOut(BaseModel):
+    workspace: dict  # {"id", "name"}
+    members: list[dict]  # [{"user_id", "name", "email", "role", "joined_at"}]
+    invitations: list[dict]  # [{"id", "email", "role", "created_at", "expires_at", "expired", "invited_by"}]
+    email_configured: bool
+
+
+class ForgotPassword(BaseModel):
+    email: str = Field(max_length=254)
+
+
+class ResetPassword(BaseModel):
+    token: str = Field(max_length=200)
+    password: str = Field(max_length=200)

@@ -102,7 +102,7 @@ def test_saved_charter_starts_as_proposed(client, charter):
 
 
 def test_charters_are_listed_per_project(client, project, charter):
-    other = client.post("/projects", json={"name": "Other", "org_id": "x"}).json()
+    other = client.post("/projects", json={"name": "Other"}).json()
     assert [c["id"] for c in client.get(f"/projects/{project['id']}/charters").json()] == [charter["id"]]
     assert client.get(f"/projects/{other['id']}/charters").json() == []
 
@@ -124,6 +124,6 @@ def test_a_suggested_charter_remembers_the_change_it_came_from(client, project, 
     assert c["source_label"] == "PR #42: Check passports against the MRZ (mock PR 42)"
     assert c["source_url"] == "https://mock-github.local/addisverify/kyc/pull/42"
     assert client.get(f"/projects/{project['id']}/charters").json()[0]["source_label"].startswith("PR #42")
-    other = client.post("/projects", json={"name": "Other", "org_id": "x"}).json()
+    other = client.post("/projects", json={"name": "Other"}).json()
     r = client.post(f"/projects/{other['id']}/charters", json={"mission_statement": "x", "source_artifact_id": pr["id"]})
     assert r.status_code == 400 and "Unknown artifact" in r.json()["detail"]

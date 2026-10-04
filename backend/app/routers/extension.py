@@ -12,10 +12,10 @@ import uuid
 from datetime import timedelta
 from urllib.parse import parse_qsl, quote, urlsplit, urlunsplit
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session as DBSession
 
-from app import models, schemas
+from app import auth, models, schemas
 from app.database import get_db
 from app.routers.runner import session_folder, store_signals
 from app.runner import Signal, _cut, describe_action, sanitize_action
@@ -78,12 +78,13 @@ def to_signal(e: schemas.ExtensionEvent) -> Signal | None:
 
 
 @router.get("/sessions/active", response_model=list[schemas.ActiveSessionOut])
-def active_sessions(db: DBSession = Depends(get_db)):
-    """Running sessions, newest first, for the extension's session picker."""
+def active_sessions(request: Request, db: DBSession = Depends(get_db)):
+    """Running sessions in your workspaces, newest first, for the extension's session picker."""
+    workspaces = list(auth.roles_of(db, auth.current_user(request, db)))
     rows = (db.query(models.Session, models.Charter, models.Project)
             .join(models.Charter, models.Session.charter_id == models.Charter.id)
             .join(models.Project, models.Charter.project_id == models.Project.id)
-            .filter(models.Session.ended_at.is_(None))
+            .filter(models.Session.ended_at.is_(None), models.Project.org_id.in_(workspaces))
             .order_by(models.Session.started_at.desc()).all())
     return [schemas.ActiveSessionOut(id=s.id, charter_mission=c.mission_statement, started_at=s.started_at,
                                      paused=bool(s.paused_at), project_id=p.id, project_name=p.name)

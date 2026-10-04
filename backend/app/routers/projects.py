@@ -1,9 +1,9 @@
 """Projects: what a tester works on. Everything else hangs off a project."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session as DBSession
 
-from app import models, schemas
+from app import auth, models, schemas
 from app.ai.base import PROVIDER_NAMES
 from app.database import get_db
 from app.housekeeping import BusyError, delete_project
@@ -20,7 +20,18 @@ def _project_or_404(db: DBSession, project_id: str) -> models.Project:
 
 
 @router.post("", response_model=schemas.ProjectOut)
-def create_project(payload: schemas.ProjectCreate, db: DBSession = Depends(get_db)):
+def create_project(payload: schemas.ProjectCreate, request: Request, db: DBSession = Depends(get_db)):
+    """In a workspace where you are an admin or owner; org_id can be left out when there is only one."""
+    roles = auth.roles_of(db, auth.current_user(request, db))
+    if payload.org_id is None:
+        mine = [w for w, r in roles.items() if auth.RANK[r] >= auth.RANK["admin"]]
+        if len(mine) != 1:
+            raise HTTPException(422, "Say which workspace the project is for (org_id).")
+        payload.org_id = mine[0]
+    if payload.org_id not in roles:
+        raise HTTPException(404, "Workspace not found")
+    if auth.RANK[roles[payload.org_id]] < auth.RANK["admin"]:
+        raise HTTPException(403, "Only a workspace admin can create projects.")
     project = models.Project(**payload.model_dump())
     db.add(project)
     db.commit()
@@ -29,9 +40,10 @@ def create_project(payload: schemas.ProjectCreate, db: DBSession = Depends(get_d
 
 
 @router.get("", response_model=list[schemas.ProjectSummary])
-def list_projects(db: DBSession = Depends(get_db)):
-    """Projects for the Projects page, most recently worked on first."""
-    projects = db.query(models.Project).all()
+def list_projects(request: Request, db: DBSession = Depends(get_db)):
+    """Projects in your workspaces, most recently worked on first."""
+    workspaces = list(auth.roles_of(db, auth.current_user(request, db)))
+    projects = db.query(models.Project).filter(models.Project.org_id.in_(workspaces)).all()
     risks = dict(db.query(models.Risk.project_id, func.count(models.Risk.id))
                  .filter(models.Risk.status != "retired").group_by(models.Risk.project_id).all())
     charters = dict(db.query(models.Charter.project_id, func.count(models.Charter.id))

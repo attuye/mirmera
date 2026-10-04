@@ -2,11 +2,16 @@
 export const API_URL: string = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 const BASE_URL = API_URL
 
+/** Fired when the API says the browser isn't signed in (any more): the app shows the sign-in page. */
+export const SIGNED_OUT = 'mirmera:signed-out'
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
+    credentials: 'include',  // the sign-in cookie
     headers: { 'Content-Type': 'application/json', ...options.headers },
   })
+  if (res.status === 401 && !path.startsWith('/auth/')) window.dispatchEvent(new Event(SIGNED_OUT))
   if (!res.ok) {
     // FastAPI puts a human-readable reason in "detail" (e.g. "Set ANTHROPIC_API_KEY...").
     const body = await res.text()
@@ -710,6 +715,18 @@ export interface TrendRow {
 export interface TrendChange { name: string; before: number; recent: number; direction: 'up' | 'down' | 'same'; text: string; note: string | null }
 export interface Trends { project_id: string; weeks: number; generated_at: string; phases: Record<string, string>; rows: TrendRow[]; changes: TrendChange[] }
 
+// ---- Accounts ----------------------------------------------------------------------
+
+export type Role = 'viewer' | 'tester' | 'admin' | 'owner'
+export interface WorkspaceRef { id: string; name: string; role: Role }
+export interface Me { user: { id: string; name: string; email: string }; workspaces: WorkspaceRef[] }
+export interface AuthConfig { allow_signups: boolean; has_users: boolean; unowned_projects: number }
+export interface ApiToken { id: string; label: string | null; created_at: string; last_used_at: string | null }
+export interface Member { user_id: string; name: string; email: string; role: Role; joined_at: string }
+export interface PendingInvitation { id: string; email: string; role: Role; created_at: string; expires_at: string; expired: boolean; invited_by: string | null }
+export interface Members { workspace: { id: string; name: string }; members: Member[]; invitations: PendingInvitation[]; email_configured: boolean }
+export interface InvitationView { workspace_name: string; email: string; role: Role; invited_by: string | null; has_account: boolean }
+
 // ---- User stories ---------------------------------------------------------------
 
 export interface StoryRef { id: string; key: string | null; title: string }
@@ -917,7 +934,35 @@ export const api = {
   deleteSession: (sessionId: string) => request<Deleted>(`/sessions/${sessionId}`, { method: 'DELETE' }),
   deleteBug: (bugId: string) => request<Deleted>(`/bugs/${bugId}`, { method: 'DELETE' }),
   getProject: (projectId: string) => request<Project>(`/projects/${projectId}`),
-  createProject: (project: { name: string; description?: string; app_url?: string }) =>
+  authConfig: () => request<AuthConfig>('/auth/config'),
+  me: () => request<Me>('/auth/me'),
+  signUp: (body: { name: string; email: string; password: string; workspace_name?: string }) =>
+    request<Me>('/auth/signup', { method: 'POST', body: JSON.stringify(body) }),
+  signIn: (email: string, password: string) => request<Me>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  signOut: () => request<void>('/auth/logout', { method: 'POST' }),
+  updateMe: (name: string) => request<Me>('/auth/me', { method: 'PATCH', body: JSON.stringify({ name }) }),
+  changePassword: (current_password: string, new_password: string) =>
+    request<void>('/auth/password', { method: 'POST', body: JSON.stringify({ current_password, new_password }) }),
+  listTokens: () => request<ApiToken[]>('/auth/tokens'),
+  createToken: (label: string) => request<ApiToken & { token: string }>('/auth/tokens', { method: 'POST', body: JSON.stringify({ label }) }),
+  deleteToken: (id: string) => request<void>(`/auth/tokens/${id}`, { method: 'DELETE' }),
+  members: (workspaceId: string) => request<Members>(`/workspaces/${workspaceId}/members`),
+  invite: (workspaceId: string, email: string, role: Role) =>
+    request<{ id: string; email: string; role: Role; link: string; emailed: boolean }>(`/workspaces/${workspaceId}/invitations`, { method: 'POST', body: JSON.stringify({ email, role }) }),
+  revokeInvitation: (workspaceId: string, id: string) => request<void>(`/workspaces/${workspaceId}/invitations/${id}`, { method: 'DELETE' }),
+  changeRole: (workspaceId: string, userId: string, role: Role) =>
+    request<Members>(`/workspaces/${workspaceId}/members/${userId}`, { method: 'PATCH', body: JSON.stringify({ role }) }),
+  removeMember: (workspaceId: string, userId: string) => request<Members>(`/workspaces/${workspaceId}/members/${userId}`, { method: 'DELETE' }),
+  leaveWorkspace: (workspaceId: string) => request<Me>(`/workspaces/${workspaceId}/leave`, { method: 'POST' }),
+  viewInvitation: (token: string) => request<InvitationView>(`/invitations/${token}`),
+  acceptInvitation: (token: string) => request<Me>(`/invitations/${token}/accept`, { method: 'POST' }),
+  signUpByInvitation: (token: string, name: string, password: string) =>
+    request<Me>(`/invitations/${token}/signup`, { method: 'POST', body: JSON.stringify({ name, password }) }),
+  forgotPassword: (email: string) => request<void>('/auth/forgot', { method: 'POST', body: JSON.stringify({ email }) }),
+  resetPassword: (token: string, password: string) => request<Me>('/auth/reset', { method: 'POST', body: JSON.stringify({ token, password }) }),
+  createWorkspace: (name: string) => request<Me>('/workspaces', { method: 'POST', body: JSON.stringify({ name }) }),
+  renameWorkspace: (id: string, name: string) => request<Me>(`/workspaces/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  createProject: (project: { name: string; description?: string; app_url?: string; org_id?: string }) =>
     request<Project>('/projects', { method: 'POST', body: JSON.stringify(project) }),
 
   listCharters: (projectId: string) => request<Charter[]>(`/projects/${projectId}/charters`),

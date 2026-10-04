@@ -1,10 +1,10 @@
 import logging
 from app.timeutil import utcnow
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session as DBSession
 
-from app import models, schemas
+from app import auth, models, schemas
 from app.ai import tasks
 from app.ai.base import ProviderError
 from app.ai.routing import provider_for
@@ -47,10 +47,11 @@ def _compute_time_breakdown(notes: list[models.Note], ended_at) -> dict[str, flo
     return {k: round(v / total_time, 3) for k, v in totals.items()}
 
 @router.post("", response_model=schemas.SessionOut)
-def start_session(payload: schemas.SessionCreate, db: DBSession = Depends(get_db)):
+def start_session(payload: schemas.SessionCreate, request: Request, db: DBSession = Depends(get_db)):
     charter = db.get(models.Charter, payload.charter_id)
     if not charter:
         raise HTTPException(404, "Charter not found")
+    auth.check_project(request, db, charter.project_id)
 
     session = models.Session(**payload.model_dump())
     charter.status = "active"

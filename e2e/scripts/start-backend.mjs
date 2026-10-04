@@ -40,6 +40,7 @@ const child = spawn(python, ['-m', 'uvicorn', 'app.main:app', '--port', port], {
     // In-memory GitHub and Jira: the tests never touch a real tracker.
     MOCK_TRACKERS: 'true',
     MOCK_NOTIFICATIONS: 'true',
+    MOCK_EMAIL: 'true',  // invitations and reset links are kept, readable at GET /mock-email
     ...(process.env.PW_CHROMIUM_PATH ? { RUNNER_CHROMIUM_PATH: process.env.PW_CHROMIUM_PATH } : {}),
   },
 })

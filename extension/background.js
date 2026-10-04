@@ -19,15 +19,19 @@ const SCRIPTS = [
 
 const getRecording = async () => (await chrome.storage.session.get('recording')).recording ?? null
 const setRecording = (recording) => chrome.storage.session.set({ recording })
-const settings = async () => ({ ...DEFAULTS, ...(await chrome.storage.local.get(['apiUrl', 'appUrl'])) })
+const settings = async () => ({ ...DEFAULTS, ...(await chrome.storage.local.get(['apiUrl', 'appUrl', 'token'])) })
+// What the popup may see: the token itself never leaves the service worker.
+const publicSettings = async () => { const { token, ...rest } = await settings(); return { ...rest, hasToken: !!token } }
 const setLastError = (lastError) => chrome.storage.session.set({ lastError })
 
 async function api(path, options = {}) {
-  const { apiUrl } = await settings()
+  const { apiUrl, token } = await settings()
   const res = await fetch(apiUrl.replace(/\/+$/, '') + path, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
+    // An API token from Mirmera's Account page: the extension signs in with it.
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(options.headers ?? {}) },
   })
+  if (res.status === 401) throw new Error('Mirmera needs a token: create one under Account in Mirmera, then paste it in Settings below.')
   if (!res.ok) {
     let detail = ''
     try { detail = (await res.json()).detail } catch (_) { /* not JSON */ }
@@ -142,12 +146,14 @@ async function popup(msg) {
       const { lastError } = await chrome.storage.session.get('lastError')
       let tab = null
       if (rec) { try { tab = await chrome.tabs.get(rec.tabId) } catch (_) { /* closed */ } }
-      return { recording: rec, tab: tab && { title: tab.title, url: tab.url }, lastError: lastError ?? null, settings: await settings() }
+      return { recording: rec, tab: tab && { title: tab.title, url: tab.url }, lastError: lastError ?? null, settings: await publicSettings() }
     }
     case 'sessions': return api('/sessions/active')
     case 'start': await start(msg.tabId, msg.sessionId); return { ok: true }
     case 'stop': await stop(); return { ok: true }
-    case 'settings': await chrome.storage.local.set({ apiUrl: msg.apiUrl, appUrl: msg.appUrl }); return { ok: true }
+    case 'settings':
+      await chrome.storage.local.set({ apiUrl: msg.apiUrl, appUrl: msg.appUrl, ...(msg.token ? { token: msg.token } : {}) })
+      return { ok: true }
     case 'note': {
       if (!rec) throw new Error('Not recording.')
       return api(`/sessions/${rec.sessionId}/notes`, { method: 'POST', body: JSON.stringify({ tag: msg.tag, content: msg.content }) })
