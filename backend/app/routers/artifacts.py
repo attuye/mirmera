@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session as DBSession
 
 from app import models, schemas
 from app.ai import tasks
-from app.ai.base import ProviderError, get_provider
+from app.ai.base import ProviderError
+from app.ai.routing import provider_for
 from app.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ async def add_artifact(project_id: str, payload: schemas.ArtifactCreate, db: DBS
     # The reason is logged, so a misconfiguration doesn't go unnoticed.
     if artifact.raw_content:
         try:
-            provider = get_provider(project.default_ai_provider)
+            provider = provider_for(project, "artifact_summary")
             artifact.ai_summary = await tasks.summarize_artifact(
                 provider, raw_content=artifact.raw_content, artifact_type=artifact.type,
             )

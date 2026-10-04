@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from app import models, schemas
 from app.ai import tasks
-from app.ai.base import get_provider
+from app.ai.routing import provider_for
 from app.database import get_db
 from app.evidence_text import browser_context
 from app.routers import runner as runner_api
@@ -93,7 +93,7 @@ async def suggest(session_id: str, payload: schemas.RiskSuggestRequest, db: DBSe
     )
     debrief = session.debrief
     project = db.get(models.Project, charter.project_id)
-    provider = get_provider(payload.provider or project.default_ai_provider)
+    provider = provider_for(project, "risk_update", payload.provider)
 
     result = await tasks.suggest_risk_updates(
         provider,
