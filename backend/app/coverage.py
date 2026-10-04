@@ -81,10 +81,12 @@ def _problem(e: models.Evidence) -> str:
     return (e.summary or "").splitlines()[0][:160] if e.summary else e.kind
 
 
-def build(db: DBSession, project: models.Project, since: datetime | None = None) -> dict:
+def build(db: DBSession, project: models.Project, since: datetime | None = None, until: datetime | None = None) -> dict:
+    """until: sessions started before this moment (exclusive); None for up to now."""
     now = utcnow()
     charters = db.query(models.Charter).filter(models.Charter.project_id == project.id).all()
-    sessions = [s for c in charters for s in c.sessions if since is None or s.started_at >= since]
+    sessions = [s for c in charters for s in c.sessions
+                if (since is None or s.started_at >= since) and (until is None or s.started_at < until)]
     session_by_id = {s.id: s for s in sessions}
     pages: dict[str, Page] = {}
 

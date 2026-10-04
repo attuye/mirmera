@@ -77,12 +77,13 @@ def _left(story: models.Story, sessions: list[models.Session], bugs: list[models
     for c in story.charters:
         if not c.sessions:
             left.append({"text": f"Not explored yet: {c.mission_statement}", "to": "/charters/suggest", "action": "Start a session"})
+    latest = {s.charter_id: s for s in sessions if s.debrief}  # sessions are oldest first; a later one may fulfil the charter
     for s in sessions:
         d = s.debrief
         if s.ended_at and not d:
             left.append({"text": f"No debrief yet: {s.charter.mission_statement} ({s.tester_id})",
                          "to": f"/sessions/{s.id}/debrief", "action": "Write debrief"})
-        elif d and d.charter_status in UNFULFILLED:
+        elif d and d.charter_status in UNFULFILLED and latest[s.charter_id] is s:
             why = f": {d.charter_status_rationale}" if d.charter_status_rationale else ""
             left.append({"text": f"Charter {UNFULFILLED[d.charter_status]}: {s.charter.mission_statement}{why}",
                          "to": f"/sessions/{s.id}/debrief", "action": "Open debrief"})
@@ -108,6 +109,7 @@ def summary(story: models.Story, now: datetime | None = None) -> dict:
         "bugs": len([b for b in bugs if b.kind != "question"]),
         "high_bugs": len([b for b in bugs if b.kind == "bug" and b.severity == "high"]),
         "left": len(_left(story, sessions, bugs)),
+        "sprint": {"id": story.sprint.id, "name": story.sprint.name} if story.sprint else None,
     }
 
 

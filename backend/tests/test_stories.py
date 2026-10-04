@@ -104,6 +104,12 @@ def test_links_testing_and_whats_left(client, project):
     assert d["pages"] == [{"page": "/upload/:id", "sessions": 1, "actions": 1}]
     assert [l["action"] for l in d["left_list"]] == ["Add a charter", "Open debrief", "Review"]  # the drafted debrief says partly fulfilled
 
+    again = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "sara"}).json()
+    client.post(f"/sessions/{again['id']}/end")
+    actions = [l["action"] for l in client.get(f"/stories/{sid}").json()["left_list"]]
+    assert actions.count("Open debrief") == 1  # only the charter's latest debrief counts
+    client.delete(f"/sessions/{again['id']}")
+
     summary = client.get(f"/projects/{pid}/stories").json()[0]
     assert (summary["risks"], summary["charters"], summary["sessions"], summary["left"]) == (2, 1, 1, 3)
 

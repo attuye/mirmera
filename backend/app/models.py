@@ -2,7 +2,7 @@
 import uuid
 from app.timeutil import utcnow
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Float, JSON, Boolean, Integer, Table
+from sqlalchemy import Column, Date, String, DateTime, ForeignKey, Text, Float, JSON, Boolean, Integer, Table
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -93,15 +93,32 @@ class Story(Base):
     tracker_status = Column(String, nullable=True)  # as the tracker says it, e.g. "In Progress"
     closed = Column(Boolean, default=False)
     artifact_id = Column(String, ForeignKey("artifacts.id"), nullable=True)  # made for charter suggestions
+    sprint_id = Column(String, ForeignKey("sprints.id"), nullable=True)  # one sprint at a time; moved when carried over
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
     risks = relationship("Risk", secondary=story_risks, back_populates="stories")
     charters = relationship("Charter", secondary=story_charters, back_populates="stories")
+    sprint = relationship("Sprint", back_populates="stories")
 
     @property
     def ref(self) -> dict:
         return {"id": self.id, "key": self.key, "title": self.title}
+
+
+class Sprint(Base):
+    """A time box with the stories planned for it. Its testing is everything done in
+    those dates, under its stories or not."""
+    __tablename__ = "sprints"
+    id = Column(String, primary_key=True, default=gen_id)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)  # "Sprint 14"
+    goal = Column(Text, nullable=True)
+    starts_on = Column(Date, nullable=False)
+    ends_on = Column(Date, nullable=False)  # included
+    created_at = Column(DateTime, default=utcnow)
+
+    stories = relationship("Story", back_populates="sprint")
 
 
 # Which risks a charter investigates (many-to-many).

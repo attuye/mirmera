@@ -1594,6 +1594,7 @@ class StoryUpdate(BaseModel):
     description: Optional[str] = Field(default=None, max_length=20_000)
     url: Optional[str] = Field(default=None, max_length=500)
     closed: Optional[bool] = None
+    sprint_id: Optional[str] = None  # null takes the story out of its sprint
 
 
 class StoryLinks(BaseModel):
@@ -1616,6 +1617,7 @@ class StorySummary(BaseModel):
     bugs: int
     high_bugs: int
     left: int
+    sprint: Optional[dict] = None  # {"id", "name"}
 
 
 class StoryDetail(StorySummary):
@@ -1627,4 +1629,52 @@ class StoryDetail(StorySummary):
     bug_list: list[dict]  # [{"id", "title", "kind", "severity", "session_id", "issue_key", "issue_url"}]
     pages: list[dict]  # [{"page", "sessions", "actions"}]
     more_pages: int
+    left_list: list[dict]  # [{"text", "to", "action"}]
+
+
+# ---- Sprints ---------------------------------------------------------------------
+
+class SprintCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    goal: Optional[str] = Field(default=None, max_length=5000)
+    starts_on: date
+    ends_on: date
+    story_ids: list[str] = Field(default=[], max_length=200)
+
+    @model_validator(mode="after")
+    def ends_after_start(self):
+        if self.ends_on < self.starts_on:
+            raise ValueError("The sprint must end on or after the day it starts.")
+        return self
+
+
+class SprintUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    goal: Optional[str] = Field(default=None, max_length=5000)
+    starts_on: Optional[date] = None
+    ends_on: Optional[date] = None
+
+
+class SprintSummary(BaseModel):
+    id: str
+    name: str
+    goal: Optional[str]
+    starts_on: date
+    ends_on: date
+    state: Literal["upcoming", "current", "past"]
+    days_left: Optional[int]
+    stories: int
+    stories_done: int
+    sessions: int
+    minutes: int
+    bugs: int
+    left: int
+
+
+class SprintDetail(SprintSummary):
+    story_list: list[StorySummary]
+    under_stories: dict  # {"sessions", "minutes", "bugs"}: testing under the sprint's stories, in its dates
+    outside_stories: dict  # the same for everything else tested in its dates
+    outside_charters: list[dict]  # [{"id", "mission_statement", "sessions", "minutes", "stories"}]
+    high_unexplored: list[dict]  # [{"id", "ref", "title", "score", "in_sprint"}]
     left_list: list[dict]  # [{"text", "to", "action"}]
