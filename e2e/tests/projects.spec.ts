@@ -78,6 +78,22 @@ test('projects: create one, set it up, work inside it, switch away', async ({ pa
     await expect(page.getByText('Explore sending money to a wrong number')).toHaveCount(0)
   })
 
+  await test.step('the menu groups pages; a group folds away and stays folded', async () => {
+    const nav = page.getByRole('navigation', { name: 'Project pages' })
+    await page.goto(`/projects/${shared.id}/coverage`)
+    await expect(nav.getByRole('group', { name: 'Insights' }).getByRole('link', { name: 'Coverage' })).toHaveAttribute('aria-current', 'page')
+    await expect(nav.getByRole('group', { name: 'Plan' }).getByRole('link')).toHaveText(['Risks', 'Charters'])
+    await expect(nav.getByRole('group', { name: 'Findings' }).getByRole('link')).toHaveText(['Bugs', 'Regression'])
+    const insights = nav.getByRole('button', { name: 'Insights' })
+    await insights.click()
+    await expect(insights).toHaveAttribute('aria-expanded', 'false')
+    await expect(nav.getByRole('link', { name: 'Report' })).toHaveCount(0)
+    await page.reload()
+    await expect(nav.getByRole('link', { name: 'Report' })).toHaveCount(0)  // remembered in this browser
+    await insights.click()
+    await expect(nav.getByRole('link', { name: 'Report' })).toBeVisible()
+  })
+
   await test.step('the Projects page counts the work and "/" returns to the last project', async () => {
     await page.goto('/projects')
     const card = page.getByRole('link', { name })
