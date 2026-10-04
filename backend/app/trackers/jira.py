@@ -64,6 +64,18 @@ class JiraTracker(IssueTracker):
             snippet=adf_text(f.get("description")).strip()[:300],
         )
 
+    async def list_issues(self, jql: str, limit: int = 50) -> list[dict]:
+        """Issues matching a JQL query, with their description as plain text."""
+        data = await self._call("POST", "/rest/api/3/search/jql", json={
+            "jql": jql, "maxResults": min(limit, 100), "fields": ["summary", "status", "description", "issuetype"],
+        })
+        out = []
+        for item in data.get("issues", []):
+            f = item.get("fields", {})
+            out.append({"key": item["key"], "title": f.get("summary", ""), "status": (f.get("status") or {}).get("name", ""),
+                        "body": adf_text(f.get("description")).strip(), "url": self._url(item["key"]), "labels": []})
+        return out
+
     async def issue(self, key: str) -> TrackerIssue:
         key = self._check_key(key)
         return self._issue(await self._call("GET", f"/rest/api/3/issue/{key}",

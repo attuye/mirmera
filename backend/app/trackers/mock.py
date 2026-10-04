@@ -71,6 +71,22 @@ class MockTracker(IssueTracker):
     async def issue(self, key: str) -> TrackerIssue:
         return self._get(key)
 
+    async def pull_request(self, number: int) -> dict:
+        """A canned pull request: the mock has no code, so the diff is a small, realistic one."""
+        if number > 999:
+            raise TrackerError(f"{self.name} answered 404 (check the repo / project name): no pull request {number}")
+        diff = (f"diff --git a/kyc/verify.py b/kyc/verify.py\n--- a/kyc/verify.py\n+++ b/kyc/verify.py\n"
+                f"@@ -10,6 +10,9 @@ def verify(document):\n"
+                f"+    if document.type == \"passport\" and not document.mrz:\n"
+                f"+        raise ValueError(\"Passport needs a machine-readable zone\")\n"
+                f"+    # PR {number}: passports are checked against the MRZ\n")
+        return {"title": f"Check passports against the MRZ (mock PR {number})", "body": "Adds an MRZ check for passports.",
+                "url": f"https://mock-github.local/{self.target}/pull/{number}", "diff": diff, "state": "open"}
+
+    async def list_issues(self, labels_or_jql=None, limit: int = 50) -> list[dict]:
+        return [{"key": i.key, "title": i.title, "status": i.status, "body": i.snippet, "url": i.url, "labels": ["bug"]}
+                for i in reversed(self._db["issues"])][:limit]
+
     # for tests and demos
     def set_closed(self, key: str, closed: bool = True) -> None:
         issue = self._get(key)
