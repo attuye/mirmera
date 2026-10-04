@@ -110,3 +110,20 @@ def test_charters_are_listed_per_project(client, project, charter):
 def test_provider_registry_rejects_unknown_names():
     with pytest.raises(ai_base.UnknownProvider):
         ai_base.get_provider("nope")
+
+def test_a_suggested_charter_remembers_the_change_it_came_from(client, project, monkeypatch):
+    from app.config import settings
+    from app.trackers import mock as mock_trackers
+    monkeypatch.setattr(settings, "mock_trackers", True)
+    mock_trackers.reset()
+    client.patch(f"/projects/{project['id']}", json={"github_repo": "addisverify/kyc"})
+    pr = client.post(f"/projects/{project['id']}/artifacts/import", json={"source": "github_pr", "ref": "42"}).json()
+    [s, *_] = client.post(f"/projects/{project['id']}/charters/suggest", json={"artifact_ids": [pr["id"]]}).json()
+    c = client.post(f"/projects/{project['id']}/charters", json={
+        "mission_statement": s["mission_statement"], "source": "ai-suggested", "source_artifact_id": pr["id"]}).json()
+    assert c["source_label"] == "PR #42: Check passports against the MRZ (mock PR 42)"
+    assert c["source_url"] == "https://mock-github.local/addisverify/kyc/pull/42"
+    assert client.get(f"/projects/{project['id']}/charters").json()[0]["source_label"].startswith("PR #42")
+    other = client.post("/projects", json={"name": "Other", "org_id": "x"}).json()
+    r = client.post(f"/projects/{other['id']}/charters", json={"mission_statement": "x", "source_artifact_id": pr["id"]})
+    assert r.status_code == 400 and "Unknown artifact" in r.json()["detail"]

@@ -91,6 +91,9 @@ export interface Charter {
   risk_ids: string[]
   test_ideas: string[]
   oracles: string[]
+  source_artifact_id: string | null
+  source_label: string | null  // the change it was suggested from, e.g. "PR #42: …"
+  source_url: string | null
 }
 
 export interface CharterSuggestion {
@@ -569,6 +572,7 @@ export interface CharterInput {
   risk_areas?: string[]
   priority?: 'high' | 'medium' | 'low'
   source?: 'ai-suggested' | 'risk-based' | 'manual'
+  source_artifact_id?: string | null
   risk_ids?: string[]
   test_ideas?: string[]
   oracles?: string[]

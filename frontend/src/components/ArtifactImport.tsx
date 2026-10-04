@@ -11,7 +11,9 @@ const SOURCES: { key: ImportBody['source']; label: string; hint: string }[] = [
   { key: 'git_diff', label: 'Git diff on this computer', hint: 'What a branch adds, from a local repository, for work not pushed yet.' },
 ]
 
-export default function ArtifactImport({ project, onImported }: { project: Project; onImported: (a: Artifact) => void }) {
+export default function ArtifactImport({ project, onImported, actionLabel = 'Import', busyLabel = 'Importing…' }: {
+  project: Project; onImported: (a: Artifact) => void | Promise<void>; actionLabel?: string; busyLabel?: string
+}) {
   const [source, setSource] = useState<ImportBody['source']>('github_pr')
   const [f, setF] = useState({ ref: '', labels: 'bug', jql: '', repo_path: '', base: 'main', head: 'HEAD' })
   const [busy, setBusy] = useState(false)
@@ -29,7 +31,7 @@ export default function ArtifactImport({ project, onImported }: { project: Proje
       if (source === 'github_issues') body.labels = f.labels
       if (source === 'jira_issues') body.jql = f.jql
       if (source === 'git_diff') Object.assign(body, { repo_path: f.repo_path, base: f.base, head: f.head })
-      onImported(await api.importArtifact(project.id, body))
+      await onImported(await api.importArtifact(project.id, body))
     } catch (e) { setError(errorText(e)) } finally { setBusy(false) }
   }
 
@@ -66,7 +68,7 @@ export default function ArtifactImport({ project, onImported }: { project: Proje
       )}
       <ErrorLine message={error} />
       <div>
-        <button onClick={go} disabled={!ready || busy} style={primaryButton(!ready || busy)}>{busy ? 'Importing…' : 'Import'}</button>
+        <button onClick={go} disabled={!ready || busy} style={primaryButton(!ready || busy)}>{busy ? busyLabel : actionLabel}</button>
       </div>
     </div>
   )

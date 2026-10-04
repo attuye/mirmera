@@ -99,6 +99,7 @@ export default function Dashboard() {
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
                       <div style={{ fontSize: 13, fontWeight: 500 }}>{c.mission_statement}</div>
+                      {c.source_label && <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2 }}>from {c.source_label}</div>}
                       <div className="mono" style={{ fontSize: 9.5, background: status.bg, color: status.fg, padding: '3px 7px', borderRadius: 5, whiteSpace: 'nowrap' }}>
                         {c.status.toUpperCase()}
                       </div>

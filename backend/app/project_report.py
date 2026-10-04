@@ -209,7 +209,8 @@ def build(db: DBSession, project: models.Project, since: date | None = None, unt
         rows = []
         for s in sessions:
             d = s.debrief
-            rows.append([s.charter.mission_statement, s.tester_id, _day(s.started_at),
+            rows.append([s.charter.mission_statement + (f" (from {s.charter.source_label})" if s.charter.source_label else ""),
+                         s.tester_id, _day(s.started_at),
                          hours(tested_seconds(s, now)) + ("" if s.ended_at else " (running)"),
                          CHARTER_STATUS.get(d.charter_status, "") if d else "no debrief",
                          str(sum(1 for b in s.bugs if b.kind))])

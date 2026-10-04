@@ -65,6 +65,10 @@ def save_charter(project_id: str, payload: schemas.CharterCreate, db: DBSession 
         if missing:
             raise HTTPException(400, f"Unknown risk ids for this project: {sorted(missing)}")
 
+    if data.get("source_artifact_id"):
+        source = db.get(models.Artifact, data["source_artifact_id"])
+        if not source or source.project_id != project_id:
+            raise HTTPException(400, "Unknown artifact for this project")
     charter = models.Charter(project_id=project_id, **data)
     charter.risks = risks
     db.add(charter)
