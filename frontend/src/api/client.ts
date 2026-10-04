@@ -721,6 +721,10 @@ export type ReportBlock =
   | { type: 'bullets'; items: string[] }
   | { type: 'quote'; text: string; by: string }
   | { type: 'table'; headers: string[]; rows: ReportCell[][] }
+export interface ReportSummary {
+  text: string; ai_provider: string | null; ai_model: string | null; prompt_version: string | null; edited: boolean; created_at: string
+}
+export interface ReportSummaryDraft { text: string; basis: string[]; ai_provider: string | null; ai_model: string | null; prompt_version: string }
 export interface ProjectReport {
   project_id: string
   project_name: string
@@ -741,6 +745,7 @@ export interface ProjectReport {
   }
   top_bugs: { headers: string[]; rows: ReportCell[][]; total: number; bugs: number; questions: number }
   sections: ReportSection[]
+  ai_summary: ReportSummary | null  // kept by the tester for this period
   blocks: ReportBlock[]
 }
 function periodQuery(since?: string, until?: string): string {
@@ -773,6 +778,12 @@ export const api = {
     request<Note>(`/sessions/${sessionId}/nudges/${nudgeId}/tried`, { method: 'POST', body: JSON.stringify({ note }) }),
   getCoverage: (projectId: string, since?: string) =>
     request<CoverageMap>(`/projects/${projectId}/coverage${since ? `?since=${since}` : ''}`),
+  draftReportSummary: (projectId: string, since?: string, until?: string) =>
+    request<ReportSummaryDraft>(`/projects/${projectId}/report/summary${periodQuery(since, until)}`, { method: 'POST', body: '{}' }),
+  keepReportSummary: (projectId: string, body: { text: string; ai_provider: string | null; ai_model: string | null; prompt_version: string | null; edited: boolean }, since?: string, until?: string) =>
+    request<ReportSummary>(`/projects/${projectId}/report/summary${periodQuery(since, until)}`, { method: 'PUT', body: JSON.stringify(body) }),
+  removeReportSummary: (projectId: string, since?: string, until?: string) =>
+    request<void>(`/projects/${projectId}/report/summary${periodQuery(since, until)}`, { method: 'DELETE' }),
   getReport: (projectId: string, since?: string, until?: string) =>
     request<ProjectReport>(`/projects/${projectId}/report${periodQuery(since, until)}`),
   listRetests: (projectId: string) => request<Retest[]>(`/projects/${projectId}/retests`),

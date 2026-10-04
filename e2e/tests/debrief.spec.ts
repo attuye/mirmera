@@ -72,7 +72,7 @@ test('PROOF debrief: review the draft, add feelings, turn outlook and risks into
   await test.step('the report: summary first, then the full story folded', async () => {
     await page.evaluate(() => localStorage.removeItem('mirmera.report.view'))
     await page.getByRole('link', { name: 'Report', exact: true }).click()
-    const summary = page.getByRole('region', { name: 'Summary' })
+    const summary = page.getByRole('region', { name: 'Totals' })
     await expect(summary).toContainText('Sessions1')
     await expect(summary).toContainText('1 to review')  // the logged bug isn't reviewed yet
 
@@ -84,6 +84,21 @@ test('PROOF debrief: review the draft, add feelings, turn outlook and risks into
     await expect(glance.getByRole('listitem', { name: '1 report waiting for review' })).toBeVisible()
     await expect(page.getByRole('figure', { name: 'Accepted risks tested' })).toContainText('0 of 1')
     await expect(page.getByRole('article', { name: 'Report' })).toHaveCount(0)
+
+    // An AI summary on request: from the report's own lines, reviewed, then kept.
+    await page.getByRole('button', { name: 'Draft summary with AI' }).click()
+    const draft = page.getByRole('region', { name: 'Summary draft' })
+    await expect(draft.getByLabel('Summary text')).toHaveValue(/^\(mock\) 1 high risk not tested/)
+    await expect(draft).toContainText('Drafted by AI (mock · mock): review before keeping')
+    await draft.getByText(/Based on \d+ lines? of this report/).click()
+    await expect(draft).toContainText('At a glance: 1 high risk not tested')
+    await draft.getByLabel('Summary text').fill('Liveness accepts printed photos and nobody has tested that risk yet.')
+    await draft.getByRole('button', { name: 'Keep' }).click()
+    const kept = page.getByRole('region', { name: 'Summary', exact: true })
+    await expect(kept).toContainText('Liveness accepts printed photos and nobody has tested that risk yet.')
+    await expect(kept).toContainText('Drafted by AI (mock · mock), edited by you')
+    const withSummary = await page.request.get((await page.getByRole('link', { name: 'Download Markdown' }).getAttribute('href'))!)
+    expect(await withSummary.text()).toContain('## Summary\n\nLiveness accepts printed photos')
 
     // Full: the three parts, folded; "How good the testing was" open with its gaps.
     await page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Full' }).click()
@@ -112,8 +127,8 @@ test('PROOF debrief: review the draft, add feelings, turn outlook and risks into
     await page.getByRole('button', { name: 'Last 7 days' }).click()
     await expect(page.getByRole('status', { name: 'Report period' })).toContainText(' to ')
     await page.getByRole('button', { name: 'Custom…' }).click()
-    await page.getByLabel('From').fill('2020-01-01')
-    await page.getByLabel('To').fill('2020-01-31')
+    await page.getByLabel('From', { exact: true }).fill('2020-01-01')
+    await page.getByLabel('To', { exact: true }).fill('2020-01-31')
     await expect(summary).toContainText('Sessions0')
     await expect(page.getByRole('region', { name: 'At a glance' })).not.toContainText('charter partly fulfilled')  // no session then
     await expect(page.getByRole('region', { name: 'At a glance' })).toContainText('1 high risk not tested')  // still untested

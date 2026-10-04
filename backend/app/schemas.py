@@ -1373,6 +1373,7 @@ class ProjectReport(BaseModel):
     charts: dict = {}  # {"severity": {...}, "risks": {...}, "time": {"seconds", "split"}}
     top_bugs: dict = {}  # {"headers", "rows", "total", "bugs", "questions"}
     sections: list[dict] = []  # [{"key", "title", "counts", "open", "parts": [{"title", "count", "open", "blocks"}]}]
+    ai_summary: Optional["ReportSummaryOut"] = None  # kept by the tester for this period
     blocks: list[dict]  # the full report, flat
 
 
@@ -1459,3 +1460,41 @@ class AICheckResult(BaseModel):
     seconds: float
     sample: Optional[str] = None  # a glimpse of the reply, to judge its quality
     detail: Optional[str] = None
+
+
+# ---------- AI-drafted report summary ----------
+
+class LLMReportSummary(BaseModel):
+    summary: str = Field(min_length=20, max_length=900)
+    basis: list[str] = []  # fact lines the summary relies on, copied from the input
+
+
+class ReportSummaryDraft(BaseModel):
+    text: str
+    basis: list[str]
+    ai_provider: Optional[str] = None
+    ai_model: Optional[str] = None
+    prompt_version: str
+
+
+class ReportSummaryIn(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+    ai_provider: Optional[str] = None
+    ai_model: Optional[str] = None
+    prompt_version: Optional[str] = None
+    edited: bool = False  # the tester changed the AI's words
+
+
+class ReportSummaryRequest(BaseModel):
+    provider: Optional[str] = None  # override the project's choice for this task
+
+
+class ReportSummaryOut(BaseModel):
+    text: str
+    ai_provider: Optional[str] = None
+    ai_model: Optional[str] = None
+    prompt_version: Optional[str] = None
+    edited: bool = False
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

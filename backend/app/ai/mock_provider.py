@@ -57,7 +57,19 @@ class MockProvider(LLMProvider):
                 "assumptions": ["(mock) The steps were fixed before the AI was asked; check the assertion matches the oracle."]})
         if task == "reproduce_step":
             return json.dumps(self._reproduce_step(user))
+        if task == "report_summary":
+            return json.dumps(self._report_summary(user))
         return json.dumps({"note": f"mock provider has no canned answer for task '{task}'"})
+
+    @staticmethod
+    def _report_summary(user: str) -> dict:
+        """Built only from the fact lines, so its numbers are always grounded."""
+        facts = [re.sub(r"^\d+\. ", "", l) for l in _between(user, "facts").splitlines() if l.strip()]
+        glance = [f for f in facts if f.startswith("At a glance: ")]
+        totals = next((f for f in facts if f.startswith("Totals: ")), "")
+        lead = glance[0].removeprefix("At a glance: ") if glance else "Nothing was flagged"
+        text = f"(mock) {lead}. {totals.removeprefix('Totals: ')}." if totals else f"(mock) {lead}."
+        return {"summary": text, "basis": ([glance[0]] if glance else []) + ([totals] if totals else [])}
 
     @staticmethod
     def _charters(user: str) -> dict:

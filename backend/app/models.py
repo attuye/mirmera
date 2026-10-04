@@ -446,3 +446,20 @@ class Retest(Base):
     comment_error = Column(Text, nullable=True)  # why the comment could not be posted
     created_at = Column(DateTime, default=utcnow)
     finished_at = Column(DateTime, nullable=True)
+
+
+class ReportSummary(Base):
+    """An AI-drafted summary the tester kept (maybe edited) for one report period.
+    since/until are "" for an open end, so a period is one exact key."""
+    __tablename__ = "report_summaries"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    since = Column(String, default="")
+    until = Column(String, default="")
+    text = Column(Text, nullable=False)
+    edited = Column(Boolean, default=False)
+    ai_provider = Column(String, nullable=True)
+    ai_model = Column(String, nullable=True)
+    prompt_version = Column(String, nullable=True)
+    created_at = Column(DateTime, default=utcnow)

@@ -195,8 +195,14 @@ The **Report** page tells the project's testing story for a period, in two views
   default with its **Gaps**, each linked to where to act (make a charter, write the debrief, review, generate tests).
   Long lists show five rows first; long debrief text shows its start.
 
-Everything comes from what was recorded; the AI writes none of it. **Markdown** and **Print** export the view you are
-on, so the Summary makes a short report for a ticket. Set `PUBLIC_APP_URL` so the exported links open Mirmera.
+Everything comes from what was recorded. **Markdown** and **Print** export the view you are on, so the Summary makes
+a short report for a ticket. Set `PUBLIC_APP_URL` so the exported links open Mirmera.
+
+**Draft summary with AI** (optional) writes two to four sentences from the report's own lines only (totals, at a
+glance, charts, gaps, top bugs) and shows which lines it used. A summary with a number that isn't in the report is
+refused (one retry, then a clear message). You keep, edit or discard it; a kept summary is saved for that period,
+shown labelled ("Drafted by AI (provider · model), edited by you") and included in the exports. It is its own task
+in **Settings → AI** ("Summarise the test report"), so it can use a different model from the rest.
 
 ## Tests
 

@@ -337,6 +337,21 @@ def build(db: DBSession, project: models.Project, since: date | None = None, unt
             "top_bugs": top_bugs, "sections": sections, "blocks": blocks}
 
 
+def facts(report: dict) -> list[str]:
+    """The report's own lines, for the AI summary: nothing else reaches the model."""
+    out = [f"Period: {report['period']}", f"Totals: {_totals(report)}"]
+    out += [f"At a glance: {g['title']}" + (f": {g['detail']}" if g["detail"] else "") for g in report["glance"]]
+    out += [line[2:] for line in _charts_text(report) if line]
+    for sec in report["sections"]:
+        for pt in sec["parts"]:
+            for b in pt["blocks"]:
+                if b["type"] == "actions":
+                    out += [f"Gap: {a['text']}" for a in b["items"]]
+    tb = report["top_bugs"]
+    out += [f"Bug: {r[0]} ({r[1]}, regression test: {r[4]})" for r in tb["rows"]]
+    return out
+
+
 def part(title: str | None, blocks: list[dict], count: int | None = None, open: bool = True) -> dict:
     """A foldable piece of a section; title None: shown without a header."""
     return {"title": title, "count": count, "open": open, "blocks": blocks}
@@ -386,6 +401,11 @@ def _app_link(report: dict, to: str | None) -> str | None:
     if not to or not settings.public_app_url:
         return None
     return f"{settings.public_app_url.rstrip('/')}/projects/{report['project_id']}{to}"
+
+
+def _summary_label(summary: dict) -> str:
+    who = " · ".join(x for x in (summary.get("ai_provider"), summary.get("ai_model")) if x)
+    return ("Drafted by AI" + (f" ({who})" if who else "") + (", edited by the tester" if summary.get("edited") else ", kept by the tester"))
 
 
 def _cell_md(cell) -> str:
@@ -457,7 +477,10 @@ def to_markdown(report: dict, view: str = "full") -> str:
     title = f"# Test report: {report['project_name']}" + (" (summary)" if view == "summary" else "")
     out = [title, "", f"Period: {report['period']}. Generated {report['generated_at']:%Y-%m-%d %H:%M} UTC by Mirmera.", ""]
     if "glance" in report:
-        out += [_totals(report), ""] + _glance_md(report)
+        out += [_totals(report), ""]
+        if report.get("ai_summary"):
+            out += ["## Summary", "", report["ai_summary"]["text"], "", f"_{_summary_label(report['ai_summary'])}_", ""]
+        out += _glance_md(report)
     if view == "summary":
         out += _charts_text(report)
         tb = report["top_bugs"]
@@ -522,7 +545,11 @@ def to_html(report: dict, view: str = "full") -> str:
     out = [f"<h1>Test report: {name}{' (summary)' if view == 'summary' else ''}</h1>",
            f'<div class="meta">Period: {html.escape(report["period"])}. Generated {report["generated_at"]:%Y-%m-%d %H:%M} UTC by Mirmera.</div>']
     if "summary" in report and "glance" in report:
-        out.append(f'<div class="totals">{html.escape(_totals(report))}</div><h2>At a glance</h2><ul class="glance">')
+        out.append(f'<div class="totals">{html.escape(_totals(report))}</div>')
+        if report.get("ai_summary"):
+            out.append(f'<h2>Summary</h2><p>{html.escape(report["ai_summary"]["text"])}</p>'
+                       f'<div class="meta">{html.escape(_summary_label(report["ai_summary"]))}</div>')
+        out.append('<h2>At a glance</h2><ul class="glance">')
         for g in report["glance"]:
             url = _app_link(report, g["to"])
             act = f' <a href="{html.escape(url)}">{html.escape(g["label"])}</a>' if url else ""

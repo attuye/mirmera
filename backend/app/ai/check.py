@@ -89,6 +89,14 @@ async def _run(task: str, p: LLMProvider) -> str:
         step = await complete_json(p, agent.PROMPT, agent._user_message(ctx, [], page, 20), schemas.LLMAgentStep,
                                    task="reproduce_step", max_tokens=800)
         return f"{step.action.kind}: {step.thought}"[:160]
+    if task == "report_summary":
+        r = await tasks.summarize_report(p, project_name=PROJECT, facts=[
+            "Period: 2026-09-05 to 2026-10-04", "Totals: 9 sessions (11 h 20 min, 3 testers) · 6 bugs (2 high, 3 medium, 1 low)",
+            "At a glance: 2 high bugs still open: Passport verification fails · Ge'ez names rejected at signup",
+            "At a glance: 1 high risk not tested: R3 Selfie liveness accepts printed photos (score 20)",
+            "At a glance: 1 fix verified after the issue closed: KYC-12 Expired national ID accepted",
+            "Accepted risks tested: 4 of 6"])
+        return r.summary[:160]
     raise ValueError(f"Unknown task {task}")
 
 

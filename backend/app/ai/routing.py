@@ -19,6 +19,7 @@ AI_TASKS: list[dict] = [
     {"key": "duplicate_check", "label": "Check tracker duplicates", "hint": "Compares titles and steps"},
     {"key": "regression", "label": "Write regression tests", "hint": "Checks that assert the oracle"},
     {"key": "agent", "label": "Reproduction agent", "hint": "Many quick steps: speed matters"},
+    {"key": "report_summary", "label": "Summarise the test report", "hint": "Short; must not invent numbers"},
 ]
 TASK_KEYS = tuple(t["key"] for t in AI_TASKS)
 
