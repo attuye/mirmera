@@ -14,6 +14,7 @@ import Regression from './pages/Regression'
 import ReportPage from './pages/Report'
 import CoveragePage from './pages/Coverage'
 import HeuristicsPage from './pages/Heuristics'
+import TrendsPage from './pages/Trends'
 import RisksPage from './pages/Risks'
 import { ProjectLayout, SessionRedirect, lastProjectId } from './project'
 
@@ -42,6 +43,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="report" element={<ReportPage />} />
           <Route path="coverage" element={<CoveragePage />} />
           <Route path="heuristics" element={<HeuristicsPage />} />
+          <Route path="trends" element={<TrendsPage />} />
           <Route path="settings" element={<ProjectSettings />} />
         </Route>
         {/* Links from before projects */}

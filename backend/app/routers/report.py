@@ -98,3 +98,13 @@ def remove_summary(project_id: str, since: date | None = None, until: date | Non
     s, u = _key(since, until)
     db.query(models.ReportSummary).filter_by(project_id=project_id, since=s, until=u).delete()
     db.commit()
+
+
+@router.get("/projects/{project_id}/trends", response_model=schemas.Trends)
+def trends(project_id: str, weeks: int = 12, db: DBSession = Depends(get_db)):
+    """Week by week: sessions, hours, bugs, bugs per hour, time split, charters, fixes, risk exposure."""
+    from app import trends as engine
+    project = db.get(models.Project, project_id)
+    if not project:
+        raise HTTPException(404, "Project not found")
+    return engine.build(db, project, max(4, min(weeks, 52)))
