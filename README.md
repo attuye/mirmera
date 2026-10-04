@@ -261,6 +261,26 @@ refused (one retry, then a clear message). You keep, edit or discard it; a kept 
 shown labelled ("Drafted by AI (provider · model), edited by you") and included in the exports. It is its own task
 in **Settings → AI** ("Summarise the test report"), so it can use a different model from the rest.
 
+### Notifications
+
+Mirmera can send a short message to **Telegram** or **Slack** when something needs you, so you don't have to keep
+the app open. Set it up per project in **Settings → Notifications**: a Telegram chat id and/or "Send to Slack", and
+which events to hear about:
+
+- **A closed issue still fails its retest** (on by default), and optionally **a closed issue's fix is verified**
+- **A regression run has failures, broken tests or known bugs that now pass** (on by default)
+- **A bug is reviewed as high severity** (on by default)
+
+**Send a test message** checks the setup; **Recent** shows what was sent, and why a message failed. Only the
+secrets go in `backend/.env`, never in the app:
+
+- Telegram: create a bot with @BotFather and set `TELEGRAM_BOT_TOKEN`. Send the bot a message (or add it to a
+  group) before using its chat id; bots can't start a chat.
+- Slack: create an incoming webhook for the channel and set `SLACK_WEBHOOK_URL`.
+
+Set `PUBLIC_APP_URL` so messages link to the page to act on. `MOCK_NOTIFICATIONS=true` keeps messages in the app
+instead of sending them. Tokens and webhook addresses are removed from any error shown or logged.
+
 ## Tests
 
 CI runs all three on every pull request.
@@ -329,6 +349,7 @@ This is the Phase 1 scaffold from the scoping discussion:
 - ✅ Retest when an issue closes: replay the test and comment the result on the issue
 - ✅ Test report (Summary and Full views, optional AI summary), coverage map, test-idea nudges
 - ✅ Import specs, diffs and past bugs: GitHub pull requests and issues, Jira issues, local git diffs, files
+- ✅ Notifications: Telegram and Slack messages for fixes that didn't hold, regression problems and high bugs
 
 Not yet built:
 - Multi-user auth (the `org_id` field is there, but nothing enforces it yet)

@@ -5,6 +5,7 @@ import Sidebar from '../components/Sidebar'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
 import { api, deletedText, Environment, Project, ProjectChanges } from '../api/client'
 import { useProject } from '../project'
+import NotificationSettings from '../components/NotificationSettings'
 import AISettings from '../components/AISettings'
 
 interface Form {
@@ -181,6 +182,7 @@ export default function ProjectSettings() {
           </div>
           <ErrorLine message={error} />
         </form>
+        <NotificationSettings projectId={project.id} />
         <DangerZone />
       </main>
     </div>

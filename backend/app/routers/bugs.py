@@ -4,7 +4,7 @@ A bug logged during a session is "unreviewed" (kind is empty). The tester can
 ask the AI for a draft report, which is stored as-is in `ai_draft` and never
 overwrites anything, then saves their own version as a bug or a question.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session as DBSession
 
 from app import models, schemas
@@ -67,10 +67,11 @@ async def draft_report(bug_id: str, payload: schemas.BugDraftRequest, db: DBSess
 
 
 @router.patch("/{bug_id}", response_model=schemas.BugOut)
-def review_bug(bug_id: str, payload: schemas.BugReview, db: DBSession = Depends(get_db)):
+def review_bug(bug_id: str, payload: schemas.BugReview, background: BackgroundTasks, db: DBSession = Depends(get_db)):
     """Save the tester's version of the report."""
     bug = _bug_or_404(db, bug_id)
     changes = payload.model_dump(exclude_unset=True)
+    was_high_bug = bug.kind == "bug" and bug.severity == "high"
 
     # Check the rule against the report as it will be after this change.
     kind = changes.get("kind", bug.kind)
@@ -92,6 +93,10 @@ def review_bug(bug_id: str, payload: schemas.BugReview, db: DBSession = Depends(
         bug.last_change = "Edited by tester"
     db.commit()
     db.refresh(bug)
+    if bug.kind == "bug" and bug.severity == "high" and not was_high_bug:  # newly a high-severity bug
+        from app import notify
+        background.add_task(notify.send, bug.charter.project_id, "high_bug", f"High-severity bug: {bug.title}",
+                            bug.actual or bug.description or "", "/bugs")
     return bug
 
 
