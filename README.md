@@ -163,6 +163,21 @@ check on a timer while the backend runs. With `MOCK_TRACKERS=true`, close a mock
 issue with `POST /mock-trackers/issue-state`
 (`{"tracker": "github", "target": "owner/repo", "issue_key": "#3"}`).
 
+### Test report
+
+The **Report** page tells the project's testing story for a period (or all time):
+
+1. **The product:** bugs and questions with severity, issue (and whether it's closed), regression test and retest
+   results; accepted risks with how many sessions tested them and the bugs found; the last full regression run.
+2. **The testing:** each session (charter, tester, date, time, whether the charter was fulfilled), time per
+   tester, where the time went, and what each session covered.
+3. **How good the testing was:** high risks nobody tested, unfinished charters, sessions without a debrief,
+   unreviewed reports, bugs without a regression test, obstacles, open questions, follow-up charters not run
+   yet, and how the testers felt.
+
+Everything comes from what was recorded; the AI writes none of it. **Download Markdown** for a ticket or
+wiki, or open the **Printable page** and print it to PDF.
+
 ## Tests
 
 CI runs all three on every pull request.

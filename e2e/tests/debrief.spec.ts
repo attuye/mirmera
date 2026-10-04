@@ -68,4 +68,31 @@ test('PROOF debrief: review the draft, add feelings, turn outlook and risks into
     await expect(page.getByRole('link', { name: /Saved as charter/ })).toBeVisible()
     await expect(page.getByRole('link', { name: /Added to risks/ })).toBeVisible()
   })
+
+  await test.step('the test report tells the story: the session, its gaps, and how the tester felt', async () => {
+    await page.getByRole('link', { name: 'Report', exact: true }).click()
+    const summary = page.getByRole('region', { name: 'Summary' })
+    await expect(summary).toContainText('Sessions1')
+    await expect(summary).toContainText('1 to review')  // the logged bug isn't reviewed yet
+    const report = page.getByRole('article', { name: 'Report' })
+    await expect(report.getByRole('heading', { name: '2. The testing: how we tested' })).toBeVisible()
+    await expect(report.getByRole('row', { name: new RegExp(mission) })).toContainText('Partly fulfilled')
+    await expect(report).toContainText('High risk not tested: R1 Liveness accepts printed photos (score 20)')
+    await expect(report).toContainText('Camera permission prompt blocked the page')
+    await expect(report).toContainText('Confident on photos, rushed on screens')
+
+    await page.getByRole('button', { name: 'Last 7 days' }).click()
+    await expect(page.getByRole('status', { name: 'Report period' })).toContainText(' to ')
+    await page.getByLabel('From').fill('2020-01-01')
+    await page.getByLabel('To').fill('2020-01-31')
+    await expect(summary).toContainText('Sessions0')
+    await expect(report).toContainText('No sessions in this period.')
+
+    const md = await page.request.get((await page.getByRole('link', { name: 'Download Markdown' }).getAttribute('href'))!)
+    expect(md.headers()['content-disposition']).toContain('test-report-2020-01-01-to-2020-01-31.md')
+    expect(await md.text()).toContain('# Test report: AddisVerify Liveness')
+    await page.getByRole('button', { name: 'All time' }).click()
+    const printable = await page.request.get((await page.getByRole('link', { name: 'Printable page' }).getAttribute('href'))!)
+    expect(await printable.text()).toContain('Confident on photos, rushed on screens')
+  })
 })

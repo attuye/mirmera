@@ -1,7 +1,7 @@
 """Pydantic schemas — request/response shapes, and the AI provider's structured output contracts."""
 import logging
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import ClassVar, Optional, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
@@ -1350,3 +1350,15 @@ class MockIssueState(BaseModel):
     target: str
     issue_key: str
     closed: bool = True
+
+
+class ProjectReport(BaseModel):
+    """The test report as blocks: heading, paragraph, table, bullets, quote."""
+    project_id: str
+    project_name: str
+    since: Optional[date] = None
+    until: Optional[date] = None
+    period: str
+    generated_at: datetime
+    summary: dict
+    blocks: list[dict]
