@@ -61,7 +61,22 @@ def test_the_three_stories_from_what_was_recorded(client, project):
     assert (sm["sessions"], sm["tested_seconds"], sm["bugs"], sm["high"], sm["questions"], sm["unreviewed"]) == (1, 3600, 1, 1, 1, 1)
 
     blocks = report["blocks"]
-    assert blocks[0]["text"].startswith("1 session of exploratory testing (1 h 00 min) by 1 tester")
+    glance = {g["title"]: g for g in report["glance"]}
+    assert list(glance) == ["1 high bug still open", "1 high risk not tested", "1 charter partly fulfilled", "1 report waiting for review"]
+    assert glance["1 high bug still open"]["detail"] == "Passport verify fails" and glance["1 high bug still open"]["to"] == "/bugs"
+    assert glance["1 high risk not tested"]["detail"] == "R2 Selfie upload (score 12)"
+    assert glance["1 charter partly fulfilled"]["to"] == f"/sessions/{s['id']}/debrief"
+    assert report["charts"]["severity"] == {"high": 1, "medium": 0, "low": 0}
+    assert report["charts"]["risks"] == {"tested": 1, "untested": 1, "untested_high": 1}
+    assert report["charts"]["time"]["split"] == {"on_charter": 0.5, "bug_investigation": 0.5}
+    assert report["top_bugs"]["total"] == 2 and report["top_bugs"]["rows"][0][0] == "Passport verify fails"
+    quality = report["sections"][2]
+    assert (quality["key"], quality["open"]) == ("quality", True)
+    assert [(pt["title"], pt["open"]) for pt in quality["parts"]] == [
+        ("Gaps", True), ("Obstacles", False), ("Open questions", False), ("Testing still to do", False), ("How the testers felt", False)]
+    gaps = quality["parts"][0]["blocks"][0]["items"]
+    assert gaps[0] == {"text": "High risk not tested: R2 Selfie upload (score 12)", "label": "Make a charter", "to": "/risks"}
+    assert report["sections"][1]["counts"] == "1 session · 1 h 00 min · 1 tester"
     tables = [b for b in blocks if b["type"] == "table"]
     found = tables[0]
     assert [row[0] for row in found["rows"]] == ["Passport verify fails", "Is the 5 MB limit right?"]  # bugs before questions
@@ -138,3 +153,63 @@ def test_filed_issues_show_closed_and_the_retest(client, project, session, monke
     assert row[3] == [{"text": f"{filing['issue_key']} (closed)", "href": filing["issue_url"]}]
     assert row[5] == "No test"
     assert (report["summary"]["filed"], report["summary"]["closed"]) == (1, 1)
+
+
+def test_summary_view_exports_are_short_and_links_need_the_app_address(client, project, session, monkeypatch):
+    from app.config import settings
+    bug = client.post(f"/sessions/{session['id']}/bugs", json={"title": "Checkout total wrong", "severity": "high"}).json()
+    client.patch(f"/bugs/{bug['id']}", json={"kind": "bug", "expected": "100", "actual": "90",
+                                              "oracle_heuristic": "claims", "oracle_explanation": "Spec says 100"})
+    r = client.get(f"/projects/{project['id']}/report.md", params={"view": "summary"})
+    assert 'filename="shopflow-test-report-summary.md"' in r.headers["content-disposition"]
+    md = r.text
+    assert md.startswith("# Test report: ShopFlow (summary)")
+    assert "## At a glance" in md and "- **1 high bug still open**: Checkout total wrong" in md
+    assert "- Bugs by severity: 1 high, 0 medium, 0 low" in md and "## Top bugs" in md
+    assert "## 2. The testing" not in md  # the full report only
+    assert "(Bugs](" not in md and "[Bugs](" not in md  # no app address: no links
+    monkeypatch.setattr(settings, "public_app_url", "https://mirmera.example/")
+    md = client.get(f"/projects/{project['id']}/report.md", params={"view": "summary"}).text
+    assert f"([Bugs](https://mirmera.example/projects/{project['id']}/bugs))" in md
+    full = client.get(f"/projects/{project['id']}/report.html").text
+    assert "<h2>At a glance</h2>" in full and "2. The testing: how we tested" in full
+    assert "Top bugs" in client.get(f"/projects/{project['id']}/report.html", params={"view": "summary"}).text
+    assert client.get(f"/projects/{project['id']}/report.md", params={"view": "short"}).status_code == 422
+
+
+def test_glance_says_when_a_fix_held_or_not(client, project, session):
+    from datetime import timedelta as td
+    a = client.post(f"/sessions/{session['id']}/bugs", json={"title": "Fixed one", "severity": "high"}).json()
+    b = client.post(f"/sessions/{session['id']}/bugs", json={"title": "Still broken", "severity": "medium"}).json()
+    for x in (a, b):
+        client.patch(f"/bugs/{x['id']}", json={"kind": "bug", "expected": "e", "actual": "a", "oracle_heuristic": "claims", "oracle_explanation": "x"})
+    with SessionLocal() as db:
+        for x, outcome, key in ((a, "fixed", "#3"), (b, "still_fails", "#4")):
+            f = models.BugFiling(bug_id=x["id"], tracker="github", target="o/r", mode="new", issue_key=key, issue_url=f"https://x/{key[1:]}")
+            db.add(f)
+            db.flush()
+            db.add(models.Retest(project_id=project["id"], bug_id=x["id"], filing_id=f.id, tracker="github", issue_key=key,
+                                 issue_url=f.issue_url, outcome=outcome, created_at=utcnow() - td(minutes=1)))
+        db.commit()
+    glance = {g["title"]: g for g in client.get(f"/projects/{project['id']}/report").json()["glance"]}
+    assert "high bug" not in " ".join(glance)  # the high one's fix was verified
+    assert glance["1 fix didn't hold: #4 was closed, but the bug still reproduces"]["detail"] == "Still broken"
+    assert glance["1 fix verified after the issue closed"]["detail"] == "#3 Fixed one"
+
+
+def test_nothing_to_flag(client, project, session):
+    with SessionLocal() as db:
+        s = db.get(models.Session, session["id"])
+        s.ended_at = utcnow()
+        db.add(models.Debrief(session_id=s.id, time_breakdown={}, charter_status="fulfilled"))
+        db.commit()
+    [g] = client.get(f"/projects/{project['id']}/report").json()["glance"]
+    assert (g["tone"], g["title"]) == ("ok", "Nothing needs attention")
+
+
+def test_many_running_sessions_are_one_gap(client, project, charter):
+    for n in range(3):
+        client.post("/sessions", json={"charter_id": charter["id"], "tester_id": f"t{n}"})
+    gaps = client.get(f"/projects/{project['id']}/report").json()["sections"][2]["parts"][0]["blocks"][0]["items"]
+    running = [g for g in gaps if "still running" in g["text"]]
+    assert len(running) == 1 and running[0]["text"].startswith("3 sessions still running: ") and running[0]["to"] == "/dashboard"

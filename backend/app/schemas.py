@@ -1369,7 +1369,11 @@ class ProjectReport(BaseModel):
     period: str
     generated_at: datetime
     summary: dict
-    blocks: list[dict]
+    glance: list[dict] = []  # [{"tone", "title", "detail", "label", "to"}]: what matters most, where to act
+    charts: dict = {}  # {"severity": {...}, "risks": {...}, "time": {"seconds", "split"}}
+    top_bugs: dict = {}  # {"headers", "rows", "total", "bugs", "questions"}
+    sections: list[dict] = []  # [{"key", "title", "counts", "open", "parts": [{"title", "count", "open", "blocks"}]}]
+    blocks: list[dict]  # the full report, flat
 
 
 class CoveragePage(BaseModel):

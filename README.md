@@ -186,18 +186,17 @@ targets a risk naming it. **Where to look next** lists the gaps.
 
 ### Test report
 
-The **Report** page tells the project's testing story for a period (or all time):
+The **Report** page tells the project's testing story for a period, in two views:
 
-1. **The product:** bugs and questions with severity, issue (and whether it's closed), regression test and retest
-   results; accepted risks with how many sessions tested them and the bugs found; the last full regression run.
-2. **The testing:** each session (charter, tester, date, time, whether the charter was fulfilled), time per
-   tester, where the time went, and what each session covered.
-3. **How good the testing was:** high risks nobody tested, unfinished charters, sessions without a debrief,
-   unreviewed reports, bugs without a regression test, obstacles, open questions, follow-up charters not run
-   yet, and how the testers felt.
+- **Summary** (default, one screen): the totals, **At a glance** (high bugs still open, high risks not tested, fixes
+  that didn't hold or were verified, unfinished charters, reports to review, each with a link to act on it), three
+  small charts (bugs by severity, risks tested, where the time went) and the top five bugs.
+- **Full**: the three parts of the story, folded, with their counts in the headers. *How good the testing was* opens by
+  default with its **Gaps**, each linked to where to act (make a charter, write the debrief, review, generate tests).
+  Long lists show five rows first; long debrief text shows its start.
 
-Everything comes from what was recorded; the AI writes none of it. **Download Markdown** for a ticket or
-wiki, or open the **Printable page** and print it to PDF.
+Everything comes from what was recorded; the AI writes none of it. **Markdown** and **Print** export the view you are
+on, so the Summary makes a short report for a ticket. Set `PUBLIC_APP_URL` so the exported links open Mirmera.
 
 ## Tests
 

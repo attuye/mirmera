@@ -710,8 +710,13 @@ export interface CoverageMap {
 // ---- Test report ---------------------------------------------------------------
 
 export type ReportCell = string | { text: string; href: string } | (string | { text: string; href: string })[]
+export interface ReportAction { text: string; label: string; to: string }
+export interface GlanceLine { tone: 'danger' | 'warning' | 'ok' | 'neutral' | 'question'; title: string; detail: string; label: string | null; to: string | null }
+export interface ReportPart { title: string | null; count: number | null; open: boolean; blocks: ReportBlock[] }
+export interface ReportSection { key: string; title: string; counts: string; open: boolean; parts: ReportPart[] }
 export type ReportBlock =
   | { type: 'heading'; level: number; text: string }
+  | { type: 'actions'; items: ReportAction[] }
   | { type: 'paragraph'; text: string }
   | { type: 'bullets'; items: string[] }
   | { type: 'quote'; text: string; by: string }
@@ -728,6 +733,14 @@ export interface ProjectReport {
     questions: number; unreviewed: number; filed: number; closed: number; regression_tests: number
     fix_verified: number; still_fails: number
   }
+  glance: GlanceLine[]
+  charts: {
+    severity: { high: number; medium: number; low: number }
+    risks: { tested: number; untested: number; untested_high: number }
+    time: { seconds: number; split: Record<string, number> }
+  }
+  top_bugs: { headers: string[]; rows: ReportCell[][]; total: number; bugs: number; questions: number }
+  sections: ReportSection[]
   blocks: ReportBlock[]
 }
 function periodQuery(since?: string, until?: string): string {
@@ -737,8 +750,10 @@ function periodQuery(since?: string, until?: string): string {
   const s = q.toString()
   return s ? `?${s}` : ''
 }
-export const reportUrl = (projectId: string, kind: 'md' | 'html', since?: string, until?: string) =>
-  `${BASE_URL}/projects/${projectId}/report.${kind}${periodQuery(since, until)}`
+export const reportUrl = (projectId: string, kind: 'md' | 'html', since?: string, until?: string, view: 'summary' | 'full' = 'full') => {
+  const q = periodQuery(since, until)
+  return `${BASE_URL}/projects/${projectId}/report.${kind}${q}${q ? '&' : '?'}view=${view}`
+}
 
 export const suiteExportUrl = (projectId: string) => `${BASE_URL}/projects/${projectId}/regression-tests/export`
 
