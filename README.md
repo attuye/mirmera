@@ -81,6 +81,15 @@ On the Risks page, **Add an artifact** has two tabs. **Paste** takes text, or **
 Imports use the same `GITHUB_TOKEN` and Jira settings as filing (read access is enough), and the project's repo
 and Jira key from Settings. Very large diffs are cut at 60,000 characters, and the artifact says so.
 
+### Charters from a change
+
+The **Charters** page lists the project's charters (click one to start or resume a session) and has **Suggest from
+a change**: paste a diff or spec excerpt (or load a file), **Import** a pull request or local git diff, or pick
+something **Imported before**, and the AI suggests charters for what it changes. Accepted charters remember the
+change they came from ("from PR #42"), shown on the Charters page, the Dashboard and in the report. Pasted text is
+saved with a readable name ("Pasted: diff of kyc/selfie.py"). The slower path from the whole product's risks stays
+on the Risks page.
+
 ### Regression tests from a bug
 
 The recorded browser also records your actions: clicks, typing, selects,

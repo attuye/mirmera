@@ -223,6 +223,9 @@ class CharterOut(BaseModel):
     risk_ids: list[str] = []
     test_ideas: list[str] = []
     oracles: list[str] = []
+    source_artifact_id: Optional[str] = None
+    source_label: Optional[str] = None  # the change it was suggested from
+    source_url: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

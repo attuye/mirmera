@@ -146,10 +146,21 @@ class Charter(Base):
     project = relationship("Project", back_populates="charters")
     sessions = relationship("Session", back_populates="charter")
     risks = relationship("Risk", secondary=charter_risks, back_populates="charters")
+    source_artifact = relationship("Artifact")
 
     @property
     def risk_ids(self) -> list[str]:
         return [r.id for r in self.risks]
+
+    @property
+    def source_label(self) -> str | None:
+        """The change a suggested charter came from: "PR #42: …", "git diff main...x"."""
+        return self.source_artifact.label if self.source_artifact else None
+
+    @property
+    def source_url(self) -> str | None:
+        ref = self.source_artifact.file_ref if self.source_artifact else None
+        return ref if ref and ref.startswith(("http://", "https://")) else None
 
 
 class Session(Base):
