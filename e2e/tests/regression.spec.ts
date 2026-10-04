@@ -114,4 +114,21 @@ test('regression test: generate from the recording, read the code, replay it to 
     await expect(result).toContainText('Broken', { timeout: 30_000 })
     await expect(result).toContainText('failed1. open http://localhost:5199/')
   })
+
+  await test.step('the Regression page runs every test and exports them as a Playwright project', async () => {
+    await page.getByRole('link', { name: 'Regression', exact: true }).click()
+    await page.getByLabel('Replay against').fill('')  // each test's recorded address
+    await page.getByRole('button', { name: /^Run all/ }).click()
+    const latest = page.getByRole('region', { name: 'Latest run' })
+    await expect(latest.getByRole('status')).toContainText('Latest run', { timeout: 60_000 })
+    await expect(latest.getByRole('row', { name: title })).toContainText('Bug still there')
+    await expect(latest.getByRole('row', { name: title })).toContainText('expected: marked as a known bug')
+    await expect(page.getByRole('region', { name: 'Tests' }).getByRole('row', { name: title })).toContainText('Bug still there')
+    await expect(page.getByRole('region', { name: 'History' }).getByRole('listitem')).toHaveCount(1)
+
+    const href = await page.getByRole('link', { name: 'Export as Playwright project' }).getAttribute('href')
+    const zip = await request.get(href!)
+    expect(zip.headers()['content-type']).toBe('application/zip')
+    expect((await zip.body()).subarray(0, 2).toString()).toBe('PK')  // a zip file
+  })
 })

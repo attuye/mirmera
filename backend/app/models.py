@@ -400,3 +400,20 @@ class IsolationRun(Base):
     cancel_requested = Column(Boolean, default=False)
     created_at = Column(DateTime, default=utcnow)
     finished_at = Column(DateTime, nullable=True)
+
+
+class RegressionSuiteRun(Base):
+    """Replays the latest regression test of every bug in a project, one after
+    another, against one address. Results are saved as each test finishes."""
+    __tablename__ = "regression_suite_runs"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    status = Column(String, default="running")  # running | done | cancelled | error
+    base_url = Column(String, nullable=True)  # None: each test's own recorded address
+    total = Column(Integer, default=0)
+    results = Column(JSON, default=list)  # [{"bug_id", "bug_title", "test_id", "known_failing", "outcome", "duration_ms", "detail"}]
+    detail = Column(Text, nullable=True)
+    cancel_requested = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=utcnow)
+    finished_at = Column(DateTime, nullable=True)

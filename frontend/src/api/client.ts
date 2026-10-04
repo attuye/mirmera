@@ -613,7 +613,41 @@ export interface AICheckResult {
   detail: string | null
 }
 
+// ---- Regression suite ---------------------------------------------------------
+
+export interface SuiteTest {
+  bug_id: string
+  bug_title: string
+  test_id: string
+  filename: string
+  known_failing: boolean
+  base_url: string | null
+  outcome: ReplayResult['outcome'] | null
+  meaning: string | null
+  replayed_at: string | null
+  created_at: string
+}
+export interface SuiteRun {
+  id: string
+  project_id: string
+  status: 'running' | 'done' | 'cancelled' | 'error'
+  base_url: string | null
+  total: number
+  results: { bug_id: string; bug_title: string; test_id: string; known_failing: boolean
+    outcome: ReplayResult['outcome'] | 'error'; meaning: string; duration_ms: number; detail: string }[]
+  detail: string | null
+  created_at: string
+  finished_at: string | null
+}
+export const suiteExportUrl = (projectId: string) => `${BASE_URL}/projects/${projectId}/regression-tests/export`
+
 export const api = {
+  listRegressionTests: (projectId: string) => request<SuiteTest[]>(`/projects/${projectId}/regression-tests`),
+  runSuite: (projectId: string, base_url?: string) =>
+    request<SuiteRun>(`/projects/${projectId}/regression-suite`, { method: 'POST', body: JSON.stringify({ base_url }) }),
+  getSuiteRun: (runId: string) => request<SuiteRun>(`/suite-runs/${runId}`),
+  cancelSuiteRun: (runId: string) => request<SuiteRun>(`/suite-runs/${runId}/cancel`, { method: 'POST' }),
+  suiteHistory: (projectId: string) => request<SuiteRun[]>(`/projects/${projectId}/suite-runs`),
   aiOverview: () => request<AIOverview>('/ai'),
   aiCheck: (provider: string, task: string) =>
     request<AICheckResult>('/ai/check', { method: 'POST', body: JSON.stringify({ provider, task }) }),

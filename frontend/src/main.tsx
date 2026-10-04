@@ -10,6 +10,7 @@ import ActiveSession from './pages/ActiveSession'
 import DebriefPage from './pages/Debrief'
 import DebriefsList from './pages/Debriefs'
 import Bugs from './pages/Bugs'
+import Regression from './pages/Regression'
 import RisksPage from './pages/Risks'
 import { ProjectLayout, SessionRedirect, lastProjectId } from './project'
 
@@ -34,6 +35,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="sessions/:sessionId/debrief" element={<DebriefPage />} />
           <Route path="debriefs" element={<DebriefsList />} />
           <Route path="bugs" element={<Bugs />} />
+          <Route path="regression" element={<Regression />} />
           <Route path="settings" element={<ProjectSettings />} />
         </Route>
         {/* Links from before projects */}

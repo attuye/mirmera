@@ -7,6 +7,7 @@ const NAV = [
   { label: 'Risks', to: '/risks' },
   { label: 'Charters', to: '/charters/suggest' },
   { label: 'Bugs', to: '/bugs' },
+  { label: 'Regression', to: '/regression' },
   { label: 'Debriefs', to: '/debriefs' },
   { label: 'Settings', to: '/settings' },
 ]
