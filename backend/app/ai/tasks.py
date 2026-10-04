@@ -13,7 +13,7 @@ from app.ai.llm_json import complete_json
 from app.evidence_text import NOT_USED
 from app.schemas import (
     CharterSuggestion, CharterSuggestionList, LLMDebrief,
-    LLMBugDraft, LLMDuplicateList, LLMRegressionChecks, LLMRegressionPlan, LLMProductModel, LLMRiskUpdateList, LLMRisk, LLMRiskCharter, LLMRiskCharterList, LLMRiskList,
+    LLMBugDraft, LLMDuplicateList, LLMRegressionChecks, LLMRegressionPlan, LLMProductModel, LLMRiskUpdateList, LLMRisk, LLMRiskCharter, LLMRiskCharterList, LLMRiskList, LLMReportSummary,
 )
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -30,6 +30,7 @@ PROMPT_VERSIONS = {
     "duplicate_check": "duplicate-check-v1",
     "regression_test": "regression-test-v2",
     "regression_checks": "regression-checks-v1",
+    "report_summary": "report-summary-v1",
 }
 PLANNING_TOKENS = 4000
 MAX_ARTIFACT_CHARS = 15_000
@@ -229,3 +230,34 @@ async def plan_regression_test(provider: LLMProvider, *, report: dict, actions: 
     return await complete_json(
         provider, load_prompt("regression_test.md"), user, LLMRegressionPlan, task="regression_test",
     )
+
+
+# ---- Report summary -----------------------------------------------------------
+
+def ungrounded_numbers(text: str, facts: list[str]) -> list[str]:
+    """Numbers in the summary that appear in none of the facts (the AI made them up)."""
+    import re
+    known = set(re.findall(r"\d+(?:[.,]\d+)?", "\n".join(facts)))
+    return sorted({n for n in re.findall(r"\d+(?:[.,]\d+)?", text) if n not in known})
+
+
+async def summarize_report(provider: LLMProvider, *, project_name: str, facts: list[str]) -> LLMReportSummary:
+    """facts: the report's own lines (period, totals, at a glance, charts, gaps, top bugs).
+    The summary may only use numbers found in them; one retry says which ones were invented."""
+    from app.ai.llm_json import LLMOutputError
+    numbered = "\n".join(f"{i}. {f}" for i, f in enumerate(facts, 1))
+    user = f"<project>{project_name}</project>\n\n<facts>\n{numbered}\n</facts>"
+    system = load_prompt("report_summary.md")
+    result = await complete_json(provider, system, user, LLMReportSummary, task="report_summary", max_tokens=800)
+    bad = ungrounded_numbers(result.summary, facts)
+    if bad:
+        retry = f"{user}\n\nYour summary used numbers that are not in the facts: {', '.join(bad)}. Use only numbers from <facts>."
+        result = await complete_json(provider, system, retry, LLMReportSummary, task="report_summary", max_tokens=800)
+        bad = ungrounded_numbers(result.summary, facts)
+        if bad:
+            raise LLMOutputError(
+                f"The AI ({provider.name}) kept using numbers that are not in the report ({', '.join(bad)}), so its "
+                "summary was not shown. Try again, or choose a stronger model for 'Summarise the test report' in Settings.")
+    joined = "\n".join(facts)
+    result.basis = [b.strip() for b in result.basis if b.strip() and b.strip() in joined][:8]  # only real lines
+    return result

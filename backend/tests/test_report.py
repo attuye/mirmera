@@ -213,3 +213,83 @@ def test_many_running_sessions_are_one_gap(client, project, charter):
     gaps = client.get(f"/projects/{project['id']}/report").json()["sections"][2]["parts"][0]["blocks"][0]["items"]
     running = [g for g in gaps if "still running" in g["text"]]
     assert len(running) == 1 and running[0]["text"].startswith("3 sessions still running: ") and running[0]["to"] == "/dashboard"
+
+
+# ---------- AI-drafted summary ----------
+
+def reviewed_high_bug(client, session, title="Checkout total wrong"):
+    bug = client.post(f"/sessions/{session['id']}/bugs", json={"title": title, "severity": "high"}).json()
+    client.patch(f"/bugs/{bug['id']}", json={"kind": "bug", "expected": "100", "actual": "90",
+                                              "oracle_heuristic": "claims", "oracle_explanation": "Spec says 100"})
+    return bug
+
+
+def test_facts_are_the_reports_own_lines(client, project, session):
+    from app.project_report import build, facts
+    reviewed_high_bug(client, session)
+    with SessionLocal() as db:
+        lines = facts(build(db, db.get(models.Project, project["id"])))
+    assert lines[0].startswith("Period: all time") and lines[1].startswith("Totals: 1 session")
+    assert "At a glance: 1 high bug still open: Checkout total wrong" in lines
+    assert "Bugs by severity: 1 high, 0 medium, 0 low" in lines
+    assert any(l.startswith("Gap: ") for l in lines) and "Bug: Checkout total wrong (high, regression test: no test)" in lines
+
+
+def test_draft_keep_edit_and_remove_a_summary(client, project, session):
+    reviewed_high_bug(client, session)
+    url = f"/projects/{project['id']}/report/summary"
+    draft = client.post(url, json={}).json()
+    assert draft["text"].startswith("(mock) 1 high bug still open: Checkout total wrong.")
+    assert draft["basis"][0] == "At a glance: 1 high bug still open: Checkout total wrong"
+    assert (draft["ai_provider"], draft["prompt_version"]) == ("mock", "report-summary-v1")
+    assert client.get(f"/projects/{project['id']}/report").json()["ai_summary"] is None  # a draft isn't kept
+
+    kept = client.put(url, json={"text": draft["text"] + " Retest after the fix.", "ai_provider": "mock",
+                                 "ai_model": "mock", "prompt_version": draft["prompt_version"], "edited": True}).json()
+    assert kept["edited"] is True
+    report = client.get(f"/projects/{project['id']}/report").json()
+    assert report["ai_summary"]["text"].endswith("Retest after the fix.")
+    md = client.get(f"/projects/{project['id']}/report.md", params={"view": "summary"}).text
+    assert "## Summary\n\n(mock) 1 high bug still open" in md and "_Drafted by AI (mock · mock), edited by the tester_" in md
+    assert "<h2>Summary</h2>" in client.get(f"/projects/{project['id']}/report.html").text
+
+    # Kept for that period only.
+    assert client.get(f"/projects/{project['id']}/report", params={"since": "2026-01-01"}).json()["ai_summary"] is None
+    assert client.delete(url).status_code == 204
+    assert client.get(f"/projects/{project['id']}/report").json()["ai_summary"] is None
+
+
+def test_invented_numbers_are_refused(client, project, session, monkeypatch):
+    from app.ai.base import LLMProvider
+    from app.ai.tasks import ungrounded_numbers
+
+    class Inventive(LLMProvider):
+        name, model = "inventive", "x"
+        def __init__(self): self.calls = 0
+        async def complete(self, system, user, **kw):
+            self.calls += 1
+            return '{"summary": "Testing found 7 high bugs and 99 percent coverage overall.", "basis": ["made up line"]}'
+
+    assert ungrounded_numbers("2 high bugs in 9 sessions", ["Totals: 9 sessions", "2 high"]) == []
+    assert ungrounded_numbers("7 high bugs", ["2 high"]) == ["7"]
+    reviewed_high_bug(client, session)
+    fake = Inventive()
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: fake)
+    r = client.post(f"/projects/{project['id']}/report/summary", json={})
+    assert r.status_code == 502 and "numbers that are not in the report (7, 99)" in r.json()["detail"]
+    assert fake.calls == 2  # one retry, told which numbers were invented
+
+
+def test_basis_keeps_only_real_fact_lines(client, project, session, monkeypatch):
+    from app.ai.base import LLMProvider
+
+    class Loose(LLMProvider):
+        name, model = "loose", "x"
+        async def complete(self, system, user, **kw):
+            return ('{"summary": "One high bug is still open: Checkout total wrong.", '
+                    '"basis": ["At a glance: 1 high bug still open: Checkout total wrong", "Something the AI imagined"]}')
+
+    reviewed_high_bug(client, session)
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: Loose())
+    draft = client.post(f"/projects/{project['id']}/report/summary", json={}).json()
+    assert draft["basis"] == ["At a glance: 1 high bug still open: Checkout total wrong"]

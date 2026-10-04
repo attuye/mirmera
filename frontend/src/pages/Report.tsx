@@ -8,6 +8,7 @@ import {
   AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, CircleDot, Clock, Download, Printer, ShieldAlert, type LucideIcon,
 } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
+import ReportSummaryCard from '../components/ReportSummaryCard'
 import { utcDate } from '../components/Evidence'
 import { ErrorLine, errorText, fieldLabel, input, quietButton } from '../components/ui'
 import {
@@ -290,10 +291,8 @@ export default function ReportPage() {
     try { localStorage.setItem(VIEW_KEY, v) } catch { /* not remembered */ }
   }
 
-  useEffect(() => {
-    setError(null)
-    api.getReport(project.id, since || undefined, until || undefined).then(setReport).catch((e) => setError(errorText(e)))
-  }, [project.id, since, until])
+  const load = () => api.getReport(project.id, since || undefined, until || undefined).then(setReport).catch((e) => setError(errorText(e)))
+  useEffect(() => { setError(null); load() }, [project.id, since, until])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const preset = (days: number | null) => {
     setCustom(false)
@@ -354,7 +353,7 @@ export default function ReportPage() {
 
         {report && s && tb && (
           <>
-            <section aria-label="Summary" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
+            <section aria-label="Totals" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
               <Tile label="Sessions" value={s.sessions} note={`${hours(s.tested_seconds)} · ${s.testers} tester${s.testers === 1 ? '' : 's'}`} />
               <Tile label="Bugs" value={s.bugs} note={`${s.high} high · ${s.medium} medium · ${s.low} low`} />
               <Tile label="Questions" value={s.questions} note={s.unreviewed ? `${s.unreviewed} to review` : undefined} />
@@ -362,6 +361,8 @@ export default function ReportPage() {
               <Tile label="Regression tests" value={s.regression_tests} note={s.fix_verified || s.still_fails ? `${s.fix_verified} fix verified · ${s.still_fails} still fail` : undefined} />
             </section>
 
+            <ReportSummaryCard projectId={project.id} since={since || undefined} until={until || undefined}
+              kept={report.ai_summary} onChange={load} />
             <Glance lines={report.glance} />
 
             {view === 'summary' ? (

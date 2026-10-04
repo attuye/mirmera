@@ -8,7 +8,7 @@ test('AI settings: check a model task by task, choose a provider per task', asyn
   await test.step('check the mock model: every task usable first time', async () => {
     await ai.getByLabel('Model to check').selectOption('mock')
     await ai.getByRole('button', { name: 'Check this model' }).click()
-    await expect(ai.getByRole('status')).toContainText('mock: 11 OK, 0 needed a retry, 0 failed', { timeout: 30_000 })
+    await expect(ai.getByRole('status')).toContainText('mock: 12 OK, 0 needed a retry, 0 failed', { timeout: 30_000 })
     await expect(ai.getByRole('row', { name: 'Draft bug reports' })).toContainText('OK')
     await expect(ai.getByRole('row', { name: 'Draft bug reports' })).toContainText('(oracle: claims)')
   })
@@ -25,7 +25,7 @@ test('AI settings: check a model task by task, choose a provider per task', asyn
   await test.step('use the checked model for the tasks it handled first time', async () => {
     await ai.getByLabel('Model to check').selectOption('mock')
     await ai.getByRole('button', { name: 'Check this model' }).click()
-    await ai.getByRole('button', { name: 'Use mock for the 11 tasks it handled first time' }).click({ timeout: 30_000 })
+    await ai.getByRole('button', { name: 'Use mock for the 12 tasks it handled first time' }).click({ timeout: 30_000 })
     await expect(ai.getByLabel('Provider for Draft debriefs')).toHaveValue('mock')
     await page.getByRole('button', { name: 'Save settings' }).click()
     await expect(page.getByRole('status').filter({ hasText: 'Saved.' })).toBeVisible()
