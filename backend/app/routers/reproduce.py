@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session as DBSession
 from app import models, schemas
 from app.agent import reproduce as agent
 from app.ai import tasks
-from app.ai.base import get_provider
+from app.ai.routing import provider_for
 from app.config import settings
 from app.database import get_db
 from app.evidence_text import browser_context
@@ -75,7 +75,7 @@ def start(bug_id: str, payload: schemas.ReproduceRequest, db: DBSession = Depend
     origins = {origin(base_url)}
 
     project = db.get(models.Project, bug.charter.project_id)
-    provider = get_provider(payload.provider or project.default_ai_provider)
+    provider = provider_for(project, "agent", payload.provider)
     evidence = [e for e in runner_api.evidence_for_bug(db, bug) if e.kind != "action"]
     ctx = agent.BugContext(
         report={"title": bug.title, "kind": bug.kind or "unreviewed", "description": bug.description,

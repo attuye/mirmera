@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from app import models, schemas
 from app.ai import tasks
-from app.ai.base import get_provider
+from app.ai.routing import provider_for
 from app.config import settings
 from app.database import get_db
 from app.evidence_text import _defang as defang
@@ -89,7 +89,7 @@ async def check_duplicates(bug_id: str, payload: schemas.TrackerRequest, db: DBS
     if not issues:
         return out
 
-    provider = get_provider(payload.provider or project.default_ai_provider)
+    provider = provider_for(project, "duplicate_check", payload.provider)
     # Issue text comes from the tracker and can be written by anyone: data only, and tag-proof.
     result = await tasks.check_duplicates(
         provider,
