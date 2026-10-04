@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     # that window. Headless is for automated tests and CI.
     runner_headless: bool = False
     runner_chromium_path: str | None = None  # use a specific Chromium instead of Playwright's
+    # Extra signals from the recorded browser (evidence, not verdicts):
+    runner_accessibility_checks: bool = True  # check each page when it loads (labels, alt text, contrast...)
+    slow_request_ms: int = 2000  # an API call (fetch/XHR) slower than this is recorded
+    slow_page_ms: int = 3000  # a page that takes longer than this to load is recorded
     # Where screenshots, traces and HAR files are kept, one folder per session.
     # They can contain whatever the tested app shows, so keep them out of git.
     evidence_dir: str = "./evidence"

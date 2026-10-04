@@ -50,7 +50,7 @@ def test_the_map_from_recorded_sessions(client, project, charter, session):
     assert (verify["sessions"], verify["testers"], verify["visits"], verify["actions"]) == (2, ["attu", "sara"], 2, 4)
     assert verify["hosts"] == ["localhost:3000", "staging.kyc.et"]
     assert verify["controls"] == ['click button "Verify"', 'fill label "Full name"']  # never the value typed
-    assert verify["problems"] == [{"summary": "POST /api/verify/:id → 500", "count": 2}]
+    assert verify["problems"] == [{"summary": "POST /api/verify/:id → 500", "count": 2, "kind": "failed_request"}]
     assert [b["title"] for b in verify["bugs"]] == ["Verify fails for passports"]
     assert verify["flags"] == []
 

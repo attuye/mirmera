@@ -218,7 +218,8 @@ export interface FileRequest { tracker: TrackerName; mode: 'new' | 'comment'; is
 // ---- Browser session runner ------------------------------------------------
 
 export type EvidenceKind =
-  | 'screenshot' | 'trace' | 'har' | 'console_error' | 'page_error' | 'failed_request' | 'navigation' | 'action'
+  | 'screenshot' | 'trace' | 'har' | 'console_error' | 'page_error' | 'failed_request' | 'slow_request' | 'accessibility'
+  | 'navigation' | 'action'
 
 /** Something the runner recorded. Files are fetched with evidenceFileUrl(). */
 export interface Evidence {
@@ -696,7 +697,7 @@ export interface CoveragePage {
   visits: number
   actions: number
   controls: string[]
-  problems: { summary: string; count: number }[]
+  problems: { summary: string; count: number; kind?: string }[]
   bugs: { id: string; title: string; severity: string; kind: string | null }[]
   first_seen: string | null
   last_seen: string | null

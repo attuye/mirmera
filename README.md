@@ -50,6 +50,22 @@ They contain whatever the tested app showed, so they are git-ignored. Set
 `RUNNER_HEADLESS=true` to run without a window (CI), or `RUNNER_CHROMIUM_PATH`
 to use a specific Chromium.
 
+### Slow requests and accessibility
+
+The recorded browser also records, as evidence (never verdicts):
+
+- **Slow requests:** API calls (fetch/XHR) slower than `SLOW_REQUEST_MS` (2 s) and pages slower than
+  `SLOW_PAGE_MS` (3 s) to load, grouped per address.
+- **Accessibility findings,** checked when each page loads: images without alt text, form fields without a
+  label, buttons and links without a name, low-contrast text (WCAG AA), no page language, no title, duplicate
+  ids. A small checker of Mirmera's own (`backend/app/a11y_check.js`), at most five findings per rule per page.
+  Turn it off with `RUNNER_ACCESSIBILITY_CHECKS=false`.
+
+They show in the browser panel (accessibility folded under its own heading), reach the AI drafts like other
+signals, appear on the coverage map, and bring test ideas: investigate a slow call, and check accessibility by
+hand (keyboard only, 200% zoom, a screen reader). Only full page loads are checked; the Chrome extension doesn't
+record these yet.
+
 ### Frontend
 
 ```bash
