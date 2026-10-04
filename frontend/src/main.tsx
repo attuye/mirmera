@@ -18,6 +18,8 @@ import TrendsPage from './pages/Trends'
 import RisksPage from './pages/Risks'
 import StoriesPage from './pages/Stories'
 import StoryPage from './pages/StoryPage'
+import SprintsPage from './pages/Sprints'
+import SprintPage from './pages/SprintPage'
 import { ProjectLayout, SessionRedirect, lastProjectId } from './project'
 
 /** "/" opens the project used last in this browser, or the Projects page. */
@@ -35,6 +37,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/projects/:projectId" element={<ProjectLayout />}>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
+          <Route path="sprints" element={<SprintsPage />} />
+          <Route path="sprints/:sprintId" element={<SprintPage />} />
           <Route path="stories" element={<StoriesPage />} />
           <Route path="stories/:storyId" element={<StoryPage />} />
           <Route path="risks" element={<RisksPage />} />

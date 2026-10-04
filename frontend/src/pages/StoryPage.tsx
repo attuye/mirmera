@@ -1,13 +1,13 @@
 /** One user story: what it claims, the risks and charters linked to it, the sessions and
  *  bugs under those charters, the pages explored, and what is still left to look at. */
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, ExternalLink, RefreshCw } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
 import RiskForm from '../components/RiskForm'
 import { utcDate } from '../components/Evidence'
 import { ConfirmDelete, ErrorLine, errorText, input, quietButton } from '../components/ui'
-import { api, Charter, Risk, StoryDetail } from '../api/client'
+import { api, Charter, Risk, SprintSummary, StoryDetail } from '../api/client'
 import { useProject, useProjectPath } from '../project'
 import { StoryStatus, timeText } from './Stories'
 
@@ -74,6 +74,8 @@ export default function StoryPage() {
   const [story, setStory] = useState<StoryDetail | null>(null)
   const [risks, setRisks] = useState<Risk[]>([])
   const [charters, setCharters] = useState<Charter[]>([])
+  const [sprints, setSprints] = useState<SprintSummary[]>([])
+  const { hash } = useLocation()
   const [addingRisk, setAddingRisk] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -82,7 +84,11 @@ export default function StoryPage() {
     api.getStory(storyId).then(setStory).catch((e) => setError(errorText(e)))
     api.listRisks(project.id).then(setRisks).catch(() => {})
     api.listCharters(project.id).then(setCharters).catch(() => {})
+    api.listSprints(project.id).then(setSprints).catch(() => {})
   }, [storyId, project.id])
+  useEffect(() => {  // a link to /stories/x#charters (from a sprint's page) scrolls there
+    if (story && hash) document.getElementById(hash.slice(1))?.scrollIntoView({ block: 'start' })
+  }, [story?.id, hash])  // eslint-disable-line react-hooks/exhaustive-deps
 
   async function act(what: string, fn: () => Promise<StoryDetail>) {
     setBusy(what); setError(null)
@@ -127,6 +133,16 @@ export default function StoryPage() {
           <span><b>{story.risks}</b> {plural(story.risks, 'risk')}</span><span><b>{story.charters}</b> {plural(story.charters, 'charter')}</span>
           <span><b>{story.sessions}</b> {plural(story.sessions, 'session')}{story.minutes ? `, ${timeText(story.minutes)}` : ''}</span>
           <span><b>{story.bugs}</b> {plural(story.bugs, 'bug')}{story.high_bugs ? <span style={{ color: 'var(--danger)' }}> ({story.high_bugs} high)</span> : ''}</span>
+          {sprints.length > 0 && (
+            <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }}>Sprint
+              <select aria-label="Sprint" value={story.sprint?.id ?? ''} disabled={!!busy}
+                onChange={(e) => act('sprint', () => api.updateStory(story.id, { sprint_id: e.target.value || null }))}
+                style={{ ...input, width: 'auto', fontSize: 12, padding: '2px 6px' }}>
+                <option value="">None</option>
+                {sprints.map((s) => <option key={s.id} value={s.id}>{s.name}{s.state === 'current' ? ' (current)' : ''}</option>)}
+              </select>
+            </label>
+          )}
         </div>
         <ErrorLine message={error} />
 

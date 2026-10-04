@@ -717,6 +717,7 @@ export interface StorySummary {
   id: string; key: string | null; title: string; url: string | null
   tracker: 'github' | 'jira' | null; tracker_status: string | null; closed: boolean; created_at: string
   risks: number; charters: number; sessions: number; minutes: number; bugs: number; high_bugs: number; left: number
+  sprint: { id: string; name: string } | null
 }
 export interface StoryLeft { text: string; to: string; action: string }
 export interface StoryDetail extends StorySummary {
@@ -731,6 +732,24 @@ export interface StoryDetail extends StorySummary {
   left_list: StoryLeft[]
 }
 export interface StoryInput { title: string; key?: string | null; description?: string | null; url?: string | null }
+
+// ---- Sprints ---------------------------------------------------------------------
+
+export interface SprintSummary {
+  id: string; name: string; goal: string | null; starts_on: string; ends_on: string
+  state: 'upcoming' | 'current' | 'past'; days_left: number | null
+  stories: number; stories_done: number; sessions: number; minutes: number; bugs: number; left: number
+}
+export interface SprintPart { sessions: number; minutes: number; bugs: number }
+export interface SprintDetail extends SprintSummary {
+  story_list: StorySummary[]
+  under_stories: SprintPart
+  outside_stories: SprintPart
+  outside_charters: { id: string; mission_statement: string; sessions: number; minutes: number; stories: StoryRef[] }[]
+  high_unexplored: { id: string; ref: string; title: string; score: number; in_sprint: boolean }[]
+  left_list: StoryLeft[]
+}
+export interface SprintInput { name: string; goal?: string | null; starts_on: string; ends_on: string; story_ids?: string[] }
 
 // ---- Notifications ---------------------------------------------------------------
 
@@ -851,7 +870,16 @@ export const api = {
   importStory: (projectId: string, ref: string) =>
     request<StoryDetail>(`/projects/${projectId}/stories/import`, { method: 'POST', body: JSON.stringify({ ref }) }),
   getStory: (storyId: string) => request<StoryDetail>(`/stories/${storyId}`),
-  updateStory: (storyId: string, changes: Partial<StoryInput> & { closed?: boolean }) =>
+  listSprints: (projectId: string) => request<SprintSummary[]>(`/projects/${projectId}/sprints`),
+  createSprint: (projectId: string, sprint: SprintInput) =>
+    request<SprintDetail>(`/projects/${projectId}/sprints`, { method: 'POST', body: JSON.stringify(sprint) }),
+  getSprint: (sprintId: string) => request<SprintDetail>(`/sprints/${sprintId}`),
+  updateSprint: (sprintId: string, changes: Partial<Omit<SprintInput, 'story_ids'>>) =>
+    request<SprintDetail>(`/sprints/${sprintId}`, { method: 'PATCH', body: JSON.stringify(changes) }),
+  setSprintStories: (sprintId: string, ids: string[]) =>
+    request<SprintDetail>(`/sprints/${sprintId}/stories`, { method: 'PUT', body: JSON.stringify({ ids }) }),
+  deleteSprint: (sprintId: string) => request<Deleted>(`/sprints/${sprintId}`, { method: 'DELETE' }),
+  updateStory: (storyId: string, changes: Partial<StoryInput> & { closed?: boolean; sprint_id?: string | null }) =>
     request<StoryDetail>(`/stories/${storyId}`, { method: 'PATCH', body: JSON.stringify(changes) }),
   refreshStory: (storyId: string) => request<StoryDetail>(`/stories/${storyId}/refresh`, { method: 'POST' }),
   deleteStory: (storyId: string) => request<Deleted>(`/stories/${storyId}`, { method: 'DELETE' }),
@@ -867,8 +895,8 @@ export const api = {
     request<NotificationsOverview>(`/projects/${projectId}/notifications`, { method: 'PUT', body: JSON.stringify(body) }),
   testNotification: (projectId: string) =>
     request<NotificationsOverview>(`/projects/${projectId}/notifications/test`, { method: 'POST' }),
-  getCoverage: (projectId: string, since?: string) =>
-    request<CoverageMap>(`/projects/${projectId}/coverage${since ? `?since=${since}` : ''}`),
+  getCoverage: (projectId: string, since?: string, until?: string) =>
+    request<CoverageMap>(`/projects/${projectId}/coverage${periodQuery(since, until)}`),
   draftReportSummary: (projectId: string, since?: string, until?: string) =>
     request<ReportSummaryDraft>(`/projects/${projectId}/report/summary${periodQuery(since, until)}`, { method: 'POST', body: '{}' }),
   keepReportSummary: (projectId: string, body: { text: string; ai_provider: string | null; ai_model: string | null; prompt_version: string | null; edited: boolean }, since?: string, until?: string) =>

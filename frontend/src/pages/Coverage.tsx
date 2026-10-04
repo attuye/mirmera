@@ -2,8 +2,9 @@
  *  and where to look next. Built from what the recorded browser (or the
  *  extension) saw, and from the charters' risks. */
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
+import SprintPicker from '../components/SprintPicker'
 import { utcDate } from '../components/Evidence'
 import { ErrorLine, errorText, quietButton } from '../components/ui'
 import { api, CoverageArea, CoverageFlag, CoverageMap, CoveragePage } from '../api/client'
@@ -110,7 +111,11 @@ function Areas({ areas }: { areas: CoverageArea[] }) {
 export default function Coverage() {
   const { project } = useProject()
   const path = useProjectPath()
-  const [days, setDays] = useState<number | null>(null)
+  const [params] = useSearchParams()  // a sprint's page links here with its dates
+  const [days, setDaysState] = useState<number | null>(null)
+  const [range, setRange] = useState<{ since: string; until: string } | null>(
+    params.get('since') && params.get('until') ? { since: params.get('since')!, until: params.get('until')! } : null)
+  const setDays = (n: number | null) => { setRange(null); setDaysState(n) }
   const [map, setMap] = useState<CoverageMap | null>(null)
   const [filter, setFilter] = useState<'all' | CoverageFlag>('all')
   const [open, setOpen] = useState<string | null>(null)
@@ -118,8 +123,9 @@ export default function Coverage() {
 
   useEffect(() => {
     setError(null)
-    api.getCoverage(project.id, days ? daysAgo(days) : undefined).then(setMap).catch((e) => setError(errorText(e)))
-  }, [project.id, days])
+    const load = range ? api.getCoverage(project.id, range.since, range.until) : api.getCoverage(project.id, days ? daysAgo(days) : undefined)
+    load.then(setMap).catch((e) => setError(errorText(e)))
+  }, [project.id, days, range])
 
   const pages = map ? map.pages.filter((p) => filter === 'all' || p.flags.includes(filter)) : []
   const max = map ? Math.max(0, ...map.pages.map((p) => p.sessions)) : 0
@@ -138,9 +144,11 @@ export default function Coverage() {
           </div>
           <div role="group" aria-label="Period" style={{ display: 'flex', gap: 6 }}>
             {PERIODS.map(([label, n]) => (
-              <button key={label} onClick={() => setDays(n)} aria-pressed={days === n}
-                style={{ ...quietButton, ...(days === n ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }}>{label}</button>
+              <button key={label} onClick={() => setDays(n)} aria-pressed={!range && days === n}
+                style={{ ...quietButton, ...(!range && days === n ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }}>{label}</button>
             ))}
+            <SprintPicker projectId={project.id} since={range?.since ?? ''} until={range?.until ?? ''}
+              onPick={(sp) => setRange({ since: sp.starts_on, until: sp.ends_on })} />
           </div>
         </div>
         <ErrorLine message={error} />

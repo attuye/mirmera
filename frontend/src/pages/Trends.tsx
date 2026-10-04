@@ -5,7 +5,7 @@ import { Minus, TrendingDown, TrendingUp } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
 import WeekChart from '../components/WeekChart'
 import { ErrorLine, errorText, quietButton } from '../components/ui'
-import { api, Trends } from '../api/client'
+import { api, SprintSummary, Trends } from '../api/client'
 import { useProject } from '../project'
 
 // Categorical slots 1–4 (validated on this dark surface): blue, orange, aqua, yellow.
@@ -13,6 +13,12 @@ import { useProject } from '../project'
 const PHASE_ORDER = ['on_charter', 'bug_investigation', 'setup', 'opportunity']
 const PHASE_COLORS: Record<string, string> = { on_charter: '#3987e5', bug_investigation: '#d95926', setup: '#199e70', opportunity: '#c98500' }
 const RANGES = [8, 12, 26]
+/** The sprints a week (Monday, YYYY-MM-DD) overlaps. */
+function sprintsIn(week: string, sprints: SprintSummary[]): string {
+  const end = new Date(week + 'T00:00:00Z'); end.setUTCDate(end.getUTCDate() + 6)
+  const sunday = end.toISOString().slice(0, 10)
+  return sprints.filter((s) => s.starts_on <= sunday && s.ends_on >= week).map((s) => s.name).reverse().join(', ')
+}
 const hours = (v: number) => (v >= 10 ? `${Math.round(v)} h` : `${Math.round(v * 10) / 10} h`)
 
 function Changes({ trends }: { trends: Trends }) {
@@ -37,9 +43,9 @@ function Changes({ trends }: { trends: Trends }) {
   )
 }
 
-function Tables({ trends }: { trends: Trends }) {
+function Tables({ trends, sprints }: { trends: Trends; sprints: SprintSummary[] }) {
   const cols: [string, (r: Trends['rows'][number]) => string][] = [
-    ['Week of', (r) => r.week], ['Sessions', (r) => `${r.sessions}`], ['Hours', (r) => `${r.hours}`], ['Testers', (r) => `${r.testers}`],
+    ['Week of', (r) => r.week], ...(sprints.length ? [['Sprint', (r: Trends['rows'][number]) => sprintsIn(r.week, sprints) || '–'] as [string, (r: Trends['rows'][number]) => string]] : []), ['Sessions', (r) => `${r.sessions}`], ['Hours', (r) => `${r.hours}`], ['Testers', (r) => `${r.testers}`],
     ['Bugs (high/medium/low)', (r) => `${r.bugs.high}/${r.bugs.medium}/${r.bugs.low}`], ['Questions', (r) => `${r.questions}`],
     ['Bugs per hour', (r) => (r.bugs_per_hour === null ? '–' : `${r.bugs_per_hour}`)],
     ['Charters (done/partly/not)', (r) => `${r.charters.fulfilled}/${r.charters.partly}/${r.charters.not}`],
@@ -61,8 +67,10 @@ export default function TrendsPage() {
   const [weeks, setWeeks] = useState(12)
   const [trends, setTrends] = useState<Trends | null>(null)
   const [asTable, setAsTable] = useState(false)
+  const [sprints, setSprints] = useState<SprintSummary[]>([])
   const [error, setError] = useState<string | null>(null)
   useEffect(() => { api.getTrends(project.id, weeks).then(setTrends).catch((e) => setError(errorText(e))) }, [project.id, weeks])
+  useEffect(() => { api.listSprints(project.id).then(setSprints).catch(() => {}) }, [project.id])
 
   const rows = trends?.rows ?? []
   const w = rows.map((r) => r.week)
@@ -91,11 +99,12 @@ export default function TrendsPage() {
         </div>
         <ErrorLine message={error} />
         {trends && <Changes trends={trends} />}
-        {trends && (asTable ? <Tables trends={trends} /> : (
+        {trends && (asTable ? <Tables trends={trends} sprints={sprints} /> : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', gap: 14, marginTop: 16 }}>
             <WeekChart title="Testing time" note="Hours in sessions, pauses left out" weeks={w} kind="columns" format={hours}
               series={[{ key: 'hours', label: 'Hours', color: '#3987e5', values: rows.map((r) => r.hours) }]}
-              extra={(i) => [`${rows[i].sessions} session${rows[i].sessions === 1 ? '' : 's'} · ${rows[i].testers} tester${rows[i].testers === 1 ? '' : 's'}`]} />
+              extra={(i) => [`${rows[i].sessions} session${rows[i].sessions === 1 ? '' : 's'} · ${rows[i].testers} tester${rows[i].testers === 1 ? '' : 's'}`,
+                sprintsIn(rows[i].week, sprints)].filter(Boolean)} />
             <WeekChart title="Bugs found" note="Reviewed bugs, by severity" weeks={w} kind="stacked" integer
               series={[
                 { key: 'high', label: 'High', color: 'var(--danger)', values: rows.map((r) => r.bugs.high) },

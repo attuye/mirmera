@@ -87,6 +87,10 @@ def update_story(story_id: str, payload: schemas.StoryUpdate, db: DBSession = De
     for field in ("description", "url"):
         if field in changes:
             changes[field] = (changes[field] or "").strip() or None
+    if changes.get("sprint_id"):
+        sprint = db.get(models.Sprint, changes["sprint_id"])
+        if not sprint or sprint.project_id != story.project_id:
+            raise HTTPException(400, "Unknown sprint for this project")
     for field, value in changes.items():
         setattr(story, field, value)
     db.commit()

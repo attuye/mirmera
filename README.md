@@ -138,6 +138,24 @@ risk can belong to several stories. On a story's page:
 Stories from a tracker have **Refresh from Jira/GitHub**; stories written here have **Mark done**. Charters and risks
 show their stories as links everywhere they appear. Deleting a story keeps its risks, charters and sessions.
 
+### Sprints
+
+A sprint is a name, its dates (the end day included), an optional goal and the stories planned for it. Open
+**Plan → Sprints**: the new-sprint form suggests the next name and dates after the last sprint. A story is in one sprint
+at a time; adding it to the next sprint moves it there (carried over). Pick a story's sprint on its page too, and filter
+the Stories page by sprint.
+
+A sprint's page answers "what did we test this sprint?" with the whole answer, not just the plan:
+
+- **What's left** in its stories (the same items as each story's page), stories not done once the sprint has ended, and
+  **high risks not explored in these dates**, whether a story here names them or not.
+- **Testing in these dates**: sessions, time and bugs **under the sprint's stories** and **outside them**, with the
+  charters tested outside the plan listed, since that is often where the surprises are.
+- **Report** and **Coverage** open those pages for the sprint's dates; both also have a **Sprint** picker next to their
+  periods. **Trends** stays weekly, with each week's sprint in the testing-time tooltip and the table.
+
+Deleting a sprint keeps its stories, outside any sprint.
+
 ### Regression tests from a bug
 
 The recorded browser also records your actions: clicks, typing, selects,
@@ -372,6 +390,7 @@ This is the Phase 1 scaffold from the scoping discussion:
 - ✅ Test report (Summary and Full views, optional AI summary), coverage map, test-idea nudges
 - ✅ Import specs, diffs and past bugs: GitHub pull requests and issues, Jira issues, local git diffs, files
 - ✅ User stories: import from Jira or GitHub, link risks and charters, see the testing under each and what is left
+- ✅ Sprints: dates and stories, everything tested in those dates (inside and outside the plan), report and coverage per sprint
 - ✅ Notifications: Telegram and Slack messages for fixes that didn't hold, regression problems and high bugs
 
 Not yet built:

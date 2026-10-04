@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton } from '../components/ui'
-import { api, StorySummary } from '../api/client'
+import { api, SprintSummary, StorySummary } from '../api/client'
 import { useProject, useProjectPath } from '../project'
 
 type Mode = 'import' | 'write'
@@ -105,11 +105,17 @@ export default function Stories() {
   const navigate = useNavigate()
   const [stories, setStories] = useState<StorySummary[] | null>(null)
   const [show, setShow] = useState<Show>('open')
+  const [sprints, setSprints] = useState<SprintSummary[]>([])
+  const [sprint, setSprint] = useState('')  // '' every sprint, 'none' no sprint, or a sprint id
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => { api.listStories(project.id).then(setStories).catch((e) => setError(errorText(e))) }, [project.id])
-  const shown = (stories ?? []).filter((s) => show === 'all' || (show === 'done') === s.closed)
-  const count = (which: Show) => (stories ?? []).filter((s) => which === 'all' || (which === 'done') === s.closed).length
+  useEffect(() => {
+    api.listStories(project.id).then(setStories).catch((e) => setError(errorText(e)))
+    api.listSprints(project.id).then(setSprints).catch(() => {})
+  }, [project.id])
+  const inSprint = (s: StorySummary) => !sprint || (sprint === 'none' ? !s.sprint : s.sprint?.id === sprint)
+  const shown = (stories ?? []).filter((s) => inSprint(s) && (show === 'all' || (show === 'done') === s.closed))
+  const count = (which: Show) => (stories ?? []).filter((s) => inSprint(s) && (which === 'all' || (which === 'done') === s.closed)).length
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
@@ -137,6 +143,13 @@ export default function Stories() {
                 }}>{s === 'open' ? 'Open' : s === 'done' ? 'Done' : 'All'} {count(s)}</button>
               ))}
             </div>
+            {sprints.length > 0 && (
+              <select aria-label="Sprint" value={sprint} onChange={(e) => setSprint(e.target.value)} style={{ ...input, width: 'auto', fontSize: 12, padding: '4px 8px' }}>
+                <option value="">Every sprint</option>
+                {sprints.map((sp) => <option key={sp.id} value={sp.id}>{sp.name}{sp.state === 'current' ? ' (current)' : ''}</option>)}
+                <option value="none">No sprint</option>
+              </select>
+            )}
           </div>
           {stories && shown.length === 0 && (
             <p style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
@@ -155,6 +168,7 @@ export default function Stories() {
                   <span>{s.risks} risk{s.risks === 1 ? '' : 's'}</span>
                   <span>{s.charters} charter{s.charters === 1 ? '' : 's'}</span>
                   <span>{s.sessions} session{s.sessions === 1 ? '' : 's'}{s.minutes ? `, ${timeText(s.minutes)}` : ''}</span>
+                  {s.sprint && <Link to={path(`/sprints/${s.sprint.id}`)} style={{ color: 'var(--info)' }}>{s.sprint.name}</Link>}
                   <span>{s.bugs} bug{s.bugs === 1 ? '' : 's'}{s.high_bugs ? <span style={{ color: 'var(--danger)' }}> ({s.high_bugs} high)</span> : ''}</span>
                   <span style={{ marginLeft: 'auto', color: s.left ? 'var(--warning)' : 'var(--text-tertiary)' }}>
                     {s.left ? `${s.left} thing${s.left === 1 ? '' : 's'} left to look at` : 'Nothing obvious left'}

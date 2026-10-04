@@ -130,6 +130,9 @@ def delete_project(db: DBSession, project: models.Project) -> dict:
     stories.unlink_all(db, story_ids=story_ids, risk_ids=risk_ids, charter_ids=charter_ids)
     if story_ids:
         counts["stories"] += db.query(models.Story).filter(models.Story.project_id == pid).delete(synchronize_session=False)
+    sprints = db.query(models.Sprint).filter(models.Sprint.project_id == pid).delete(synchronize_session=False)
+    if sprints:
+        counts["sprints"] += sprints
     if risk_ids:
         counts["risk_changes"] += db.query(models.RiskChange).filter(models.RiskChange.risk_id.in_(risk_ids)).delete(synchronize_session=False)
     if charter_ids or risk_ids:

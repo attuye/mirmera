@@ -3,11 +3,12 @@
  *  story, folded, with "How good the testing was" open. Exports follow the view.
  *  Everything comes from what was recorded; the AI writes none of it. */
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, CircleDot, Clock, Download, Printer, ShieldAlert, type LucideIcon,
 } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
+import SprintPicker from '../components/SprintPicker'
 import ReportSummaryCard from '../components/ReportSummaryCard'
 import { utcDate } from '../components/Evidence'
 import { ErrorLine, errorText, fieldLabel, input, quietButton } from '../components/ui'
@@ -279,8 +280,9 @@ function loadView(): View {
 
 export default function ReportPage() {
   const { project } = useProject()
-  const [since, setSince] = useState('')
-  const [until, setUntil] = useState('')
+  const [params] = useSearchParams()  // a sprint's page links here with its dates
+  const [since, setSince] = useState(params.get('since') ?? '')
+  const [until, setUntil] = useState(params.get('until') ?? '')
   const [custom, setCustom] = useState(false)
   const [view, setViewState] = useState<View>(loadView)
   const [report, setReport] = useState<ProjectReport | null>(null)
@@ -334,6 +336,7 @@ export default function ReportPage() {
           {PRESETS.map(([label, days]) => (
             <button key={label} onClick={() => preset(days)} aria-pressed={activePreset === label} style={chip(activePreset === label)}>{label}</button>
           ))}
+          <SprintPicker projectId={project.id} since={since} until={until} onPick={(sp) => { setCustom(false); setSince(sp.starts_on); setUntil(sp.ends_on) }} />
           <button onClick={() => setCustom(true)} aria-pressed={custom} style={chip(custom)}>Custom…</button>
           {custom && (
             <>
