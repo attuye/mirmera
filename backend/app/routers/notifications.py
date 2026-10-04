@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DBSession
 
 from app import models, notify, schemas
+from app.keys import keys_for
 from app.database import get_db
 
 router = APIRouter(tags=["notifications"])
@@ -19,7 +20,7 @@ def _overview(db: DBSession, project: models.Project) -> dict:
     recent = (db.query(models.NotificationLog).filter_by(project_id=project.id)
               .order_by(models.NotificationLog.created_at.desc()).limit(20).all())
     return {"events": [{"key": k, "label": v} for k, v in notify.EVENTS.items()], "settings": notify.prefs(project),
-            "channels": notify.channel_status(), "recent": recent}
+            "channels": notify.channel_status(keys_for(project)), "recent": recent}
 
 
 @router.get("/projects/{project_id}/notifications", response_model=schemas.NotificationsOut)

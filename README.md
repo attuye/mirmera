@@ -49,8 +49,21 @@ members of its workspace; an id from another workspace answers 404. Roles in a w
 **Account** (bottom of the sidebar) has your name, password, workspaces (add one per client or team, switch, rename)
 and tokens for the Chrome extension. Passwords are hashed with scrypt; sign-in uses an httpOnly cookie, and only a
 hash of each sign-in or extension token is stored. Ten wrong passwords for an email or address lock sign-in for 15
-minutes. Behind HTTPS, set `COOKIE_SECURE=true`. Per-workspace keys come next; until then the tracker, AI and Telegram
-keys in `backend/.env` are shared by every workspace on this server.
+minutes. Behind HTTPS, set `COOKIE_SECURE=true`.
+
+**Workspace keys** (Account → a workspace → **Keys**, or the link at the top of a project's Settings; admins only): each
+workspace enters its own GitHub token, Jira site, email and API token, Claude and OpenAI keys (and an OpenAI-compatible
+address), Telegram bot token and Slack webhook. They are encrypted (Fernet) with the server key before they reach the
+database, and never come back out: the page shows only whether each is set and its last four characters. Filing,
+imports, retests, AI tasks, model checks and notifications in a project all use its workspace's keys, and tokens are
+scrubbed from error messages.
+
+- The server key is `MIRMERA_SECRET_KEY` (any long random phrase), or else a `secret.key` file created in `backend/`
+  on first use. **Back it up with the database**: without it, saved keys can't be read and must be entered again (the
+  page says which). Never commit it; it is in `.gitignore`.
+- Until a workspace sets a key, the server's own value in `backend/.env` is used. When other companies use your
+  Mirmera, set `SERVER_KEYS_FOR_ALL=false` so each workspace must bring its own (and nobody uses yours).
+- Model names, the local model address, GitHub labels and the Jira issue type stay in `backend/.env`, per server.
 
 **Members** (Account → a workspace → **Members**): admins invite by email with a role. The invitation is emailed when
 SMTP is set up (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` in `backend/.env`); either way the
@@ -426,7 +439,7 @@ This is the Phase 1 scaffold from the scoping discussion:
 - ✅ Sprints: dates and stories, everything tested in those dates (inside and outside the plan), report and coverage per sprint
 - ✅ Accounts and workspaces: sign up and in, every route checked against the workspace and role, extension tokens
 - ✅ Members: invitations by email or link, roles, removing and leaving, password reset
+- ✅ Workspace keys: each workspace's GitHub, Jira, AI, Telegram and Slack keys, encrypted, never shown back
 - ✅ Notifications: Telegram and Slack messages for fixes that didn't hold, regression problems and high bugs
 
 Not yet built:
-- Per-workspace keys for GitHub, Jira, AI providers and Telegram (today they're in `backend/.env`, shared)

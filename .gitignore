@@ -6,6 +6,8 @@ __pycache__/
 
 # Secrets
 .env
+# Encrypts workspace keys: back it up with the database, never commit it
+secret.key
 
 # Local data (may contain test data and captured page content)
 *.db

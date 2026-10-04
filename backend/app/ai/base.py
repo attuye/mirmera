@@ -50,18 +50,22 @@ class LLMProvider(ABC):
         """
 
 
-def get_provider(name: str) -> LLMProvider:
+def get_provider(name: str, keys=None) -> LLMProvider:
     """Resolve a provider by name: a project's default_ai_provider,
-    or a per-request override (see routers/charters.py)."""
+    or a per-request override (see routers/charters.py). keys: the workspace's
+    (app.keys.Keys); None means the server's own from backend/.env."""
     if name == "mock":
         from app.ai.mock_provider import MockProvider
         return MockProvider()
+    if keys is None:
+        from app.keys import server_keys
+        keys = server_keys()
     if name == "claude":
         from app.ai.anthropic_provider import AnthropicProvider
-        return AnthropicProvider()
+        return AnthropicProvider(keys.anthropic_api_key)
     if name == "openai":
         from app.ai.openai_provider import OpenAIProvider
-        return OpenAIProvider()
+        return OpenAIProvider(keys.openai_api_key, keys.openai_base_url)
     if name == "local":
         from app.ai.local_provider import LocalProvider
         return LocalProvider()

@@ -254,7 +254,7 @@ class Checks(LLMProvider):
 def test_a_check_that_asserts_the_bug_is_dropped(client, two_bugs, monkeypatch):
     _, passport = two_bugs
     review(client, passport)
-    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: Checks({
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: Checks({
         "test_title": "Passport verification succeeds",
         "assertions": [
             {"kind": "no_failed_requests", "url_contains": "/api/verify", "why": "Verify must not fail"},
@@ -269,7 +269,7 @@ def test_a_check_that_asserts_the_bug_is_dropped(client, two_bugs, monkeypatch):
 def test_a_test_that_only_asserts_the_bug_is_refused(client, two_bugs, monkeypatch):
     _, passport = two_bugs
     review(client, passport)
-    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: Checks({
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: Checks({
         "test_title": "Passport error shows",
         "assertions": [{"kind": "visible", "locator": {"method": "text", "value": "Something went wrong. Please try again later."},
                         "why": "The error appears"}]}))

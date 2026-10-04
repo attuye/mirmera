@@ -10,6 +10,7 @@ import logging
 import httpx
 
 from app import models
+from app.keys import Keys, keys_for
 from app.config import settings
 from app.database import SessionLocal
 
@@ -31,28 +32,28 @@ def prefs(project: models.Project) -> dict:
             "events": p.get("events", DEFAULT_EVENTS)}
 
 
-def channel_status() -> dict:
-    """Whether each channel can send at all (its secret is set), and what to do if not."""
+def channel_status(k: Keys) -> dict:
+    """Whether each channel can send at all (the workspace has its secret), and what to do if not."""
     mock = settings.mock_notifications
     return {
-        "telegram": {"configured": mock or bool(settings.telegram_bot_token),
-                     "problem": None if mock or settings.telegram_bot_token else "Set TELEGRAM_BOT_TOKEN in backend/.env (from @BotFather)."},
-        "slack": {"configured": mock or bool(settings.slack_webhook_url),
-                  "problem": None if mock or settings.slack_webhook_url else "Set SLACK_WEBHOOK_URL in backend/.env (a Slack incoming webhook)."},
+        "telegram": {"configured": mock or bool(k.telegram_bot_token),
+                     "problem": None if mock or k.telegram_bot_token else "Add a Telegram bot token (from @BotFather) under Workspace keys."},
+        "slack": {"configured": mock or bool(k.slack_webhook_url),
+                  "problem": None if mock or k.slack_webhook_url else "Add a Slack incoming webhook under Workspace keys."},
         "mock": mock,
     }
 
 
-def _clean(text: str) -> str:
+def _clean(text: str, k: Keys) -> str:
     """Never let a secret into an error message or the log."""
-    for secret in (settings.telegram_bot_token, settings.slack_webhook_url):
+    for secret in (k.telegram_bot_token, k.slack_webhook_url):
         if secret:
             text = text.replace(secret, "•••")
     return text
 
 
-def _telegram(chat_id: str, text: str) -> None:
-    r = httpx.post(f"{settings.telegram_api_url.rstrip('/')}/bot{settings.telegram_bot_token}/sendMessage",
+def _telegram(token: str, chat_id: str, text: str) -> None:
+    r = httpx.post(f"{settings.telegram_api_url.rstrip('/')}/bot{token}/sendMessage",
                    json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True}, timeout=TIMEOUT)
     if r.status_code >= 400:
         try:
@@ -63,8 +64,8 @@ def _telegram(chat_id: str, text: str) -> None:
         raise RuntimeError(f"Telegram answered {r.status_code}: {why}{hint}")
 
 
-def _slack(text: str) -> None:
-    r = httpx.post(settings.slack_webhook_url, json={"text": text}, timeout=TIMEOUT)
+def _slack(webhook: str, text: str) -> None:
+    r = httpx.post(webhook, json={"text": text}, timeout=TIMEOUT)
     if r.status_code >= 400:
         raise RuntimeError(f"Slack answered {r.status_code}: {r.text[:200]}")
 
@@ -76,7 +77,8 @@ def send(project_id: str, event: str, title: str, detail: str = "", to: str | No
         project = db.get(models.Project, project_id)
         if not project:
             return []
-        p, status = prefs(project), channel_status()
+        k = keys_for(project)
+        p, status = prefs(project), channel_status(k)
         if event != "test" and event not in p["events"]:
             return []
         link = f"{settings.public_app_url.rstrip('/')}/projects/{project_id}{to}" if to and settings.public_app_url else ""
@@ -94,11 +96,11 @@ def send(project_id: str, event: str, title: str, detail: str = "", to: str | No
                     MOCK_SENT.append({"channel": channel, "to": address, "text": text})
                     row.status = "mock"
                 elif channel == "telegram":
-                    _telegram(address, text)
+                    _telegram(k.telegram_bot_token, address, text)
                 else:
-                    _slack(text)
+                    _slack(k.slack_webhook_url, text)
             except Exception as err:
-                row.status, row.error = "failed", _clean(str(err))[:400]
+                row.status, row.error = "failed", _clean(str(err), k)[:400]
                 logger.warning("Notification to %s failed: %s", channel, row.error)
             db.add(row)
             logs.append(row)

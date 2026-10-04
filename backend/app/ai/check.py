@@ -100,11 +100,11 @@ async def _run(task: str, p: LLMProvider) -> str:
     raise ValueError(f"Unknown task {task}")
 
 
-async def check(provider_name: str, task: str) -> dict:
+async def check(provider_name: str, task: str, keys=None) -> dict:
     started = time.monotonic()
     base = {"provider": provider_name, "task": task}
     try:
-        p = Counting(get_provider(provider_name))
+        p = Counting(get_provider(provider_name, keys))
     except ProviderError as err:
         return {**base, "result": "failed", "seconds": 0.0, "detail": str(err)}
     base["model"] = p.model

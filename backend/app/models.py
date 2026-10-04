@@ -2,7 +2,7 @@
 import uuid
 from app.timeutil import utcnow
 
-from sqlalchemy import Column, Date, String, DateTime, ForeignKey, Text, Float, JSON, Boolean, Integer, Table
+from sqlalchemy import Column, Date, String, DateTime, ForeignKey, Text, Float, JSON, Boolean, Integer, Table, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -48,6 +48,21 @@ class Membership(Base):
 
     workspace = relationship("Workspace", back_populates="memberships")
     user = relationship("User", back_populates="memberships")
+
+
+class WorkspaceKey(Base):
+    """A workspace's own key for GitHub, Jira, an AI provider, Telegram or Slack,
+    encrypted with the server key (see app/keys.py)."""
+    __tablename__ = "workspace_keys"
+    __table_args__ = (UniqueConstraint("workspace_id", "name"),)
+    id = Column(String, primary_key=True, default=gen_id)
+    workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)  # one of app.keys.NAMES
+    value = Column(Text, nullable=False)  # Fernet token, never the plain value
+    updated_by = Column(String, ForeignKey("users.id"), nullable=True)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    updater = relationship("User")
 
 
 class Invitation(Base):

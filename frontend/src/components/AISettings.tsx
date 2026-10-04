@@ -10,7 +10,8 @@ const RESULT: Record<AICheckResult['result'], { label: string; fg: string; bg: s
   failed: { label: 'Failed', fg: 'var(--danger)', bg: 'var(--danger-bg)' },
 }
 
-export default function AISettings({ defaultProvider, choices, onDefault, onChoices }: {
+export default function AISettings({ projectId, defaultProvider, choices, onDefault, onChoices }: {
+  projectId?: string  // check providers with this project's workspace keys
   defaultProvider: string
   choices: Record<string, string>
   onDefault: (p: string) => void
@@ -23,7 +24,7 @@ export default function AISettings({ defaultProvider, choices, onDefault, onChoi
   const [error, setError] = useState<string | null>(null)
   const small = { ...input, padding: '5px 8px', fontSize: 12.5 }
 
-  useEffect(() => { api.aiOverview().then(setOverview).catch((e) => setError(errorText(e))) }, [])
+  useEffect(() => { api.aiOverview(projectId).then(setOverview).catch((e) => setError(errorText(e))) }, [projectId])
   if (!overview) return error ? <div role="alert" style={{ color: 'var(--danger)', fontSize: 12.5 }}>{error}</div> : null
   const status = Object.fromEntries(overview.providers.map((p) => [p.name, p]))
 
@@ -32,7 +33,7 @@ export default function AISettings({ defaultProvider, choices, onDefault, onChoi
     for (const t of overview!.tasks) {
       setRunning(t.key)
       try {
-        const r = await api.aiCheck(checking, t.key)
+        const r = await api.aiCheck(checking, t.key, projectId)
         setResults((prev) => ({ ...prev, [t.key]: r }))
       } catch (e) { setError(errorText(e)); break }
     }

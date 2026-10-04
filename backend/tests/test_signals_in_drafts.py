@@ -116,7 +116,7 @@ def bug_with_signals(client, session):
 
 def test_bug_draft_sees_the_signals_before_the_bug_and_the_page_it_was_on(client, bug_with_signals, monkeypatch):
     provider = Scripted(BUG_DRAFT)
-    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: provider)
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
     drafted = client.post(f"/bugs/{bug_with_signals['id']}/draft", json={}).json()
 
     browser = provider.users[0].split("<browser>\n", 1)[1].split("\n</browser>", 1)[0]
@@ -133,7 +133,7 @@ def test_bug_draft_sees_the_signals_before_the_bug_and_the_page_it_was_on(client
 def test_bug_draft_says_when_the_browser_was_not_used(client, session, monkeypatch):
     bug = client.post(f"/sessions/{session['id']}/bugs", json={"title": "Typo on landing page"}).json()
     provider = Scripted(BUG_DRAFT)
-    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: provider)
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
     client.post(f"/bugs/{bug['id']}/draft", json={})
     assert f"<browser>\n{NOT_USED}\n</browser>" in provider.users[0]
 
@@ -160,7 +160,7 @@ def test_debrief_draft_gets_the_whole_session_recording(client, session, monkeyp
     add_evidence(sid, "console_error", "Upload widget failed", start, count=4)
     add_evidence(sid, "trace", "Playwright trace of the session", start)
     provider = Scripted(PROOF)
-    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: provider)
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
     d = client.post(f"/sessions/{sid}/end").json()
 
     browser = provider.users[0].split("<browser>\n", 1)[1]
@@ -173,7 +173,7 @@ def test_debrief_draft_gets_the_whole_session_recording(client, session, monkeyp
 def test_debrief_without_the_browser_says_so(client, session, monkeypatch):
     from tests.test_debrief_proof import PROOF
     provider = Scripted(PROOF)
-    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: provider)
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
     client.post(f"/sessions/{session['id']}/end")
     assert f"<browser>\n{NOT_USED}\n</browser>" in provider.users[0]
 

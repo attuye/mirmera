@@ -41,6 +41,7 @@ const child = spawn(python, ['-m', 'uvicorn', 'app.main:app', '--port', port], {
     MOCK_TRACKERS: 'true',
     MOCK_NOTIFICATIONS: 'true',
     MOCK_EMAIL: 'true',  // invitations and reset links are kept, readable at GET /mock-email
+    MIRMERA_SECRET_KEY: 'e2e-only key for workspace secrets',  // so no secret.key file is written in backend/
     ...(process.env.PW_CHROMIUM_PATH ? { RUNNER_CHROMIUM_PATH: process.env.PW_CHROMIUM_PATH } : {}),
   },
 })
