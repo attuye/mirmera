@@ -48,7 +48,7 @@ def ended(client, project, risks):
 
 def suggest(client, session, provider=None, monkeypatch=None):
     if provider:
-        monkeypatch.setattr("app.ai.routing.get_provider", lambda name: provider)
+        monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
     return client.post(f"/sessions/{session['id']}/risk-updates", json={})
 
 

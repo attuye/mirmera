@@ -1,6 +1,6 @@
 /** A project's settings, saved together. */
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
 import { api, deletedText, Environment, Project, ProjectChanges } from '../api/client'
@@ -131,7 +131,10 @@ export default function ProjectSettings() {
       <Sidebar />
       <main style={{ flex: 1, padding: '32px 40px', maxWidth: 1000 }}>
         <h1 style={{ fontSize: 22, fontWeight: 600, margin: '0 0 4px' }}>Settings</h1>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 22px' }}>For {project.name}.</p>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 22px' }}>
+          For {project.name}. Keys for GitHub, Jira, AI providers, Telegram and Slack belong to the workspace:{' '}
+          <Link to={`/workspaces/${project.org_id}/keys`}>Workspace keys →</Link>
+        </p>
         <form onSubmit={save} aria-label="Project settings">
           <Section title="Project">
             <Field id="s-name" label="Name">
@@ -161,8 +164,8 @@ export default function ProjectSettings() {
             </div>
           </Section>
 
-          <Section title="AI" intro="Which AI does what. Cheap tasks can run on a local model while the ones that need judgement use a stronger one. Keys and model names stay in backend/.env.">
-            <AISettings defaultProvider={form.default_ai_provider} choices={form.ai_task_providers}
+          <Section title="AI" intro="Which AI does what. Cheap tasks can run on a local model while the ones that need judgement use a stronger one. API keys are in Workspace keys (link at the top); model names stay in backend/.env.">
+            <AISettings projectId={project.id} defaultProvider={form.default_ai_provider} choices={form.ai_task_providers}
               onDefault={(default_ai_provider) => set({ default_ai_provider })} onChoices={(ai_task_providers) => set({ ai_task_providers })} />
           </Section>
 

@@ -12,7 +12,7 @@ def asked(monkeypatch):
     """Records which provider names were asked for; every one answers like the mock."""
     names = []
 
-    def fake(name):
+    def fake(name, keys=None):
         names.append(name)
         return MockProvider()
     monkeypatch.setattr("app.ai.routing.get_provider", fake)
@@ -81,14 +81,14 @@ class Flaky(LLMProvider):
 
 @pytest.mark.parametrize("bad, result", [(1, "retried"), (2, "failed")])
 def test_a_check_says_when_the_first_reply_was_unusable(client, monkeypatch, bad, result):
-    monkeypatch.setattr("app.ai.check.get_provider", lambda name: Flaky(bad))
+    monkeypatch.setattr("app.ai.check.get_provider", lambda name, keys=None: Flaky(bad))
     r = client.post("/ai/check", json={"provider": "local", "task": "bug_report"}).json()
     assert r["result"] == result and r["model"] == "flaky-1"
     assert ("second worked" in r["detail"]) if result == "retried" else ("No JSON" in r["detail"])
 
 
 def test_a_provider_that_is_not_set_up_fails_with_the_reason(client, monkeypatch):
-    def missing(name):
+    def missing(name, keys=None):
         raise ProviderNotConfigured("Set ANTHROPIC_API_KEY in backend/.env to use the claude provider")
     monkeypatch.setattr("app.ai.check.get_provider", missing)
     r = client.post("/ai/check", json={"provider": "claude", "task": "debrief"}).json()

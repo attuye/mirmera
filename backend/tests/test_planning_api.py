@@ -42,8 +42,8 @@ def test_artifact_is_saved_even_when_the_summary_fails(client, project, monkeypa
     #     async def summarize_artifact(self, raw, kind):
     #         raise RuntimeError("no API key")
 
-    # monkeypatch.setattr("app.ai.routing.get_provider", lambda name: Broken())
-    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: BrokenProvider())
+    # monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: Broken())
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: BrokenProvider())
     r = client.post(f"/projects/{project['id']}/artifacts",
                     json={"type": "spec", "label": "spec.md", "raw_content": "Coupons survive FX"})
     assert r.status_code == 200

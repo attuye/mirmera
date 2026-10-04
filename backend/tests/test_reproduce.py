@@ -56,7 +56,7 @@ def finished(client, run, timeout=120.0):
 
 def scripted(monkeypatch, steps, **kw):
     provider = Scripted(steps, **kw)
-    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: provider)
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
     return provider
 
 
@@ -239,7 +239,7 @@ def replaying(client, bug, **body):
 
 def test_replaying_the_known_steps_reproduces_without_the_ai(client, recorded_bug, monkeypatch):
     monkeypatch.setenv("MIRMERA_SECRET_PASSWORD", "s3cret-pass")
-    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: NoAI())
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: NoAI())
     run = finished(client, replaying(client, recorded_bug, runs=2))
     assert run["status"] == "reproduced", run["detail"]
     kinds = [s["kind"] for s in run["steps"]]

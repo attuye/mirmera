@@ -11,6 +11,7 @@ import tempfile
 _TEST_DB = os.path.join(tempfile.mkdtemp(prefix="mirmera-tests-"), "test.db")
 os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB}"
 os.environ["DEFAULT_AI_PROVIDER"] = "mock"
+os.environ["MIRMERA_SECRET_KEY"] = "test-only key for workspace secrets"  # never writes secret.key
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

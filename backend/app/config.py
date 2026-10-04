@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     smtp_starttls: bool = True
     mock_email: bool = False  # keep emails in memory instead of sending (tests)
 
+    # Workspace keys (GitHub, Jira, AI, Telegram, Slack) are encrypted with this. Any long
+    # random phrase; without it, one is generated into SECRET_KEY_FILE on first use.
+    mirmera_secret_key: str | None = None
+    secret_key_file: str = "./secret.key"
+    # Workspaces without their own key use the keys below in this file. Set false when other
+    # companies use your Mirmera, so each workspace must bring its own.
+    server_keys_for_all: bool = True
+
     # Frontend origins allowed to call the API, comma-separated.
     cors_origins: str = "http://localhost:5173"
 

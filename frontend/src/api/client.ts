@@ -725,6 +725,11 @@ export interface ApiToken { id: string; label: string | null; created_at: string
 export interface Member { user_id: string; name: string; email: string; role: Role; joined_at: string }
 export interface PendingInvitation { id: string; email: string; role: Role; created_at: string; expires_at: string; expired: boolean; invited_by: string | null }
 export interface Members { workspace: { id: string; name: string }; members: Member[]; invitations: PendingInvitation[]; email_configured: boolean }
+export interface WorkspaceKey {
+  name: string; label: string; group: string; secret: boolean; hint: string
+  set: boolean; shown: string | null; unreadable: boolean; updated_at: string | null; updated_by: string | null; server_fallback: boolean
+}
+export interface WorkspaceKeys { keys: WorkspaceKey[]; server_keys_for_all: boolean }
 export interface InvitationView { workspace_name: string; email: string; role: Role; invited_by: string | null; has_account: boolean }
 
 // ---- User stories ---------------------------------------------------------------
@@ -923,9 +928,12 @@ export const api = {
   getReport: (projectId: string, since?: string, until?: string) =>
     request<ProjectReport>(`/projects/${projectId}/report${periodQuery(since, until)}`),
   listRetests: (projectId: string) => request<Retest[]>(`/projects/${projectId}/retests`),
-  aiOverview: () => request<AIOverview>('/ai'),
-  aiCheck: (provider: string, task: string) =>
-    request<AICheckResult>('/ai/check', { method: 'POST', body: JSON.stringify({ provider, task }) }),
+  aiOverview: (projectId?: string) => request<AIOverview>(`/ai${projectId ? `?project_id=${projectId}` : ''}`),
+  aiCheck: (provider: string, task: string, projectId?: string) =>
+    request<AICheckResult>('/ai/check', { method: 'POST', body: JSON.stringify({ provider, task, project_id: projectId }) }),
+  workspaceKeys: (workspaceId: string) => request<WorkspaceKeys>(`/workspaces/${workspaceId}/keys`),
+  saveWorkspaceKeys: (workspaceId: string, values: Record<string, string>) =>
+    request<WorkspaceKeys>(`/workspaces/${workspaceId}/keys`, { method: 'PUT', body: JSON.stringify({ values }) }),
   listProjects: () => request<ProjectSummary[]>('/projects'),
   archiveProject: (projectId: string) => request<Project>(`/projects/${projectId}/archive`, { method: 'POST' }),
   unarchiveProject: (projectId: string) => request<Project>(`/projects/${projectId}/unarchive`, { method: 'POST' }),

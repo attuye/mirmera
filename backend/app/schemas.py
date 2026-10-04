@@ -1485,6 +1485,7 @@ class AIOverview(BaseModel):
 class AICheckRequest(BaseModel):
     provider: str
     task: str
+    project_id: Optional[str] = None  # check with this project's workspace keys
 
 
 class AICheckResult(BaseModel):
@@ -1784,3 +1785,14 @@ class ForgotPassword(BaseModel):
 class ResetPassword(BaseModel):
     token: str = Field(max_length=200)
     password: str = Field(max_length=200)
+
+
+# ---- Workspace keys ----------------------------------------------------------------------
+
+class WorkspaceKeysIn(BaseModel):
+    values: dict[str, Optional[str]] = Field(default={}, max_length=20)  # name -> value; empty removes
+
+
+class WorkspaceKeysOut(BaseModel):
+    keys: list[dict]  # [{"name", "label", "group", "secret", "hint", "set", "shown", "unreadable", "updated_at", "updated_by", "server_fallback"}]
+    server_keys_for_all: bool

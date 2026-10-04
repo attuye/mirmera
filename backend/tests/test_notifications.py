@@ -83,7 +83,7 @@ def test_channels_say_what_is_missing(client, project, monkeypatch):
     monkeypatch.setattr(settings, "telegram_bot_token", None)
     monkeypatch.setattr(settings, "slack_webhook_url", None)
     ch = client.get(f"/projects/{project['id']}/notifications").json()["channels"]
-    assert ch["telegram"] == {"configured": False, "problem": "Set TELEGRAM_BOT_TOKEN in backend/.env (from @BotFather)."}
+    assert ch["telegram"] == {"configured": False, "problem": "Add a Telegram bot token (from @BotFather) under Workspace keys."}
     assert ch["slack"]["configured"] is False
 
 

@@ -13,12 +13,13 @@ from app.config import settings
 class OpenAIProvider(LLMProvider):
     name = "openai"
 
-    def __init__(self):
-        if not settings.openai_api_key:
-            raise ProviderNotConfigured("Set OPENAI_API_KEY in backend/.env to use the openai provider")
+    def __init__(self, api_key: str | None, base_url: str | None = None):
+        if not api_key:
+            raise ProviderNotConfigured("Add an OpenAI API key under Workspace keys (Account → Keys), "
+                                        "or OPENAI_API_KEY in backend/.env, to use the openai provider")
         self.model = settings.openai_model
-        # An empty OPENAI_BASE_URL= line in .env means "use OpenAI itself".
-        self.client = AsyncOpenAI(api_key=settings.openai_api_key, base_url=settings.openai_base_url or None)
+        # An empty base URL means "use OpenAI itself".
+        self.client = AsyncOpenAI(api_key=api_key, base_url=base_url or None)
 
     async def complete(self, system, user, *, max_tokens=2000, schema=None, task=None) -> str:
         try:

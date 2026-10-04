@@ -274,7 +274,7 @@ def test_invented_numbers_are_refused(client, project, session, monkeypatch):
     assert ungrounded_numbers("7 high bugs", ["2 high"]) == ["7"]
     reviewed_high_bug(client, session)
     fake = Inventive()
-    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: fake)
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: fake)
     r = client.post(f"/projects/{project['id']}/report/summary", json={})
     assert r.status_code == 502 and "numbers that are not in the report (7, 99)" in r.json()["detail"]
     assert fake.calls == 2  # one retry, told which numbers were invented
@@ -290,6 +290,6 @@ def test_basis_keeps_only_real_fact_lines(client, project, session, monkeypatch)
                     '"basis": ["At a glance: 1 high bug still open: Checkout total wrong", "Something the AI imagined"]}')
 
     reviewed_high_bug(client, session)
-    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: Loose())
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: Loose())
     draft = client.post(f"/projects/{project['id']}/report/summary", json={}).json()
     assert draft["basis"] == ["At a glance: 1 high bug still open: Checkout total wrong"]

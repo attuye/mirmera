@@ -25,6 +25,7 @@ import { AuthProvider, RequireAuth } from './auth'
 import SignIn from './pages/SignIn'
 import Account from './pages/Account'
 import MembersPage from './pages/MembersPage'
+import KeysPage from './pages/KeysPage'
 import InvitePage from './pages/InvitePage'
 import { ForgotPassword, ResetPassword } from './pages/PasswordPages'
 
@@ -47,6 +48,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/" element={<Home />} />
         <Route path="/account" element={<Account />} />
         <Route path="/workspaces/:workspaceId/members" element={<MembersPage />} />
+        <Route path="/workspaces/:workspaceId/keys" element={<KeysPage />} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/projects/:projectId" element={<ProjectLayout />}>
           <Route index element={<Navigate to="dashboard" replace />} />

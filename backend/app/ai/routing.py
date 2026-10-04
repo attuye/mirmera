@@ -32,16 +32,18 @@ def provider_name_for(project, task: str, override: str | None = None) -> str:
 def provider_for(project, task: str, override: str | None = None) -> LLMProvider:
     """The provider for this task in this project: a request's override, else the
     task's own choice, else the project default."""
-    return get_provider(provider_name_for(project, task, override))
+    from app.keys import keys_for
+    name = provider_name_for(project, task, override)
+    return get_provider(name, keys_for(project) if name in ("claude", "openai") else None)
 
 
-def provider_status() -> list[dict]:
+def provider_status(keys=None) -> list[dict]:
     """Every provider, whether it is set up (an API key, for example) and its model.
     A local model that isn't running only shows up when it is called."""
     out = []
     for name in PROVIDER_NAMES:
         try:
-            p = get_provider(name)
+            p = get_provider(name, keys)
             out.append({"name": name, "configured": True, "model": p.model, "problem": None})
         except ProviderNotConfigured as err:
             out.append({"name": name, "configured": False, "model": None, "problem": str(err)})
