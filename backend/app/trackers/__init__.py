@@ -24,16 +24,20 @@ def missing_settings(name: str, project: models.Project) -> list[str]:
     return [k for k, v in needed.items() if not v]
 
 
-def get_tracker(name: str, project: models.Project, transport=None) -> IssueTracker:
+def get_tracker(name: str, project: models.Project, transport=None, target: str | None = None) -> IssueTracker:
+    """target: a repo or project key other than the project's own (an issue filed before it changed)."""
     missing = missing_settings(name, project)
+    if target:  # the project's own target doesn't matter then
+        missing = [m for m in missing if not m.startswith("the project")]
     if missing:
         raise TrackerNotConfigured(f"{name} is not set up yet. Missing: {', '.join(missing)}.")
+    target = target or (project.github_repo if name == "github" else project.jira_project_key)
     if settings.mock_trackers:
         from app.trackers.mock import MockTracker
-        return MockTracker(name, project.github_repo if name == "github" else project.jira_project_key)
+        return MockTracker(name, target)
     if name == "github":
         from app.trackers.github import GitHubTracker
-        return GitHubTracker(project.github_repo, settings.github_token, settings.github_api_url, transport=transport)
+        return GitHubTracker(target, settings.github_token, settings.github_api_url, transport=transport)
     from app.trackers.jira import JiraTracker
     return JiraTracker(settings.jira_base_url, settings.jira_email, settings.jira_api_token,
-                       project.jira_project_key, settings.jira_issue_type, transport=transport)
+                       target, settings.jira_issue_type, transport=transport)

@@ -33,6 +33,10 @@ def _check_bugs_idle(db: DBSession, bug_ids: list[str]) -> None:
                                                    models.IsolationRun.status == "running").all()
     if any(r.id in isolate.ACTIVE for r in runs):
         raise BusyError("A bug here is being isolated. Cancel it or let it finish first.")
+    from app.regression import retest
+    runs = db.query(models.Retest.id).filter(models.Retest.bug_id.in_(bug_ids), models.Retest.outcome == "running").all()
+    if any(r.id in retest.ACTIVE for r in runs):
+        raise BusyError("A bug here is being retested after its issue closed. Let it finish first.")
 
 
 def _check_sessions_idle(session_ids: list[str]) -> None:
@@ -44,6 +48,9 @@ def _check_sessions_idle(session_ids: list[str]) -> None:
 def _delete_bugs(db: DBSession, bug_ids: list[str], counts: Counter) -> None:
     if not bug_ids:
         return
+    retests = db.query(models.Retest).filter(models.Retest.bug_id.in_(bug_ids)).delete(synchronize_session=False)
+    if retests:  # only listed when there were any
+        counts["retests"] += retests
     for model in (models.RegressionTest, models.ReproductionRun, models.IsolationRun, models.BugFiling):
         counts[model.__tablename__] += db.query(model).filter(model.bug_id.in_(bug_ids)).delete(synchronize_session=False)
     # Screenshots taken when a bug was logged stay in the session's evidence.
@@ -109,6 +116,9 @@ def delete_project(db: DBSession, project: models.Project) -> dict:
     _delete_sessions(db, session_ids, counts)
     counts["suite_runs"] += db.query(models.RegressionSuiteRun).filter(
         models.RegressionSuiteRun.project_id == pid).delete(synchronize_session=False)
+    retests = db.query(models.Retest).filter(models.Retest.project_id == pid).delete(synchronize_session=False)
+    if retests:
+        counts["retests"] += retests
     risk_ids = [r.id for r in db.query(models.Risk.id).filter(models.Risk.project_id == pid)]
     if risk_ids:
         counts["risk_changes"] += db.query(models.RiskChange).filter(models.RiskChange.risk_id.in_(risk_ids)).delete(synchronize_session=False)

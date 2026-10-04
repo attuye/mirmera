@@ -52,9 +52,17 @@ class GitHubTracker(IssueTracker):
             body["labels"] = labels
         return self._issue(await self._call("POST", f"/repos/{self.target}/issues", json=body))
 
-    async def comment(self, key: str, blocks: list[Block]) -> str:
+    @staticmethod
+    def _number(key: str) -> str:
         number = key.lstrip("#")
         if not number.isdigit():
             raise TrackerError(f"'{key}' is not a GitHub issue number")
+        return number
+
+    async def issue(self, key: str) -> TrackerIssue:
+        return self._issue(await self._call("GET", f"/repos/{self.target}/issues/{self._number(key)}"))
+
+    async def comment(self, key: str, blocks: list[Block]) -> str:
+        number = self._number(key)
         await self._call("POST", f"/repos/{self.target}/issues/{number}/comments", json={"body": to_markdown(blocks)})
         return f"https://github.com/{self.target}/issues/{number}"

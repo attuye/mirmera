@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from app.ai.base import ProviderError, ProviderNotConfigured, UnknownProvider
 from app.config import settings
 from app.database import Base, add_missing_columns, apply_renames, engine
-from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension, isolate, suite, ai
+from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension, isolate, suite, retests, ai
 from app.runner import RunnerConflict, RunnerUnavailable, manager as runner_manager
 from app.trackers import TrackerError, TrackerNotConfigured, UnknownTracker
 
@@ -20,7 +20,13 @@ for column in add_missing_columns():  # adds new columns to existing tables
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    poller = None
+    if settings.retest_poll_minutes > 0:  # check closed issues on a timer
+        import asyncio
+        poller = asyncio.create_task(retests.poll_forever(settings.retest_poll_minutes))
     yield
+    if poller:
+        poller.cancel()
     # Close any test browser still open, so no Chromium outlives the server.
     runner_manager.stop_all()
 
@@ -93,6 +99,7 @@ app.include_router(regression.router)
 app.include_router(reproduce.router)
 app.include_router(isolate.router)
 app.include_router(suite.router)
+app.include_router(retests.router)
 app.include_router(ai.router)
 
 

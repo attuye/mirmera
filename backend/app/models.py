@@ -329,6 +329,10 @@ class BugFiling(Base):
     issue_url = Column(String, nullable=False)
     attachments = Column(JSON, default=list)  # file names attached in the tracker
     created_at = Column(DateTime, default=utcnow)
+    # What "Check closed issues" saw last: a retest runs when this goes from open to closed.
+    issue_closed = Column(Boolean, nullable=True)  # None: never checked (counts as open)
+    issue_status = Column(String, nullable=True)  # the tracker's own word: "closed", "Done"...
+    status_checked_at = Column(DateTime, nullable=True)
 
     bug = relationship("Bug", back_populates="filings")
 
@@ -415,5 +419,29 @@ class RegressionSuiteRun(Base):
     results = Column(JSON, default=list)  # [{"bug_id", "bug_title", "test_id", "known_failing", "outcome", "duration_ms", "detail"}]
     detail = Column(Text, nullable=True)
     cancel_requested = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=utcnow)
+    finished_at = Column(DateTime, nullable=True)
+
+
+class Retest(Base):
+    """A bug's regression test replayed because its issue was closed, and the
+    comment Mirmera left on the issue with the result. One per close: an issue
+    reopened and closed again is retested again."""
+    __tablename__ = "retests"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    bug_id = Column(String, ForeignKey("bugs.id"), nullable=False, index=True)
+    filing_id = Column(String, ForeignKey("bug_filings.id"), nullable=False, index=True)
+    tracker = Column(String, nullable=False)
+    issue_key = Column(String, nullable=False)
+    issue_url = Column(String, nullable=False)
+    test_id = Column(String, nullable=True)  # None: the bug had no regression test
+    # running | fixed | still_fails | could_not_check | no_test
+    outcome = Column(String, default="running")
+    replay = Column(JSON, nullable=True)  # the replay result, as for a regression test
+    detail = Column(Text, nullable=True)  # what went wrong, in words
+    commented = Column(Boolean, default=False)
+    comment_error = Column(Text, nullable=True)  # why the comment could not be posted
     created_at = Column(DateTime, default=utcnow)
     finished_at = Column(DateTime, nullable=True)
