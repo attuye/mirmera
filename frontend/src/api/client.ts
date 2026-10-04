@@ -661,6 +661,39 @@ export interface Retest {
   finished_at: string | null
 }
 export interface RetestCheck { checked: number; filed: number; retests: Retest[]; problems: string[] }
+// ---- Test report ---------------------------------------------------------------
+
+export type ReportCell = string | { text: string; href: string } | (string | { text: string; href: string })[]
+export type ReportBlock =
+  | { type: 'heading'; level: number; text: string }
+  | { type: 'paragraph'; text: string }
+  | { type: 'bullets'; items: string[] }
+  | { type: 'quote'; text: string; by: string }
+  | { type: 'table'; headers: string[]; rows: ReportCell[][] }
+export interface ProjectReport {
+  project_id: string
+  project_name: string
+  since: string | null
+  until: string | null
+  period: string
+  generated_at: string
+  summary: {
+    sessions: number; tested_seconds: number; testers: number; bugs: number; high: number; medium: number; low: number
+    questions: number; unreviewed: number; filed: number; closed: number; regression_tests: number
+    fix_verified: number; still_fails: number
+  }
+  blocks: ReportBlock[]
+}
+function periodQuery(since?: string, until?: string): string {
+  const q = new URLSearchParams()
+  if (since) q.set('since', since)
+  if (until) q.set('until', until)
+  const s = q.toString()
+  return s ? `?${s}` : ''
+}
+export const reportUrl = (projectId: string, kind: 'md' | 'html', since?: string, until?: string) =>
+  `${BASE_URL}/projects/${projectId}/report.${kind}${periodQuery(since, until)}`
+
 export const suiteExportUrl = (projectId: string) => `${BASE_URL}/projects/${projectId}/regression-tests/export`
 
 export const api = {
@@ -672,6 +705,8 @@ export const api = {
   suiteHistory: (projectId: string) => request<SuiteRun[]>(`/projects/${projectId}/suite-runs`),
   checkClosedIssues: (projectId: string, base_url?: string) =>
     request<RetestCheck>(`/projects/${projectId}/retests/check`, { method: 'POST', body: JSON.stringify({ base_url }) }),
+  getReport: (projectId: string, since?: string, until?: string) =>
+    request<ProjectReport>(`/projects/${projectId}/report${periodQuery(since, until)}`),
   listRetests: (projectId: string) => request<Retest[]>(`/projects/${projectId}/retests`),
   aiOverview: () => request<AIOverview>('/ai'),
   aiCheck: (provider: string, task: string) =>

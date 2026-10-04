@@ -9,6 +9,7 @@ const NAV = [
   { label: 'Bugs', to: '/bugs' },
   { label: 'Regression', to: '/regression' },
   { label: 'Debriefs', to: '/debriefs' },
+  { label: 'Report', to: '/report' },
   { label: 'Settings', to: '/settings' },
 ]
 
