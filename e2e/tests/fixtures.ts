@@ -5,7 +5,7 @@ export { expect }
 
 // API calls that are allowed to fail because the page expects them to:
 // asking for a product model before one has been built returns 404.
-const EXPECTED_FAILURES = [/\/product-model$/]
+const EXPECTED_FAILURES = [/\/product-model$/, /\/artifacts\/import$/]  // a missing product model; an import that says what to fix
 
 /** Small wrapper for setting up data through the API, so each test only
  *  drives the UI for the part it is actually testing. */

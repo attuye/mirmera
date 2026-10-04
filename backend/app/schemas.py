@@ -141,11 +141,25 @@ class ArtifactCreate(BaseModel):
     file_ref: Optional[str] = None
 
 
+class ArtifactImport(BaseModel):
+    """Where to import from. github_pr: ref. github_issues: labels. jira_issues: jql.
+    git_diff: repo_path, base, head (a repository on the computer running Mirmera)."""
+    source: Literal["github_pr", "github_issues", "jira_issues", "git_diff"]
+    ref: str = ""
+    labels: str = "bug"
+    jql: str = ""
+    limit: int = Field(default=50, ge=1, le=100)
+    repo_path: str = ""
+    base: str = "main"
+    head: str = "HEAD"
+
+
 class ArtifactOut(BaseModel):
     id: str
     project_id: str
     type: str
     label: str
+    file_ref: Optional[str] = None  # where an imported artifact came from
     ai_summary: Optional[str] = None
     created_at: datetime
 

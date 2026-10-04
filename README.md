@@ -68,6 +68,19 @@ Upgrading an existing `mirmera.db`: on start the backend renames the old
 `products` table to `projects` (and `product_id` columns to `project_id`),
 keeping all data. Your old demo product shows up as a project.
 
+### Importing specs, diffs and past bugs
+
+On the Risks page, **Add an artifact** has two tabs. **Paste** takes text, or **Load from file** (.md, .txt,
+.diff, .patch). **Import** brings in:
+
+- a **GitHub pull request** (`42`, `owner/repo#42` or its address): title, description and diff, as a Diff;
+- **GitHub issues** with a label (default `bug`), open and closed, as Bug history;
+- **Jira issues** from a JQL query (default: the project's Bugs, newest first), as Bug history;
+- a **git diff** `base...branch` from a repository on the computer running the backend, for work not pushed yet.
+
+Imports use the same `GITHUB_TOKEN` and Jira settings as filing (read access is enough), and the project's repo
+and Jira key from Settings. Very large diffs are cut at 60,000 characters, and the artifact says so.
+
 ### Regression tests from a bug
 
 The recorded browser also records your actions: clicks, typing, selects,
@@ -258,7 +271,14 @@ This is the Phase 1 scaffold from the scoping discussion:
 - ✅ Regression tests: recorded actions -> AI plan -> rendered Playwright test, verified by replay
 - ✅ Reproduction agent: AI drives a browser to reproduce a bug; Mirmera verifies and measures it
 - ✅ Chrome extension: record a session from your everyday browser
+- ✅ Projects: everything belongs to a project with its app address, environments and default tester
+- ✅ Steps to the bug: recorded per bug, editable, and replayed exactly by the regression test
+- ✅ Isolate the bug: replay variations of the steps to find what the bug depends on
+- ✅ AI provider per task, with a model check (e.g. local qwen for debriefs, Claude for bug reports)
+- ✅ Regression page: run every test, keep a history, export them as a Playwright project
+- ✅ Retest when an issue closes: replay the test and comment the result on the issue
+- ✅ Test report (Summary and Full views, optional AI summary), coverage map, test-idea nudges
+- ✅ Import specs, diffs and past bugs: GitHub pull requests and issues, Jira issues, local git diffs, files
 
-Not yet built (Phase 2/3 from the scoping doc):
-- Importing specs, diffs and past bugs from Git, GitHub and Jira as artifacts (currently paste-only)
+Not yet built:
 - Multi-user auth (the `org_id` field is there, but nothing enforces it yet)

@@ -438,8 +438,14 @@ export interface Artifact {
   project_id: string
   type: 'spec' | 'diff' | 'bug_import'
   label: string
+  file_ref: string | null  // where an imported artifact came from
   ai_summary: string | null
   created_at: string
+}
+
+export interface ArtifactImport {
+  source: 'github_pr' | 'github_issues' | 'jira_issues' | 'git_diff'
+  ref?: string; labels?: string; jql?: string; limit?: number; repo_path?: string; base?: string; head?: string
 }
 
 export interface ModelElement {
@@ -868,6 +874,8 @@ export const api = {
     request<Project>(`/projects/${projectId}`, { method: 'PATCH', body: JSON.stringify(changes) }),
 
   listArtifacts: (projectId: string) => request<Artifact[]>(`/projects/${projectId}/artifacts`),
+  importArtifact: (projectId: string, body: ArtifactImport) =>
+    request<Artifact>(`/projects/${projectId}/artifacts/import`, { method: 'POST', body: JSON.stringify(body) }),
   createArtifact: (projectId: string, artifact: { type: Artifact['type']; label: string; raw_content: string }) =>
     request<Artifact>(`/projects/${projectId}/artifacts`, { method: 'POST', body: JSON.stringify(artifact) }),
 

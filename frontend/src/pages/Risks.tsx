@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import { useProject, useProjectPath } from '../project'
 import RiskMatrix, { scoreBand } from '../components/RiskMatrix'
+import ArtifactImport from '../components/ArtifactImport'
 import { RiskHistory } from '../components/RiskUpdates'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
 import {
@@ -195,6 +196,7 @@ function ArtifactsAndModel({ project, artifacts, model, onArtifactAdded, onModel
   const [selected, setSelected] = useState<Set<string>>(new Set(model?.artifact_ids ?? []))
   const [adding, setAdding] = useState(artifacts.length === 0)
   const [draft, setDraft] = useState({ type: 'spec' as Artifact['type'], label: '', raw_content: '' })
+  const [mode, setMode] = useState<'paste' | 'import'>('paste')
   const [busy, setBusy] = useState<'add' | 'build' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -221,6 +223,19 @@ function ArtifactsAndModel({ project, artifacts, model, onArtifactAdded, onModel
     } finally {
       setBusy(null)
     }
+  }
+
+  function imported(a: Artifact) {
+    onArtifactAdded(a)
+    setSelected((prev) => new Set(prev).add(a.id))
+    setAdding(false)
+  }
+
+  /** A text file goes into the paste box; its name becomes the artifact's name. */
+  async function loadFile(file: File) {
+    const text = await file.text()
+    const type: Artifact['type'] = /\.(diff|patch)$/i.test(file.name) ? 'diff' : draft.type
+    setDraft({ type, label: draft.label || file.name, raw_content: text })
   }
 
   async function build() {
@@ -259,6 +274,9 @@ function ArtifactsAndModel({ project, artifacts, model, onArtifactAdded, onModel
                     <span style={{ fontSize: 13, display: 'block' }}>{a.label}</span>
                     <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
                       {{ spec: 'Spec', diff: 'Diff', bug_import: 'Bug history' }[a.type]}
+                      {a.file_ref && (a.file_ref.startsWith('http')
+                        ? <> · <a href={a.file_ref} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>imported ↗</a></>
+                        : ' · imported')}
                     </span>
                   </span>
                 </label>
@@ -269,6 +287,20 @@ function ArtifactsAndModel({ project, artifacts, model, onArtifactAdded, onModel
 
         {adding ? (
           <div style={{ marginTop: artifacts.length ? 14 : 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div role="tablist" aria-label="Add by" style={{ display: 'inline-flex', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', alignSelf: 'flex-start' }}>
+              {(['paste', 'import'] as const).map((m) => (
+                <button key={m} role="tab" aria-selected={mode === m} onClick={() => setMode(m)} style={{
+                  border: 'none', padding: '6px 14px', fontSize: 12.5, cursor: 'pointer', fontFamily: 'var(--font-ui)',
+                  background: mode === m ? 'var(--accent-bg)' : 'transparent', color: mode === m ? 'var(--accent)' : 'var(--text-secondary)',
+                }}>{m === 'paste' ? 'Paste' : 'Import'}</button>
+              ))}
+            </div>
+            {mode === 'import' ? (
+              <>
+                <ArtifactImport project={project} onImported={imported} />
+                {artifacts.length > 0 && <button onClick={() => setAdding(false)} style={{ ...quietButton, alignSelf: 'flex-start' }}>Cancel</button>}
+              </>
+            ) : (<>
             <div style={{ display: 'flex', gap: 8 }}>
               <div style={{ width: 130 }}>
                 <label htmlFor="artifact-type" style={fieldLabel}>Type</label>
@@ -285,7 +317,14 @@ function ArtifactsAndModel({ project, artifacts, model, onArtifactAdded, onModel
               </div>
             </div>
             <div>
-              <label htmlFor="artifact-content" style={fieldLabel}>Content</label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <label htmlFor="artifact-content" style={fieldLabel}>Content</label>
+                <label style={{ fontSize: 11.5, color: 'var(--accent)', cursor: 'pointer' }}>
+                  Load from file
+                  <input type="file" accept=".md,.txt,.diff,.patch,.markdown,.csv,.json" aria-label="Load from file" style={{ display: 'none' }}
+                    onChange={(e) => { const file = e.target.files?.[0]; if (file) loadFile(file); e.target.value = '' }} />
+                </label>
+              </div>
               <textarea id="artifact-content" value={draft.raw_content} onChange={(e) => setDraft({ ...draft, raw_content: e.target.value })}
                 placeholder="Paste the spec text, git diff or bug list"
                 style={{ ...input, height: 140, fontFamily: 'var(--font-mono)', fontSize: 12, resize: 'vertical' }} />
@@ -296,6 +335,7 @@ function ArtifactsAndModel({ project, artifacts, model, onArtifactAdded, onModel
               </button>
               {artifacts.length > 0 && <button onClick={() => setAdding(false)} style={quietButton}>Cancel</button>}
             </div>
+            </>)}
           </div>
         ) : (
           <button onClick={() => setAdding(true)} style={{ ...quietButton, marginTop: 10 }}>Add an artifact</button>

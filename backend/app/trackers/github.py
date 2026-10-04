@@ -31,6 +31,33 @@ class GitHubTracker(IssueTracker):
             raise TrackerError(failure_message("GitHub", r))
         return r.json()
 
+    async def _text(self, path: str, accept: str) -> str:
+        async with httpx.AsyncClient(**self._client_args) as client:
+            try:
+                r = await client.get(path, headers={"Accept": accept})
+            except httpx.HTTPError as err:
+                raise TrackerError(f"Could not reach GitHub: {err}") from err
+        if r.status_code >= 400:
+            raise TrackerError(failure_message("GitHub", r))
+        return r.text
+
+    async def pull_request(self, number: int) -> dict:
+        """Title, description, address and unified diff of one pull request."""
+        pr = await self._call("GET", f"/repos/{self.target}/pulls/{number}")
+        diff = await self._text(f"/repos/{self.target}/pulls/{number}", "application/vnd.github.v3.diff")
+        return {"title": pr["title"], "body": pr.get("body") or "", "url": pr["html_url"], "diff": diff,
+                "state": "merged" if pr.get("merged_at") else pr["state"]}
+
+    async def list_issues(self, labels: list[str], limit: int = 50) -> list[dict]:
+        """Open and closed issues with these labels (any state), newest first; pull requests left out."""
+        params = {"state": "all", "per_page": min(limit, 100), "sort": "created", "direction": "desc"}
+        if labels:
+            params["labels"] = ",".join(labels)
+        items = await self._call("GET", f"/repos/{self.target}/issues", params=params)
+        return [{"key": f"#{i['number']}", "title": i["title"], "status": i["state"], "body": i.get("body") or "",
+                 "url": i["html_url"], "labels": [l["name"] for l in i.get("labels", [])]}
+                for i in items if "pull_request" not in i][:limit]
+
     @staticmethod
     def _issue(item: dict) -> TrackerIssue:
         return TrackerIssue(
