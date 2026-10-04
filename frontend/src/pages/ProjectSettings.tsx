@@ -3,8 +3,9 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
-import { AI_PROVIDERS, api, deletedText, Environment, Project, ProjectChanges } from '../api/client'
+import { api, deletedText, Environment, Project, ProjectChanges } from '../api/client'
 import { useProject } from '../project'
+import AISettings from '../components/AISettings'
 
 interface Form {
   name: string
@@ -16,6 +17,7 @@ interface Form {
   default_tester: string
   github_repo: string
   jira_project_key: string
+  ai_task_providers: Record<string, string>
 }
 
 const toForm = (p: Project): Form => ({
@@ -23,6 +25,7 @@ const toForm = (p: Project): Form => ({
   environments: p.environments.map((e) => ({ ...e })), testing_mission: p.testing_mission ?? '',
   default_ai_provider: p.default_ai_provider, default_tester: p.default_tester ?? '',
   github_repo: p.github_repo ?? '', jira_project_key: p.jira_project_key ?? '',
+  ai_task_providers: { ...p.ai_task_providers },
 })
 
 /** Only what changed, trimmed; "" clears a field on the server. */
@@ -34,6 +37,9 @@ function changes(form: Form, saved: Form): ProjectChanges {
   const envs = form.environments.map((e) => ({ name: e.name.trim(), url: e.url.trim() })).filter((e) => e.name || e.url)
   if (JSON.stringify(envs) !== JSON.stringify(saved.environments)) out.environments = envs
   if ('testing_mission' in out && !out.testing_mission) out.testing_mission = null
+  if (JSON.stringify(Object.entries(form.ai_task_providers).sort()) !== JSON.stringify(Object.entries(saved.ai_task_providers).sort())) {
+    out.ai_task_providers = form.ai_task_providers
+  }
   return out
 }
 
@@ -151,12 +157,12 @@ export default function ProjectSettings() {
               <Field id="s-tester" label="Default tester">
                 <input id="s-tester" value={form.default_tester} onChange={(e) => set({ default_tester: e.target.value })} style={input} placeholder="Your name" maxLength={60} />
               </Field>
-              <Field id="s-provider" label="AI provider">
-                <select id="s-provider" value={form.default_ai_provider} onChange={(e) => set({ default_ai_provider: e.target.value })} style={{ ...input, width: 160 }}>
-                  {AI_PROVIDERS.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </Field>
             </div>
+          </Section>
+
+          <Section title="AI" intro="Which AI does what. Cheap tasks can run on a local model while the ones that need judgement use a stronger one. Keys and model names stay in backend/.env.">
+            <AISettings defaultProvider={form.default_ai_provider} choices={form.ai_task_providers}
+              onDefault={(default_ai_provider) => set({ default_ai_provider })} onChoices={(ai_task_providers) => set({ ai_task_providers })} />
           </Section>
 
           <Section title="Bug trackers" intro="Where this project's bugs are filed. Tokens and site URLs stay in backend/.env.">
