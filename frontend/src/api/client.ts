@@ -25,6 +25,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     }
     throw new Error(detail || `${res.status} ${res.statusText}`)
   }
+  if (res.status === 204) return undefined as T  // no content
   return res.json()
 }
 
@@ -643,6 +644,18 @@ export interface Retest {
   finished_at: string | null
 }
 export interface RetestCheck { checked: number; filed: number; retests: Retest[]; problems: string[] }
+// ---- Test-idea nudges ---------------------------------------------------------------
+
+export interface Nudge {
+  id: string
+  kind: 'problem' | 'risk' | 'idea' | 'field' | 'choice' | 'upload' | 'submit' | 'page' | 'time'
+  title: string
+  why: string
+  heuristic: string
+  suggestions: string[]
+  priority: number
+}
+
 // ---- Coverage map ---------------------------------------------------------------
 
 export type CoverageFlag = 'not_tried' | 'problems_without_bug' | 'stale' | 'one_tester'
@@ -720,6 +733,11 @@ export const api = {
   suiteHistory: (projectId: string) => request<SuiteRun[]>(`/projects/${projectId}/suite-runs`),
   checkClosedIssues: (projectId: string, base_url?: string) =>
     request<RetestCheck>(`/projects/${projectId}/retests/check`, { method: 'POST', body: JSON.stringify({ base_url }) }),
+  listNudges: (sessionId: string) => request<Nudge[]>(`/sessions/${sessionId}/nudges`),
+  dismissNudge: (sessionId: string, nudgeId: string) =>
+    request<void>(`/sessions/${sessionId}/nudges/${nudgeId}/dismiss`, { method: 'POST' }),
+  triedNudge: (sessionId: string, nudgeId: string, note: string) =>
+    request<Note>(`/sessions/${sessionId}/nudges/${nudgeId}/tried`, { method: 'POST', body: JSON.stringify({ note }) }),
   getCoverage: (projectId: string, since?: string) =>
     request<CoverageMap>(`/projects/${projectId}/coverage${since ? `?since=${since}` : ''}`),
   getReport: (projectId: string, since?: string, until?: string) =>

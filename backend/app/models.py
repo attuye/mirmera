@@ -160,6 +160,7 @@ class Session(Base):
     paused_at = Column(DateTime, nullable=True)  # set while paused, null while running
     total_paused_seconds = Column(Float, default=0.0)  # accumulated across all pause/resume cycles
     duration_target_minutes = Column(Float, default=90)
+    dismissed_nudges = Column(JSON, nullable=True)  # test-idea nudge ids hidden for this session
 
     charter = relationship("Charter", back_populates="sessions")
     notes = relationship("Note", back_populates="session", cascade="all, delete-orphan")
