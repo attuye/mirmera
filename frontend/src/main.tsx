@@ -21,6 +21,9 @@ import StoryPage from './pages/StoryPage'
 import SprintsPage from './pages/Sprints'
 import SprintPage from './pages/SprintPage'
 import { ProjectLayout, SessionRedirect, lastProjectId } from './project'
+import { AuthProvider, RequireAuth } from './auth'
+import SignIn from './pages/SignIn'
+import Account from './pages/Account'
 
 /** "/" opens the project used last in this browser, or the Projects page. */
 function Home() {
@@ -31,8 +34,12 @@ function Home() {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>
+      <AuthProvider>
       <Routes>
+        <Route path="/signin" element={<SignIn />} />
+        <Route element={<RequireAuth />}>
         <Route path="/" element={<Home />} />
+        <Route path="/account" element={<Account />} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/projects/:projectId" element={<ProjectLayout />}>
           <Route index element={<Navigate to="dashboard" replace />} />
@@ -58,7 +65,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/sessions/:sessionId" element={<SessionRedirect />} />
         <Route path="/sessions/:sessionId/debrief" element={<SessionRedirect debrief />} />
         <Route path="*" element={<Navigate to="/projects" replace />} />
+        </Route>
       </Routes>
+      </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>,
 )

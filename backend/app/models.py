@@ -13,13 +13,66 @@ def gen_id() -> str:
     return str(uuid.uuid4())
 
 
+class User(Base):
+    """Someone who signs in. Belongs to workspaces through memberships."""
+    __tablename__ = "users"
+    id = Column(String, primary_key=True, default=gen_id)
+    email = Column(String, nullable=False, unique=True, index=True)  # stored lower-case
+    name = Column(String, nullable=False)
+    password_hash = Column(String, nullable=False)  # scrypt, see app/auth.py
+    created_at = Column(DateTime, default=utcnow)
+    last_login_at = Column(DateTime, nullable=True)
+
+    memberships = relationship("Membership", back_populates="user", cascade="all, delete-orphan")
+
+
+class Workspace(Base):
+    """A team or company. Its projects, and everything in them, are visible only to its members.
+    Projects keep the workspace id in their org_id column."""
+    __tablename__ = "workspaces"
+    id = Column(String, primary_key=True, default=gen_id)
+    name = Column(String, nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+
+    memberships = relationship("Membership", back_populates="workspace", cascade="all, delete-orphan")
+
+
+class Membership(Base):
+    """A user in a workspace, with a role: owner | admin | tester | viewer."""
+    __tablename__ = "memberships"
+    id = Column(String, primary_key=True, default=gen_id)
+    workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    role = Column(String, nullable=False, default="tester")
+    created_at = Column(DateTime, default=utcnow)
+
+    workspace = relationship("Workspace", back_populates="memberships")
+    user = relationship("User", back_populates="memberships")
+
+
+class AuthToken(Base):
+    """A signed-in browser (kind "session", sent as a cookie) or an API token for the
+    Chrome extension (kind "api", sent as a Bearer header). Only a hash is stored."""
+    __tablename__ = "auth_tokens"
+    id = Column(String, primary_key=True, default=gen_id)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    token_hash = Column(String, nullable=False, unique=True, index=True)  # sha256 of the token
+    kind = Column(String, nullable=False, default="session")  # "session" | "api"
+    label = Column(String, nullable=True)  # for API tokens: "Chrome on my laptop"
+    created_at = Column(DateTime, default=utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=True)  # None: until revoked (API tokens)
+
+    user = relationship("User")
+
+
 class Project(Base):
     """What a tester works on: one app or product under test. Everything else
     (specs, the product model, risks, charters, and through them sessions and
     bugs) belongs to a project. Called "product" before the projects step."""
     __tablename__ = "projects"
     id = Column(String, primary_key=True, default=gen_id)
-    org_id = Column(String, nullable=False, index=True)  # multi-tenancy hook from day one
+    org_id = Column(String, nullable=False, index=True)  # the workspace it belongs to (Workspace.id)
     name = Column(String, nullable=False)
     created_at = Column(DateTime, default=utcnow)
     description = Column(Text, nullable=True)  # one line shown on the project card

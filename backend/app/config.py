@@ -6,6 +6,13 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite:///./mirmera.db"
 
+    # Accounts. Anyone can create an account and workspace unless ALLOW_SIGNUPS=false
+    # (then only invited people can join, once invitations exist).
+    allow_signups: bool = True
+    session_days: int = 30  # a browser stays signed in this long after its last use
+    # Set true when Mirmera is served over HTTPS, so the sign-in cookie is never sent in clear.
+    cookie_secure: bool = False
+
     # Frontend origins allowed to call the API, comma-separated.
     cors_origins: str = "http://localhost:5173"
 

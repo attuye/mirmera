@@ -5,6 +5,7 @@ import Sidebar from '../components/Sidebar'
 import { utcDate } from '../components/Evidence'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
 import { api, ProjectSummary } from '../api/client'
+import { useAuth } from '../auth'
 
 function ago(iso: string): string {
   const minutes = Math.round((Date.now() - utcDate(iso).getTime()) / 60000)
@@ -18,6 +19,7 @@ function ago(iso: string): string {
 
 function NewProjectForm({ onCancel }: { onCancel?: () => void }) {
   const navigate = useNavigate()
+  const { workspace } = useAuth()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [appUrl, setAppUrl] = useState('')
@@ -30,7 +32,7 @@ function NewProjectForm({ onCancel }: { onCancel?: () => void }) {
     setError(null)
     try {
       const p = await api.createProject({
-        name: name.trim(), description: description.trim() || undefined, app_url: appUrl.trim() || undefined,
+        name: name.trim(), description: description.trim() || undefined, app_url: appUrl.trim() || undefined, org_id: workspace?.id,
       })
       navigate(`/projects/${p.id}/dashboard`)
     } catch (err) {
@@ -43,7 +45,7 @@ function NewProjectForm({ onCancel }: { onCancel?: () => void }) {
     <form aria-label="New project" onSubmit={create} style={{
       background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 12, padding: '20px 22px', maxWidth: 560,
     }}>
-      <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 14 }}>New project</div>
+      <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 14 }}>New project{workspace && <span style={{ fontWeight: 400, color: 'var(--text-tertiary)', fontSize: 12.5 }}> in {workspace.name}</span>}</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div>
           <label htmlFor="project-name" style={fieldLabel}>Name</label>
@@ -106,13 +108,16 @@ function ProjectCard({ p }: { p: ProjectSummary }) {
 }
 
 export default function Projects() {
-  const [projects, setProjects] = useState<ProjectSummary[] | null>(null)
+  const { me, workspace, setWorkspace } = useAuth()
+  const canCreate = workspace?.role === 'owner' || workspace?.role === 'admin'
+  const [all, setAll] = useState<ProjectSummary[] | null>(null)
+  const projects = all && all.filter((p) => p.org_id === workspace?.id)
   const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
   const notice = (useLocation().state as { notice?: string } | null)?.notice
 
-  useEffect(() => { api.listProjects().then(setProjects).catch((e) => setError(errorText(e))) }, [])
+  useEffect(() => { api.listProjects().then(setAll).catch((e) => setError(errorText(e))) }, [])
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
@@ -126,12 +131,22 @@ export default function Projects() {
             <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
               One per app you test. Each has its own risks, charters, sessions, bugs and settings.
             </div>
-            <div className="mono" style={{ fontSize: 11, color: 'var(--text-quiet)', marginTop: 6 }}>
-              Mirmera · ምርመራ · investigation
-            </div>
+            {me && me.workspaces.length > 1 ? (
+              <label style={{ display: 'inline-flex', gap: 8, alignItems: 'center', fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8 }}>
+                Workspace
+                <select aria-label="Workspace" value={workspace?.id} onChange={(e) => setWorkspace(e.target.value)}
+                  style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', padding: '4px 8px', fontSize: 12.5 }}>
+                  {me.workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                </select>
+              </label>
+            ) : (
+              <div className="mono" style={{ fontSize: 11, color: 'var(--text-quiet)', marginTop: 6 }}>
+                {workspace ? `${workspace.name} · ` : ''}Mirmera · ምርመራ · investigation
+              </div>
+            )}
             </div>
           </div>
-          {projects && projects.length > 0 && !creating && (
+          {projects && projects.length > 0 && !creating && canCreate && (
             <button onClick={() => setCreating(true)} style={{ ...primaryButton(), fontSize: 13.5, padding: '11px 18px' }}>+ New project</button>
           )}
         </div>
@@ -140,8 +155,10 @@ export default function Projects() {
         {!projects && !error && <div style={{ color: 'var(--text-secondary)' }}>Loading…</div>}
         {projects && projects.length === 0 && (
           <>
-            <p style={{ fontSize: 13.5, color: 'var(--text-secondary)', margin: '0 0 16px' }}>No projects yet. Create one to start testing.</p>
-            <NewProjectForm />
+            <p style={{ fontSize: 13.5, color: 'var(--text-secondary)', margin: '0 0 16px' }}>
+              {canCreate ? 'No projects yet. Create one to start testing.' : 'No projects in this workspace yet. A workspace admin can create one.'}
+            </p>
+            {canCreate && <NewProjectForm />}
           </>
         )}
         {creating && <div style={{ marginBottom: 24 }}><NewProjectForm onCancel={() => setCreating(false)} /></div>}

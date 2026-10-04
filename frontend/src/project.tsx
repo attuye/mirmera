@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import { Link, Navigate, Outlet, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { api, Project } from './api/client'
 import { errorText } from './components/ui'
+import { useAuth } from './auth'
 
 interface ProjectContextValue {
   project: Project
@@ -45,6 +46,10 @@ export function ProjectLayout() {
   const [project, setProject] = useState<Project | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [missing, setMissing] = useState(false)
+  const { workspace, setWorkspace } = useAuth()
+  useEffect(() => {  // the Projects page and the sidebar follow the workspace of the open project
+    if (project && workspace?.id !== project.org_id) setWorkspace(project.org_id)
+  }, [project?.org_id])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!projectId) return
@@ -52,12 +57,12 @@ export function ProjectLayout() {
     api.getProject(projectId)
       .then((p) => { setProject(p); rememberProject(p.id) })
       .catch((e: Error) => {
-        if (e.message === 'Project not found') { setMissing(true); rememberProject(null) } else setError(errorText(e))
+        if (e.message === 'Project not found' || e.message === 'Not found') { setMissing(true); rememberProject(null) } else setError(errorText(e))
       })
   }, [projectId])
 
   if (missing) {
-    return <Centered>This project doesn't exist (it may be from another database). <Link to="/projects">See all projects</Link></Centered>
+    return <Centered>This project doesn't exist, or it's in a workspace you're not a member of. <Link to="/projects">See your projects</Link></Centered>
   }
   if (error) return <Centered><span role="alert" style={{ color: 'var(--danger)' }}>{error}</span></Centered>
   if (!project) return <Centered>Loading project…</Centered>

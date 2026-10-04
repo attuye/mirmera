@@ -26,15 +26,40 @@ def clean_db():
     yield
 
 
+PASSWORD = "correct horse battery"
+
+
+def sign_up(c, name="Attu", email="attu@addisverify.et", workspace="AddisVerify") -> dict:
+    """A new account and workspace; the client keeps the sign-in cookie."""
+    r = c.post("/auth/signup", json={"name": name, "email": email, "password": PASSWORD, "workspace_name": workspace})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+@pytest.fixture(autouse=True)
+def fresh_attempts():
+    from app import auth
+    auth.reset_attempts()
+
+
 @pytest.fixture
-def client():
+def anon():
+    """Not signed in."""
     with TestClient(app) as c:
         yield c
 
 
 @pytest.fixture
+def client():
+    """Signed in as the owner of a workspace."""
+    with TestClient(app) as c:
+        c.me = sign_up(c)
+        yield c
+
+
+@pytest.fixture
 def project(client):
-    return client.post("/projects", json={"name": "ShopFlow", "org_id": "addisverify"}).json()
+    return client.post("/projects", json={"name": "ShopFlow"}).json()
 
 
 @pytest.fixture

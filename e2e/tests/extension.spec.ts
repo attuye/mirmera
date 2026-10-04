@@ -38,6 +38,7 @@ test('chrome extension: record a tab of your own browser into a session', async 
       await popup.getByText('Settings', { exact: true }).click()
       await popup.getByLabel('Mirmera API').fill(API_URL)
       await popup.getByLabel('Mirmera app').fill('http://localhost:5180')
+      await popup.getByLabel('Token').fill(await api.token('Chrome in the e2e run'))
       await popup.getByRole('button', { name: 'Save settings' }).click()
       await popup.getByLabel('Session').selectOption(session.id)
       await popup.getByRole('button', { name: 'Record this tab' }).click()

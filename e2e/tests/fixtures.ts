@@ -17,18 +17,34 @@ export class Api {
     return response.json() as Promise<T>
   }
 
+  private workspace?: string
+
+  /** The test account's own workspace ("AddisVerify"); the accounts spec adds another. */
+  async workspaceId(): Promise<string> {
+    if (!this.workspace) {
+      const me = await this.json<{ workspaces: { id: string; name: string }[] }>(await this.ctx.get('/auth/me'))
+      this.workspace = (me.workspaces.find((w) => w.name === 'AddisVerify') ?? me.workspaces[0]).id
+    }
+    return this.workspace
+  }
+
+  /** An API token, as Account → Chrome extension makes one. */
+  async token(label: string): Promise<string> {
+    return (await this.json<{ token: string }>(await this.ctx.post('/auth/tokens', { data: { label } }))).token
+  }
+
   /** The project most specs share; created on a fresh database. */
   async project(): Promise<{ id: string; name: string }> {
     const projects = await this.json<{ id: string; name: string }[]>(await this.ctx.get('/projects'))
     const shared = projects.find((p) => p.name === 'AddisVerify KYC Platform')
     if (shared) return shared
-    return this.json(await this.ctx.post('/projects', { data: { name: 'AddisVerify KYC Platform', org_id: 'e2e' } }))
+    return this.json(await this.ctx.post('/projects', { data: { name: 'AddisVerify KYC Platform', org_id: await this.workspaceId() } }))
   }
 
   /** A separate project, for specs whose data must not change the shared one
    *  (risk refs like R1 are numbered per project). */
   async newProject(name: string): Promise<{ id: string; name: string }> {
-    return this.json(await this.ctx.post('/projects', { data: { name, org_id: 'e2e' } }))
+    return this.json(await this.ctx.post('/projects', { data: { name, org_id: await this.workspaceId() } }))
   }
 
   async charter(projectId: string, mission: string, riskIds: string[] = []): Promise<{ id: string }> {
@@ -94,7 +110,7 @@ export const test = base.extend<{ api: Api; appErrors: string[] }>({
     { auto: true },
   ],
   api: async ({ playwright }, use) => {
-    const ctx = await playwright.request.newContext({ baseURL: API_URL })
+    const ctx = await playwright.request.newContext({ baseURL: API_URL, storageState: '.e2e-data/signed-in.json' })
     await use(new Api(ctx))
     await ctx.dispose()
   },

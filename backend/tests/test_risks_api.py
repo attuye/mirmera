@@ -210,7 +210,7 @@ def test_saved_charter_keeps_its_risks_and_ideas(client, modelled, risks):
 
 
 def test_charter_cannot_link_risks_from_another_project(client, project, risks):
-    other = client.post("/projects", json={"name": "Other", "org_id": "x"}).json()
+    other = client.post("/projects", json={"name": "Other"}).json()
     r = client.post(f"/projects/{other['id']}/charters", json={
         "mission_statement": "Explore", "risk_ids": [risks[0]["id"]],
     })

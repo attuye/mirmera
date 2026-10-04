@@ -23,6 +23,7 @@ async function render() {
   const status = await send('status')
   $('api').value = status.settings.apiUrl
   $('app').value = status.settings.appUrl
+  $('token').placeholder = status.settings.hasToken ? 'Saved (paste a new one to replace it)' : 'mm_…'
   const rec = status.recording
   $('state').textContent = rec ? 'REC' : 'Not recording'
   $('state').className = rec ? 'pill rec' : 'pill'
@@ -83,7 +84,11 @@ document.querySelectorAll('input[name=tag]').forEach((r) => r.addEventListener('
 }))
 $('note').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('log').click() })
 $('save').onclick = () => run(async () => {
-  await send('settings', { apiUrl: $('api').value.trim() || 'http://localhost:8000', appUrl: $('app').value.trim() || 'http://localhost:5173' })
+  await send('settings', {
+    apiUrl: $('api').value.trim() || 'http://localhost:8000', appUrl: $('app').value.trim() || 'http://localhost:5173',
+    token: $('token').value.trim() || undefined,
+  })
+  $('token').value = ''
   sessions = []
   say('Settings saved.')
 })

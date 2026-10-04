@@ -30,6 +30,28 @@ uvicorn app.main:app --reload
 
 API docs at http://localhost:8000/docs once it's running.
 
+### Accounts and workspaces
+
+Open the app and **create an account**: you get a **workspace** (your team or company) and are its owner. The first
+account on a database also takes over every project made before accounts existed. Anyone can create an account with
+their own empty workspace; set `ALLOW_SIGNUPS=false` to stop that (the very first account is always allowed).
+
+Everything in a project (risks, charters, sessions, bugs, evidence, stories, sprints, reports) is visible only to
+members of its workspace; an id from another workspace answers 404. Roles in a workspace:
+
+| Role | Can |
+|---|---|
+| **viewer** | look at everything |
+| **tester** | test: charters, sessions, notes, bugs, risks, stories, sprints, filing, regression runs |
+| **admin** | also create projects, change project settings, AI routing and notifications, archive and delete |
+| **owner** | the same as admin (it's whoever created the workspace) |
+
+**Account** (bottom of the sidebar) has your name, password, workspaces (add one per client or team, switch, rename)
+and tokens for the Chrome extension. Passwords are hashed with scrypt; sign-in uses an httpOnly cookie, and only a
+hash of each sign-in or extension token is stored. Ten wrong passwords for an email or address lock sign-in for 15
+minutes. Behind HTTPS, set `COOKIE_SECURE=true`. Inviting teammates and per-workspace keys come next; until then the
+tracker, AI and Telegram keys in `backend/.env` are shared by every workspace on this server.
+
 ### Recorded browser
 
 On the session screen, enter the address of the app you are testing and click
@@ -391,7 +413,9 @@ This is the Phase 1 scaffold from the scoping discussion:
 - ✅ Import specs, diffs and past bugs: GitHub pull requests and issues, Jira issues, local git diffs, files
 - ✅ User stories: import from Jira or GitHub, link risks and charters, see the testing under each and what is left
 - ✅ Sprints: dates and stories, everything tested in those dates (inside and outside the plan), report and coverage per sprint
+- ✅ Accounts and workspaces: sign up and in, every route checked against the workspace and role, extension tokens
 - ✅ Notifications: Telegram and Slack messages for fixes that didn't hold, regression problems and high bugs
 
 Not yet built:
-- Multi-user auth (the `org_id` field is there, but nothing enforces it yet)
+- Invitations and member roles in the app, password reset by email
+- Per-workspace keys for GitHub, Jira, AI providers and Telegram (today they're in `backend/.env`, shared)
