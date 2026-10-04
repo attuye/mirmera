@@ -85,6 +85,7 @@ class ProjectOut(BaseModel):
     environments: list[Environment] = []
     default_tester: Optional[str] = None
     archived_at: Optional[datetime] = None
+    ai_task_providers: dict[str, str] = {}
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -93,6 +94,11 @@ class ProjectOut(BaseModel):
     @classmethod
     def _none_is_empty(cls, v):
         return v or []
+
+    @field_validator("ai_task_providers", mode="before")
+    @classmethod
+    def _none_is_no_choices(cls, v):
+        return v or {}
 
 
 class ProjectSummary(ProjectOut):
@@ -114,6 +120,8 @@ class ProjectUpdate(BaseModel):
     app_url: Optional[str] = None  # "" clears
     environments: Optional[list[Environment]] = Field(default=None, max_length=10)
     default_tester: Optional[str] = Field(default=None, max_length=60)  # "" clears
+    # {"debrief": "local"}: tasks left out use the default provider; "" removes a choice
+    ai_task_providers: Optional[dict[str, str]] = None
 
     @field_validator("app_url")
     @classmethod
@@ -1362,3 +1370,37 @@ class ProjectReport(BaseModel):
     generated_at: datetime
     summary: dict
     blocks: list[dict]
+
+
+class AIProviderStatus(BaseModel):
+    name: str
+    configured: bool
+    model: Optional[str] = None
+    problem: Optional[str] = None
+
+
+class AITask(BaseModel):
+    key: str
+    label: str
+    hint: str
+
+
+class AIOverview(BaseModel):
+    tasks: list[AITask]
+    providers: list[AIProviderStatus]
+
+
+class AICheckRequest(BaseModel):
+    provider: str
+    task: str
+
+
+class AICheckResult(BaseModel):
+    """One task tried once on one provider, with made-up but realistic input."""
+    provider: str
+    model: Optional[str] = None
+    task: str
+    result: Literal["ok", "retried", "failed"]  # ok: valid first time; retried: needed the second try
+    seconds: float
+    sample: Optional[str] = None  # a glimpse of the reply, to judge its quality
+    detail: Optional[str] = None

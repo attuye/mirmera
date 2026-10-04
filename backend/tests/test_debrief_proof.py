@@ -49,7 +49,7 @@ def ended(client, session, monkeypatch):
     note(client, session, "setup", "Waited for FX sandbox")
     client.post(f"/sessions/{session['id']}/bugs", json={"title": "Discount lost on currency switch"})
     provider = Scripted(PROOF)
-    monkeypatch.setattr("app.routers.sessions.get_provider", lambda name: provider)
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: provider)
     debrief = client.post(f"/sessions/{session['id']}/end").json()
     return debrief, provider
 
@@ -84,7 +84,7 @@ def test_the_draft_sees_notes_with_minutes_bugs_risks_and_time_split(client, pro
         "kind": "bug", "oracle_heuristic": "claims", "oracle_explanation": "Spec says coupons survive",
     })
     provider = Scripted(PROOF)
-    monkeypatch.setattr("app.routers.sessions.get_provider", lambda name: provider)
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: provider)
     client.post(f"/sessions/{s['id']}/end")
 
     user = provider.users[0]
