@@ -95,6 +95,7 @@ export interface Charter {
   source_artifact_id: string | null
   source_label: string | null  // the change it was suggested from, e.g. "PR #42: …"
   source_url: string | null
+  stories: StoryRef[]  // the user stories it belongs to
 }
 
 export interface Heuristic { key: string; group: 'oracle' | 'element' | 'quality' | 'technique'; name: string; summary: string; questions: string[]; example: string }
@@ -505,6 +506,7 @@ export interface Risk {
   last_change: string | null
   created_at: string
   updated_at: string
+  stories: StoryRef[]
 }
 
 export interface RiskInput {
@@ -582,6 +584,7 @@ export interface CharterInput {
   risk_ids?: string[]
   test_ideas?: string[]
   oracles?: string[]
+  story_ids?: string[]
 }
 
 // ---- Isolate the bug ----------------------------------------------------------
@@ -707,6 +710,28 @@ export interface TrendRow {
 export interface TrendChange { name: string; before: number; recent: number; direction: 'up' | 'down' | 'same'; text: string; note: string | null }
 export interface Trends { project_id: string; weeks: number; generated_at: string; phases: Record<string, string>; rows: TrendRow[]; changes: TrendChange[] }
 
+// ---- User stories ---------------------------------------------------------------
+
+export interface StoryRef { id: string; key: string | null; title: string }
+export interface StorySummary {
+  id: string; key: string | null; title: string; url: string | null
+  tracker: 'github' | 'jira' | null; tracker_status: string | null; closed: boolean; created_at: string
+  risks: number; charters: number; sessions: number; minutes: number; bugs: number; high_bugs: number; left: number
+}
+export interface StoryLeft { text: string; to: string; action: string }
+export interface StoryDetail extends StorySummary {
+  description: string | null
+  artifact_id: string | null
+  risk_list: { id: string; ref: string; title: string; failure_mode: string; score: number; status: Risk['status']; quality_criterion: string; charters: number; other_stories: StoryRef[] }[]
+  charter_list: { id: string; mission_statement: string; status: Charter['status']; priority: Charter['priority']; risk_refs: string[]; sessions: number; minutes: number; bugs: number }[]
+  session_list: { id: string; charter_id: string; mission_statement: string; tester: string; started_at: string; ended_at: string | null; minutes: number; bugs: number; debrief: boolean }[]
+  bug_list: { id: string; title: string; kind: 'bug' | 'question' | null; severity: 'high' | 'medium' | 'low'; session_id: string; issue_key: string | null; issue_url: string | null }[]
+  pages: { page: string; sessions: number; actions: number }[]
+  more_pages: number
+  left_list: StoryLeft[]
+}
+export interface StoryInput { title: string; key?: string | null; description?: string | null; url?: string | null }
+
 // ---- Notifications ---------------------------------------------------------------
 
 export interface NotificationSettings { telegram_chat_id: string; slack: boolean; events: string[] }
@@ -820,6 +845,23 @@ export const api = {
   triedNudge: (sessionId: string, nudgeId: string, note: string) =>
     request<Note>(`/sessions/${sessionId}/nudges/${nudgeId}/tried`, { method: 'POST', body: JSON.stringify({ note }) }),
   getTrends: (projectId: string, weeks: number) => request<Trends>(`/projects/${projectId}/trends?weeks=${weeks}`),
+  listStories: (projectId: string) => request<StorySummary[]>(`/projects/${projectId}/stories`),
+  createStory: (projectId: string, story: StoryInput) =>
+    request<StoryDetail>(`/projects/${projectId}/stories`, { method: 'POST', body: JSON.stringify(story) }),
+  importStory: (projectId: string, ref: string) =>
+    request<StoryDetail>(`/projects/${projectId}/stories/import`, { method: 'POST', body: JSON.stringify({ ref }) }),
+  getStory: (storyId: string) => request<StoryDetail>(`/stories/${storyId}`),
+  updateStory: (storyId: string, changes: Partial<StoryInput> & { closed?: boolean }) =>
+    request<StoryDetail>(`/stories/${storyId}`, { method: 'PATCH', body: JSON.stringify(changes) }),
+  refreshStory: (storyId: string) => request<StoryDetail>(`/stories/${storyId}/refresh`, { method: 'POST' }),
+  deleteStory: (storyId: string) => request<Deleted>(`/stories/${storyId}`, { method: 'DELETE' }),
+  setStoryRisks: (storyId: string, ids: string[]) =>
+    request<StoryDetail>(`/stories/${storyId}/risks`, { method: 'PUT', body: JSON.stringify({ ids }) }),
+  setStoryCharters: (storyId: string, ids: string[]) =>
+    request<StoryDetail>(`/stories/${storyId}/charters`, { method: 'PUT', body: JSON.stringify({ ids }) }),
+  newStoryRisk: (storyId: string, risk: RiskInput) =>
+    request<StoryDetail>(`/stories/${storyId}/risks/new`, { method: 'POST', body: JSON.stringify(risk) }),
+  storyArtifact: (storyId: string) => request<Artifact>(`/stories/${storyId}/artifact`, { method: 'POST' }),
   getNotifications: (projectId: string) => request<NotificationsOverview>(`/projects/${projectId}/notifications`),
   saveNotifications: (projectId: string, body: NotificationSettings) =>
     request<NotificationsOverview>(`/projects/${projectId}/notifications`, { method: 'PUT', body: JSON.stringify(body) }),

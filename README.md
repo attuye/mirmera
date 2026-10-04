@@ -116,6 +116,28 @@ change they came from ("from PR #42"), shown on the Charters page, the Dashboard
 saved with a readable name ("Pasted: diff of kyc/selfie.py"). The slower path from the whole product's risks stays
 on the Risks page.
 
+### User stories
+
+Most teams plan in stories, so Mirmera keeps them, but the way Rapid Software Testing sees them: a story is a claim
+about a change, one oracle among several, not the thing being tested. Open **Plan → Stories** and import one from Jira
+(`KYC-12`) or GitHub (`#45`), which reads its title, whole description and status, or write one by hand.
+
+A story **links to** risks and charters; it doesn't own them. A risk stays in the project after its story closes, and one
+risk can belong to several stories. On a story's page:
+
+- **What it claims**: the description and acceptance criteria.
+- **What's left**: no risks linked, risks no charter here investigates, charters not explored yet, sessions without a
+  debrief or with a charter not fulfilled, bug reports to review, high bugs not filed. Each has a button to act on it.
+  It never says "tested"; when nothing obvious is left, deciding whether that's enough stays with you.
+- **Risks**: link a project risk, or add a new one for the story (it becomes a project risk too).
+- **Charters**: link existing ones, or **Suggest charters**: the AI suggests charters from the story's text, and the
+  ones you accept are linked to it.
+- The **sessions**, **bugs** and **pages explored** under those charters, with a pointer to the coverage map for the
+  pages around them, since a change often breaks something next to it.
+
+Stories from a tracker have **Refresh from Jira/GitHub**; stories written here have **Mark done**. Charters and risks
+show their stories as links everywhere they appear. Deleting a story keeps its risks, charters and sessions.
+
 ### Regression tests from a bug
 
 The recorded browser also records your actions: clicks, typing, selects,
@@ -349,6 +371,7 @@ This is the Phase 1 scaffold from the scoping discussion:
 - ✅ Retest when an issue closes: replay the test and comment the result on the issue
 - ✅ Test report (Summary and Full views, optional AI summary), coverage map, test-idea nudges
 - ✅ Import specs, diffs and past bugs: GitHub pull requests and issues, Jira issues, local git diffs, files
+- ✅ User stories: import from Jira or GitHub, link risks and charters, see the testing under each and what is left
 - ✅ Notifications: Telegram and Slack messages for fixes that didn't hold, regression problems and high bugs
 
 Not yet built:

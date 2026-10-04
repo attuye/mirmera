@@ -37,6 +37,7 @@ class TrackerIssue:
     status: str
     closed: bool
     snippet: str = ""
+    body: str = ""  # the whole description, when the tracker gave it
 
 
 def keywords(title: str, limit: int = 6) -> list[str]:

@@ -38,7 +38,7 @@ class MockTracker(IssueTracker):
         n = len(self._db["issues"]) + 1
         key = self._key(n)
         issue = TrackerIssue(key=key, title=title, url=f"https://mock-{self.name}.local/{self.target}/{n}",
-                             status="closed" if closed else "open", closed=closed, snippet=body[:300])
+                             status="closed" if closed else "open", closed=closed, snippet=body[:300], body=body)
         self._db["issues"].append(issue)
         return issue
 

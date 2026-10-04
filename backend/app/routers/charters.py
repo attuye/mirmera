@@ -55,6 +55,7 @@ def save_charter(project_id: str, payload: schemas.CharterCreate, db: DBSession 
 
     data = payload.model_dump()
     risk_ids = data.pop("risk_ids")
+    story_ids = list(dict.fromkeys(data.pop("story_ids")))
     risks = []
     if risk_ids:
         risks = (
@@ -73,8 +74,13 @@ def save_charter(project_id: str, payload: schemas.CharterCreate, db: DBSession 
         source = db.get(models.Artifact, data["source_artifact_id"])
         if not source or source.project_id != project_id:
             raise HTTPException(400, "Unknown artifact for this project")
+    linked_stories = (db.query(models.Story).filter(models.Story.id.in_(story_ids), models.Story.project_id == project_id).all()
+                      if story_ids else [])
+    if len(linked_stories) != len(story_ids):
+        raise HTTPException(400, "Unknown story for this project")
     charter = models.Charter(project_id=project_id, **data)
     charter.risks = risks
+    charter.stories = linked_stories
     db.add(charter)
     db.commit()
     db.refresh(charter)

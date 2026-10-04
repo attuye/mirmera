@@ -3,13 +3,14 @@
  *  request or local diff, or something already imported. The slower, whole-
  *  product path (model, risks, charters) lives on the Risks page. */
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import TesterField, { useTesterName } from '../components/TesterField'
 import ArtifactImport from '../components/ArtifactImport'
 import HeuristicChips from '../components/HeuristicChips'
+import StoryChips from '../components/StoryChips'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton } from '../components/ui'
-import { API_URL, api, Artifact, Charter, CharterSuggestion } from '../api/client'
+import { API_URL, api, Artifact, Charter, CharterSuggestion, StoryDetail } from '../api/client'
 import { useProject, useProjectPath } from '../project'
 
 const PRIORITY_COLOR: Record<string, string> = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-tertiary)' }
@@ -47,11 +48,19 @@ export default function CharterSuggestions() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
+  const [params] = useSearchParams()
+  const storyId = params.get('story')
+  const [story, setStory] = useState<StoryDetail | null>(null)  // suggestions for this story are linked to it
 
   useEffect(() => {
     api.listCharters(project.id).then(setCharters).catch(console.error)
     api.listArtifacts(project.id).then((a) => { setArtifacts(a); setEarlier(a[a.length - 1]?.id ?? '') }).catch(console.error)
   }, [project.id])
+  useEffect(() => {  // from a story's page: suggest charters for the story straight away
+    if (!storyId) { setStory(null); return }
+    api.getStory(storyId).then(async (s) => { const a = await api.storyArtifact(s.id); setStory({ ...s, artifact_id: a.id }); await suggestFrom(a) })
+      .catch((e) => setError(errorText(e)))
+  }, [storyId])  // eslint-disable-line react-hooks/exhaustive-deps
 
   async function suggestFrom(artifact: Artifact) {
     setBusy(true); setError(null); setSuggestions([]); setSource(artifact)
@@ -84,6 +93,7 @@ export default function CharterSuggestions() {
       const charter = await api.saveCharter(project.id, {
         mission_statement: s.mission_statement, rationale: s.rationale, risk_areas: s.risk_areas, priority: s.priority,
         source: 'ai-suggested', source_artifact_id: source?.id ?? null,
+        story_ids: story && source?.id === story.artifact_id ? [story.id] : [],
       })
       setCharters((prev) => [...prev, charter])
       setSuggestions((prev) => prev.filter((_, i) => i !== index))
@@ -121,6 +131,16 @@ export default function CharterSuggestions() {
           from the whole product's risks, use the <Link to={path('/risks')}>Risks</Link> page.
         </p>
 
+        {story && (
+          <div role="note" aria-label="For a story" style={{
+            marginTop: 16, maxWidth: 760, padding: '10px 14px', borderRadius: 9, background: 'var(--accent-bg)', fontSize: 13,
+            display: 'flex', gap: 12, alignItems: 'center',
+          }}>
+            <span style={{ flex: 1 }}>Suggesting charters for <b>{story.key ? `${story.key}: ` : ''}{story.title}</b>. Accepted ones are linked to the story.</span>
+            <Link to={path(`/stories/${story.id}`)} style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>Back to the story →</Link>
+          </div>
+        )}
+
         <section aria-label="Your charters" style={{ marginTop: 22 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', maxWidth: 760, marginBottom: 10 }}>
             <h2 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Your charters <span style={{ fontWeight: 400, color: 'var(--text-tertiary)', fontSize: 13 }}>{charters.length}</span></h2>
@@ -137,6 +157,7 @@ export default function CharterSuggestions() {
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 13 }}>{c.mission_statement}</div>
                   <SourceTag label={c.source_label} url={c.source_url} />
+                  <StoryChips stories={c.stories} />
                   <HeuristicChips heuristics={c.heuristics} oracles={c.oracles} />
                 </div>
                 <span className="mono" style={{ fontSize: 9.5, color: c.status === 'active' ? 'var(--accent)' : 'var(--text-tertiary)', flexShrink: 0 }}>

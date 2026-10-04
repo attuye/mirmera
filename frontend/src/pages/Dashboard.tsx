@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import TesterField, { useTesterName } from '../components/TesterField'
+import StoryChips from '../components/StoryChips'
 import { ErrorLine, errorText } from '../components/ui'
 import { api, Charter } from '../api/client'
 import { useProject, useProjectPath } from '../project'
@@ -109,6 +110,7 @@ export default function Dashboard() {
                         {c.source === 'ai-suggested' ? 'AI-suggested' : 'Manual'}
                       </span>
                       <span className="mono" style={{ fontSize: 9.5, color: PRIORITY_COLOR[c.priority] }}>{c.priority} priority</span>
+                      <StoryChips stories={c.stories ?? []} />
                     </div>
                   </div>
                 )

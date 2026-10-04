@@ -62,7 +62,7 @@ class GitHubTracker(IssueTracker):
     def _issue(item: dict) -> TrackerIssue:
         return TrackerIssue(
             key=f"#{item['number']}", title=item["title"], url=item["html_url"], status=item["state"],
-            closed=item["state"] == "closed", snippet=(item.get("body") or "")[:300],
+            closed=item["state"] == "closed", snippet=(item.get("body") or "")[:300], body=item.get("body") or "",
         )
 
     async def search(self, words: list[str], limit: int = 8) -> list[TrackerIssue]:
