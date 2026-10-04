@@ -142,6 +142,14 @@ async def _one(retest_id: str, base_url: str | None, headless: bool, executable_
     except TrackerError as err:
         fields["comment_error"] = str(err)
     _save(retest_id, finished_at=utcnow(), **fields)
+    from app import notify
+    with SessionLocal() as db:
+        title = (db.get(models.Bug, r.bug_id).title if db.get(models.Bug, r.bug_id) else "")
+    if fields.get("outcome") == "still_fails":
+        await notify.send_async(r.project_id, "fix_failed", f"{r.issue_key} was closed, but the bug still reproduces",
+                                title, "/regression")
+    elif fields.get("outcome") == "fixed":
+        await notify.send_async(r.project_id, "fix_verified", f"{r.issue_key}: fix verified", title, "/regression")
 
 
 def _save(retest_id: str, **fields) -> None:

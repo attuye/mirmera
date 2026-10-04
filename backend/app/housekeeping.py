@@ -119,6 +119,9 @@ def delete_project(db: DBSession, project: models.Project) -> dict:
     retests = db.query(models.Retest).filter(models.Retest.project_id == pid).delete(synchronize_session=False)
     if retests:
         counts["retests"] += retests
+    logs = db.query(models.NotificationLog).filter(models.NotificationLog.project_id == pid).delete(synchronize_session=False)
+    if logs:
+        counts["notification_logs"] += logs
     summaries = db.query(models.ReportSummary).filter(models.ReportSummary.project_id == pid).delete(synchronize_session=False)
     if summaries:
         counts["report_summaries"] += summaries

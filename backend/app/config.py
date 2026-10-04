@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     jira_issue_type: str = "Bug"
     # Fake GitHub and Jira kept in memory: for tests, demos and trying the flow.
     mock_trackers: bool = False
+    # Notifications. Secrets stay here; each project picks its chat and events in Settings.
+    telegram_bot_token: str | None = None  # from @BotFather
+    telegram_api_url: str = "https://api.telegram.org"
+    slack_webhook_url: str | None = None  # a Slack "incoming webhook" for one channel
+    mock_notifications: bool = False  # keep messages in memory instead of sending (tests, demos)
     # Check filed issues every N minutes and retest the ones newly closed (0: only on the button).
     retest_poll_minutes: int = 0
     # Where testers open Mirmera; when set, filed issues link back to the bug.

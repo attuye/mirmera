@@ -707,6 +707,16 @@ export interface TrendRow {
 export interface TrendChange { name: string; before: number; recent: number; direction: 'up' | 'down' | 'same'; text: string; note: string | null }
 export interface Trends { project_id: string; weeks: number; generated_at: string; phases: Record<string, string>; rows: TrendRow[]; changes: TrendChange[] }
 
+// ---- Notifications ---------------------------------------------------------------
+
+export interface NotificationSettings { telegram_chat_id: string; slack: boolean; events: string[] }
+export interface NotificationsOverview {
+  events: { key: string; label: string }[]
+  settings: NotificationSettings
+  channels: { telegram: { configured: boolean; problem: string | null }; slack: { configured: boolean; problem: string | null }; mock: boolean }
+  recent: { event: string; channel: string; text: string; status: 'sent' | 'failed' | 'mock'; error: string | null; created_at: string }[]
+}
+
 // ---- Coverage map ---------------------------------------------------------------
 
 export type CoverageFlag = 'not_tried' | 'problems_without_bug' | 'stale' | 'one_tester'
@@ -810,6 +820,11 @@ export const api = {
   triedNudge: (sessionId: string, nudgeId: string, note: string) =>
     request<Note>(`/sessions/${sessionId}/nudges/${nudgeId}/tried`, { method: 'POST', body: JSON.stringify({ note }) }),
   getTrends: (projectId: string, weeks: number) => request<Trends>(`/projects/${projectId}/trends?weeks=${weeks}`),
+  getNotifications: (projectId: string) => request<NotificationsOverview>(`/projects/${projectId}/notifications`),
+  saveNotifications: (projectId: string, body: NotificationSettings) =>
+    request<NotificationsOverview>(`/projects/${projectId}/notifications`, { method: 'PUT', body: JSON.stringify(body) }),
+  testNotification: (projectId: string) =>
+    request<NotificationsOverview>(`/projects/${projectId}/notifications/test`, { method: 'POST' }),
   getCoverage: (projectId: string, since?: string) =>
     request<CoverageMap>(`/projects/${projectId}/coverage${since ? `?since=${since}` : ''}`),
   draftReportSummary: (projectId: string, since?: string, until?: string) =>

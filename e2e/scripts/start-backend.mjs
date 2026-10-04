@@ -39,6 +39,7 @@ const child = spawn(python, ['-m', 'uvicorn', 'app.main:app', '--port', port], {
     EVIDENCE_DIR: evidenceDir,
     // In-memory GitHub and Jira: the tests never touch a real tracker.
     MOCK_TRACKERS: 'true',
+    MOCK_NOTIFICATIONS: 'true',
     ...(process.env.PW_CHROMIUM_PATH ? { RUNNER_CHROMIUM_PATH: process.env.PW_CHROMIUM_PATH } : {}),
   },
 })

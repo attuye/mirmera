@@ -1532,3 +1532,27 @@ class Trends(BaseModel):
     phases: dict  # time-split keys and their names
     rows: list[dict]  # [{"week", "sessions", "hours", "testers", "bugs": {...}, "bugs_per_hour", "time_split", "charters", "fixes", "risk_exposure"}]
     changes: list[dict]  # the last 4 weeks against the 4 before: [{"name", "before", "recent", "direction", "text", "note"}]
+
+
+class NotificationSettings(BaseModel):
+    telegram_chat_id: str = Field(default="", max_length=64)  # e.g. 123456789, or -100… for a group
+    slack: bool = False
+    events: list[str] = []
+
+
+class NotificationLogOut(BaseModel):
+    event: str
+    channel: str
+    text: str
+    status: str  # sent | failed | mock
+    error: Optional[str] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class NotificationsOut(BaseModel):
+    events: list[dict]  # [{"key", "label"}]
+    settings: NotificationSettings
+    channels: dict  # {"telegram": {"configured", "problem"}, "slack": {...}, "mock": bool}
+    recent: list[NotificationLogOut]

@@ -95,6 +95,30 @@ async def run_suite(run_id: str, items: list[dict], *, base_url: str | None, hea
             _save(run_id, results=list(results), finished_at=utcnow(), **final)
         finally:
             ACTIVE.discard(run_id)
+    if final["status"] == "done":
+        await _tell(run_id, results)
+
+
+def noteworthy(results: list[dict]) -> dict:
+    """What in a run is worth a message: tests that broke or fail, and known bugs that now pass."""
+    expected = lambda r: (r["outcome"] == "reproduces") if r["known_failing"] else (r["outcome"] == "passes")  # noqa: E731
+    fixed = [r for r in results if r["known_failing"] and r["outcome"] == "passes"]
+    wrong = [r for r in results if not expected(r) and r not in fixed]
+    return {"fixed": fixed, "wrong": wrong, "as_expected": len(results) - len(fixed) - len(wrong)}
+
+
+async def _tell(run_id: str, results: list[dict]) -> None:
+    from app import notify
+    n = noteworthy(results)
+    if not (n["fixed"] or n["wrong"]):
+        return
+    with SessionLocal() as db:
+        project_id = db.get(models.RegressionSuiteRun, run_id).project_id
+    parts = ([f"{len(n['wrong'])} test{'s' if len(n['wrong']) != 1 else ''} failed or broke"] if n["wrong"] else []) + \
+            ([f"{len(n['fixed'])} known bug{'s' if len(n['fixed']) != 1 else ''} now pass{'es' if len(n['fixed']) == 1 else ''}"] if n["fixed"] else []) + \
+            [f"{n['as_expected']} as expected"]
+    detail = "\n".join(f"• {r['bug_title']}: {r['meaning']}" for r in (n["wrong"] + n["fixed"])[:5])
+    await notify.send_async(project_id, "suite_problem", "Regression run: " + ", ".join(parts), detail, "/regression")
 
 
 # ---------- export ----------

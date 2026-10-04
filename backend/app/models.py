@@ -40,6 +40,7 @@ class Project(Base):
     app_url = Column(String, nullable=True)
     environments = Column(JSON, nullable=True)  # [{"name": "staging", "url": "https://..."}]
     default_tester = Column(String, nullable=True)  # prefilled when starting a session
+    notify = Column(JSON, nullable=True)  # {"telegram_chat_id", "slack": bool, "events": [...]}
 
     artifacts = relationship("Artifact", back_populates="project", cascade="all, delete-orphan")
     charters = relationship("Charter", back_populates="project", cascade="all, delete-orphan")
@@ -474,4 +475,18 @@ class ReportSummary(Base):
     ai_provider = Column(String, nullable=True)
     ai_model = Column(String, nullable=True)
     prompt_version = Column(String, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class NotificationLog(Base):
+    """One message to one channel: what was sent, and whether it arrived."""
+    __tablename__ = "notification_logs"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    event = Column(String, nullable=False)  # fix_failed | fix_verified | suite_problem | high_bug | test
+    channel = Column(String, nullable=False)  # telegram | slack
+    text = Column(Text, nullable=False)
+    status = Column(String, nullable=False)  # sent | failed | mock
+    error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=utcnow)
