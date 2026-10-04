@@ -11,7 +11,7 @@ def test_a_project_is_created_with_its_details(client):
     assert r.status_code == 200
     p = r.json()
     assert (p["name"], p["description"], p["app_url"], p["org_id"]) == (
-        "AddisVerify KYC", "ID document checks", "http://localhost:4000", "local")
+        "AddisVerify KYC", "ID document checks", "http://localhost:4000", client.me["workspaces"][0]["id"])
     assert p["environments"] == [] and p["default_tester"] is None
 
 

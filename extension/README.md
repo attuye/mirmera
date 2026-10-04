@@ -36,8 +36,12 @@ anywhere but the Mirmera API you set.
    the session screen shows what the extension sends.
 4. **Stop recording** when done, then end the session in Mirmera as usual.
 
-Settings: the Mirmera API address (default `http://localhost:8000`) and app
-address (default `http://localhost:5173`).
+Settings: the Mirmera API address (default `http://localhost:8000`), app
+address (default `http://localhost:5173`), and a **token**: in Mirmera, open
+**Account → Chrome extension → Create token**, copy it and paste it here. The
+extension only sees sessions in your workspaces. The token is kept in the
+extension's storage and never shown again; delete it in Mirmera to sign the
+extension out.
 
 `recorder.js` is a copy of `backend/app/recorder.js`; a backend test fails if
 they differ. After changing the recorder, copy it here.

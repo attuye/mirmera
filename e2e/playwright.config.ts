@@ -10,6 +10,7 @@ const WEB_URL = `http://localhost:${WEB_PORT}`
 
 export default defineConfig({
   testDir: './tests',
+  globalSetup: './scripts/sign-in.ts',  // one account for every spec; see scripts/sign-in.ts
   // One worker, in order: the specs share one fresh database and one product.
   // Each spec owns its own area (risks, bugs, session notes).
   workers: 1,
@@ -23,6 +24,7 @@ export default defineConfig({
     : [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: WEB_URL,
+    storageState: '.e2e-data/signed-in.json',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     viewport: { width: 1440, height: 1000 },

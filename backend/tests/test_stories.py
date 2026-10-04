@@ -113,7 +113,7 @@ def test_links_testing_and_whats_left(client, project):
     summary = client.get(f"/projects/{pid}/stories").json()[0]
     assert (summary["risks"], summary["charters"], summary["sessions"], summary["left"]) == (2, 1, 1, 3)
 
-    stranger = client.post("/projects", json={"name": "Other", "org_id": "x"}).json()
+    stranger = client.post("/projects", json={"name": "Other"}).json()
     foreign = risk(client, stranger, "Somebody else's risk")
     assert client.put(f"/stories/{sid}/risks", json={"ids": [foreign["id"]]}).status_code == 400
 

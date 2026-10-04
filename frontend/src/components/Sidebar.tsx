@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, BookOpen, CalendarRange, Bug, ChevronRight, Compass, FileText, FlaskConical, FolderKanban, LayoutDashboard, Lightbulb, Map as MapIcon,
-  MessageSquareText, ScanSearch, ScrollText, Settings, ShieldAlert, StickyNote, TrendingUp, type LucideIcon,
+  CircleUser, MessageSquareText, ScanSearch, ScrollText, Settings, ShieldAlert, StickyNote, TrendingUp, type LucideIcon,
 } from 'lucide-react'
 import { api, ProjectSummary } from '../api/client'
+import { useAuth } from '../auth'
 
 type Item = { label: string; to: string; icon: LucideIcon }
 type Group = { label: string; icon: LucideIcon; items: Item[] }
@@ -110,7 +111,9 @@ function ProjectSwitcher({ projectId }: { projectId: string }) {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const location = useLocation()
   const navigate = useNavigate()
+  const { workspace } = useAuth()
   useEffect(() => { api.listProjects().then(setProjects).catch(console.error) }, [projectId])
+  const mine = projects.filter((p) => p.org_id === workspace?.id || p.id === projectId)  // this workspace's projects
 
   function switchTo(id: string) {
     const rest = location.pathname.replace(/^\/projects\/[^/]+/, '')
@@ -128,7 +131,7 @@ function ProjectSwitcher({ projectId }: { projectId: string }) {
         color: 'var(--text)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--font-ui)',
       }}>
         {projects.length === 0 && <option value={projectId}>Loading…</option>}
-        {projects.filter((p) => !p.archived_at || p.id === projectId).map((p) => <option key={p.id} value={p.id}>{p.name}{p.archived_at ? ' (archived)' : ''}</option>)}
+        {mine.filter((p) => !p.archived_at || p.id === projectId).map((p) => <option key={p.id} value={p.id}>{p.name}{p.archived_at ? ' (archived)' : ''}</option>)}
       </select>
       <Link to="/projects" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--text-tertiary)', marginTop: 7 }}>
         <ArrowLeft size={13} strokeWidth={1.8} aria-hidden />All projects
@@ -143,6 +146,7 @@ export default function Sidebar() {
   const [closed, toggle] = useClosedGroups()
   const base = `/projects/${projectId}`
   const current = activePage(location.pathname.replace(/^\/projects\/[^/]+/, ''))
+  const { me, workspace } = useAuth()
   return (
     <div style={{
       width: 232, flexShrink: 0, background: 'var(--panel-alt)', borderRight: '1px solid var(--border)',
@@ -151,7 +155,9 @@ export default function Sidebar() {
       <Link to="/projects" title="Mirmera (ምርመራ): investigation" aria-label="Mirmera home" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 32, color: 'inherit' }}>
         <img src="/mirmera.svg" width={32} height={32} alt="" style={{ display: 'block', flexShrink: 0 }} />
         <div>
-          <div style={{ fontWeight: 600, fontSize: 14 }}>AddisVerify</div>
+          <div style={{ fontWeight: 600, fontSize: 14, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title="Workspace">
+            {workspace?.name ?? 'Mirmera'}
+          </div>
           <div className="mono" style={{ fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Mirmera</div>
         </div>
       </Link>
@@ -171,6 +177,18 @@ export default function Sidebar() {
         <nav aria-label="Main" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           <NavLink to="/projects" label="Projects" icon={FolderKanban} active={location.pathname === '/projects'} />
         </nav>
+      )}
+      {me && (
+        <Link to="/account" aria-label="Account" aria-current={location.pathname === '/account' ? 'page' : undefined} style={{
+          marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--border)', display: 'flex', gap: 10, alignItems: 'center',
+          color: location.pathname === '/account' ? 'var(--accent)' : 'var(--text-secondary)',
+        }}>
+          <CircleUser size={18} strokeWidth={1.8} aria-hidden style={{ flexShrink: 0 }} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{me.user.name}</div>
+            {workspace && <div className="mono" style={{ fontSize: 10, color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>{workspace.role}</div>}
+          </div>
+        </Link>
       )}
     </div>
   )
