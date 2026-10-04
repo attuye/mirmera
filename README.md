@@ -151,6 +151,18 @@ screenshot is kept in Mirmera. Each bug is filed at most once per tracker.
 Set `MOCK_TRACKERS=true` to try the flow without accounts (in-memory trackers,
 reset when the backend restarts).
 
+### Retest when an issue closes
+
+Trackers can't reach your machine, so Mirmera asks them. **Check closed issues**
+on the Regression page looks up every issue filed from the project. When one
+was closed since the last check, Mirmera replays the bug's latest regression
+test and comments on the issue: **fix verified**, **still fails** (what failed
+and the steps replayed), or **couldn't check** (and why). Reopened and closed
+again means retested again. Set `RETEST_POLL_MINUTES=30` in `backend/.env` to
+check on a timer while the backend runs. With `MOCK_TRACKERS=true`, close a mock
+issue with `POST /mock-trackers/issue-state`
+(`{"tracker": "github", "target": "owner/repo", "issue_key": "#3"}`).
+
 ## Tests
 
 CI runs all three on every pull request.

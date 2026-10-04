@@ -922,6 +922,9 @@ class BugFilingOut(BaseModel):
     issue_url: str
     attachments: list[str] = []
     created_at: datetime
+    issue_closed: Optional[bool] = None  # as seen by the last "Check closed issues"
+    issue_status: Optional[str] = None
+    status_checked_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1308,3 +1311,42 @@ class SuiteRunOut(BaseModel):
     @classmethod
     def _none_is_empty(cls, v):
         return v or []
+
+
+class RetestRequest(BaseModel):
+    base_url: Optional[str] = Field(default=None, pattern=r"^https?://")  # None: each test's recorded address
+
+
+class RetestOut(BaseModel):
+    id: str
+    project_id: str
+    bug_id: str
+    bug_title: str = ""
+    filing_id: str
+    tracker: str
+    issue_key: str
+    issue_url: str
+    test_id: Optional[str] = None
+    outcome: str  # running | fixed | still_fails | could_not_check | no_test
+    replay: Optional[dict] = None
+    detail: Optional[str] = None
+    commented: bool = False
+    comment_error: Optional[str] = None
+    created_at: datetime
+    finished_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RetestCheckOut(BaseModel):
+    checked: int  # issues looked up
+    filed: int  # issues filed from the project
+    retests: list[RetestOut]  # one per issue closed since the last check
+    problems: list[str]  # issues that couldn't be looked up, and why
+
+
+class MockIssueState(BaseModel):
+    tracker: Literal["github", "jira"]
+    target: str
+    issue_key: str
+    closed: bool = True

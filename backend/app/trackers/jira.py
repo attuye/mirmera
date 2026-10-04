@@ -52,17 +52,22 @@ class JiraTracker(IssueTracker):
         data = await self._call("POST", "/rest/api/3/search/jql", json={
             "jql": jql, "maxResults": limit, "fields": ["summary", "status", "description"],
         })
-        issues = []
-        for item in data.get("issues", []):
-            f = item.get("fields", {})
-            status = f.get("status") or {}
-            issues.append(TrackerIssue(
-                key=item["key"], title=f.get("summary", ""), url=self._url(item["key"]),
-                status=status.get("name", "unknown"),
-                closed=(status.get("statusCategory") or {}).get("key") == "done",
-                snippet=adf_text(f.get("description")).strip()[:300],
-            ))
-        return issues
+        return [self._issue(item) for item in data.get("issues", [])]
+
+    def _issue(self, item: dict) -> TrackerIssue:
+        f = item.get("fields", {})
+        status = f.get("status") or {}
+        return TrackerIssue(
+            key=item["key"], title=f.get("summary", ""), url=self._url(item["key"]),
+            status=status.get("name", "unknown"),
+            closed=(status.get("statusCategory") or {}).get("key") == "done",
+            snippet=adf_text(f.get("description")).strip()[:300],
+        )
+
+    async def issue(self, key: str) -> TrackerIssue:
+        key = self._check_key(key)
+        return self._issue(await self._call("GET", f"/rest/api/3/issue/{key}",
+                                            params={"fields": "summary,status,description"}))
 
     async def create(self, title: str, blocks: list[Block], labels: list[str]) -> TrackerIssue:
         data = await self._call("POST", "/rest/api/3/issue", json={"fields": {

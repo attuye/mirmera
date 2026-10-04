@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import { EnvironmentChoice } from '../components/BrowserPanel'
+import ClosedIssues from '../components/ClosedIssues'
 import { utcDate } from '../components/Evidence'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
 import { api, projectUrls, suiteExportUrl, SuiteRun, SuiteTest } from '../api/client'
@@ -191,6 +192,8 @@ export default function Regression() {
             )}
           </>
         )}
+
+        {tests && <ClosedIssues projectId={project.id} baseUrl={baseUrl} />}
       </main>
     </div>
   )

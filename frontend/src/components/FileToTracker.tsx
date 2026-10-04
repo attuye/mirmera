@@ -21,9 +21,11 @@ export function FilingLinks({ filings }: { filings: BugFiling[] }) {
     <span style={{ display: 'inline-flex', gap: 6 }}>
       {filings.map((f) => (
         <a key={f.id} href={f.issue_url} target="_blank" rel="noreferrer"
-          title={`${f.mode === 'new' ? 'Filed' : 'Added as an occurrence'} in ${TRACKER_LABEL[f.tracker]} ${f.target}`}
-          className="mono" style={{ fontSize: 11, color: 'var(--info)', border: '1px solid var(--border)', padding: '2px 7px', borderRadius: 5 }}>
-          {f.issue_key} ↗
+          title={`${f.mode === 'new' ? 'Filed' : 'Added as an occurrence'} in ${TRACKER_LABEL[f.tracker]} ${f.target}`
+            + (f.issue_status ? ` · ${f.issue_status} when last checked` : '')}
+          className="mono" style={{ fontSize: 11, color: 'var(--info)', border: '1px solid var(--border)', padding: '2px 7px', borderRadius: 5,
+            textDecoration: f.issue_closed ? 'line-through' : 'none' }}>
+          {f.issue_key}{f.issue_closed ? ' closed' : ''} ↗
         </a>
       ))}
     </span>

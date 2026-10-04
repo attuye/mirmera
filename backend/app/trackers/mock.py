@@ -68,7 +68,14 @@ class MockTracker(IssueTracker):
         self._get(key)
         self._db["attachments"].setdefault(key, []).append(filename)
 
-    # for tests
+    async def issue(self, key: str) -> TrackerIssue:
+        return self._get(key)
+
+    # for tests and demos
+    def set_closed(self, key: str, closed: bool = True) -> None:
+        issue = self._get(key)
+        issue.closed, issue.status = closed, "closed" if closed else "open"
+
     def comments(self, key: str) -> list[str]:
         return self._db["comments"].get(key, [])
 

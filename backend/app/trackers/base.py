@@ -81,5 +81,9 @@ class IssueTracker(ABC):
     async def comment(self, key: str, blocks: list[Block]) -> str:
         """Adds a comment to an existing issue; returns the issue URL."""
 
+    @abstractmethod
+    async def issue(self, key: str) -> TrackerIssue:
+        """One issue as it is now, with whether it is closed."""
+
     async def attach(self, key: str, filename: str, content: bytes, mime: str) -> None:
         raise TrackerError(f"{self.name} cannot receive attachments through its API")

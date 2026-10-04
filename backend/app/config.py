@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     jira_issue_type: str = "Bug"
     # Fake GitHub and Jira kept in memory: for tests, demos and trying the flow.
     mock_trackers: bool = False
+    # Check filed issues every N minutes and retest the ones newly closed (0: only on the button).
+    retest_poll_minutes: int = 0
     # Where testers open Mirmera; when set, filed issues link back to the bug.
     public_app_url: str | None = None
 

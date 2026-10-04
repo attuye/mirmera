@@ -1,4 +1,4 @@
-import { expect, test } from './fixtures'
+import { API_URL, expect, test } from './fixtures'
 
 const TARGET = 'http://localhost:5190/'
 
@@ -7,7 +7,7 @@ const TARGET = 'http://localhost:5190/'
 // the request succeeds"; recorded clicks and typing are covered by the backend
 // tests with a real form.
 test('regression test: generate from the recording, read the code, replay it to see it catch the bug', async ({ page, api, request }) => {
-  test.setTimeout(120_000)  // three replays in a real browser
+  test.setTimeout(150_000)  // several replays in a real browser
   const project = await api.project()
   const charter = await api.charter(project.id, 'Explore the document list after login')
   const session = await api.session(charter.id)
@@ -130,5 +130,35 @@ test('regression test: generate from the recording, read the code, replay it to 
     const zip = await request.get(href!)
     expect(zip.headers()['content-type']).toBe('application/zip')
     expect((await zip.body()).subarray(0, 2).toString()).toBe('PK')  // a zip file
+  })
+
+  await test.step('retest when the issue closes: the bug is still there, and the issue says so', async () => {
+    // File the bug to the mock GitHub under its own repo, so the trackers spec's repo stays untouched.
+    const [bug] = (await api.sessionBugs(session.id)).filter((b) => b.title === title)
+    const patch = (github_repo: string) => request.patch(`${API_URL}/projects/${project.id}`, { data: { github_repo } })
+    expect((await patch('addisverify/retest')).ok()).toBeTruthy()
+    const filed = await request.post(`${API_URL}/bugs/${bug.id}/file`, { data: { tracker: 'github' } })
+    expect(filed.ok(), await filed.text()).toBeTruthy()
+    const key = (await filed.json()).filing.issue_key
+    expect((await patch('')).ok()).toBeTruthy()  // the filing keeps its own repo
+
+    await page.reload()
+    const closed = page.getByRole('region', { name: 'Closed issues' })
+    await closed.getByRole('button', { name: 'Check closed issues' }).click()
+    await expect(closed.getByRole('status')).toContainText('Checked 1 of 1 filed issue: none newly closed.')
+
+    const state = await request.post(`${API_URL}/mock-trackers/issue-state`,
+      { data: { tracker: 'github', target: 'addisverify/retest', issue_key: key, closed: true } })
+    expect(state.ok()).toBeTruthy()
+    await closed.getByRole('button', { name: 'Check closed issues' }).click()
+    await expect(closed.getByRole('status')).toContainText('1 newly closed, retesting.')
+    const retest = closed.getByRole('row', { name: `Retest ${key}` })
+    await expect(retest).toContainText('Still fails', { timeout: 30_000 })
+    await expect(retest).toContainText(`Result commented on ${key}`)
+    await expect(retest).toContainText('The issue may need reopening')
+
+    await closed.getByRole('button', { name: 'Check closed issues' }).click()  // one retest per close
+    await expect(closed.getByRole('status')).toContainText('none newly closed.')
+    await expect(closed.getByRole('row')).toHaveCount(1)
   })
 })

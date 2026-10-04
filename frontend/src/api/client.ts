@@ -202,6 +202,9 @@ export interface BugFiling {
   issue_url: string
   attachments: string[]
   created_at: string
+  issue_closed: boolean | null // as seen by the last "Check closed issues"; null: never checked
+  issue_status: string | null
+  status_checked_at: string | null
 }
 
 export interface FileRequest { tracker: TrackerName; mode: 'new' | 'comment'; issue_key?: string; note?: string }
@@ -621,6 +624,25 @@ export interface SuiteRun {
   created_at: string
   finished_at: string | null
 }
+export interface Retest {
+  id: string
+  project_id: string
+  bug_id: string
+  bug_title: string
+  filing_id: string
+  tracker: TrackerName
+  issue_key: string
+  issue_url: string
+  test_id: string | null
+  outcome: 'running' | 'fixed' | 'still_fails' | 'could_not_check' | 'no_test'
+  replay: ReplayResult | null
+  detail: string | null
+  commented: boolean
+  comment_error: string | null
+  created_at: string
+  finished_at: string | null
+}
+export interface RetestCheck { checked: number; filed: number; retests: Retest[]; problems: string[] }
 export const suiteExportUrl = (projectId: string) => `${BASE_URL}/projects/${projectId}/regression-tests/export`
 
 export const api = {
@@ -630,6 +652,9 @@ export const api = {
   getSuiteRun: (runId: string) => request<SuiteRun>(`/suite-runs/${runId}`),
   cancelSuiteRun: (runId: string) => request<SuiteRun>(`/suite-runs/${runId}/cancel`, { method: 'POST' }),
   suiteHistory: (projectId: string) => request<SuiteRun[]>(`/projects/${projectId}/suite-runs`),
+  checkClosedIssues: (projectId: string, base_url?: string) =>
+    request<RetestCheck>(`/projects/${projectId}/retests/check`, { method: 'POST', body: JSON.stringify({ base_url }) }),
+  listRetests: (projectId: string) => request<Retest[]>(`/projects/${projectId}/retests`),
   listProjects: () => request<ProjectSummary[]>('/projects'),
   archiveProject: (projectId: string) => request<Project>(`/projects/${projectId}/archive`, { method: 'POST' }),
   unarchiveProject: (projectId: string) => request<Project>(`/projects/${projectId}/unarchive`, { method: 'POST' }),
