@@ -6,6 +6,7 @@ import { errorText, ConfirmDelete } from '../components/ui'
 import BrowserPanel, { useRunner } from '../components/BrowserPanel'
 import { Screenshot, clock } from '../components/Evidence'
 import TestIdeas from '../components/TestIdeas'
+import HeuristicChips from '../components/HeuristicChips'
 import { useProject, useProjectPath, useSessionProject } from '../project'
 
 const TAGS: { key: Note['tag']; label: string; color: string }[] = [
@@ -62,6 +63,7 @@ export default function ActiveSession() {
   const [totalPausedSeconds, setTotalPausedSeconds] = useState(0)
   const elapsed = useElapsed(startedAt, !ending, paused, pausedAt, totalPausedSeconds)
   const [charterMission, setCharterMission] = useState('')
+  const [charterHeuristics, setCharterHeuristics] = useState<{ heuristics: string[]; oracles: string[] }>({ heuristics: [], oracles: [] })
   const runner = useRunner(sessionId)
   const box = useRef<HTMLTextAreaElement>(null)
 
@@ -84,6 +86,7 @@ export default function ActiveSession() {
       setSessionProjectId(session.project_id)
       api.getCharter(session.charter_id).then((charter) => {
         setCharterMission(charter.mission_statement)
+        setCharterHeuristics({ heuristics: charter.heuristics, oracles: charter.oracles })
       }).catch(console.error)
     }).catch(console.error)
   }, [sessionId])
@@ -149,6 +152,7 @@ export default function ActiveSession() {
           <div>
             <div className="mono" style={{ fontSize: 10, color: 'var(--text-quiet)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Charter</div>
             <div style={{ fontSize: 14.5, fontWeight: 600, maxWidth: 560 }}>{charterMission || 'Loading…'}</div>
+            <HeuristicChips heuristics={charterHeuristics.heuristics} oracles={charterHeuristics.oracles} />
             {sessionId && (
               <div style={{ marginTop: 6 }}>
                 <ConfirmDelete label="Delete session" question="Delete this session with its notes, bugs and recordings?"

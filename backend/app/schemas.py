@@ -208,6 +208,7 @@ class CharterCreate(BaseModel):
     risk_ids: list[str] = []  # risks this charter investigates (must belong to the project)
     test_ideas: list[str] = []
     oracles: list[str] = []
+    heuristics: list[str] = []  # keys from the heuristics library
 
 
 class CharterOut(BaseModel):
@@ -223,13 +224,14 @@ class CharterOut(BaseModel):
     risk_ids: list[str] = []
     test_ideas: list[str] = []
     oracles: list[str] = []
+    heuristics: list[str] = []
     source_artifact_id: Optional[str] = None
     source_label: Optional[str] = None  # the change it was suggested from
     source_url: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
-    @field_validator("risk_areas", "test_ideas", "oracles", mode="before")
+    @field_validator("risk_areas", "test_ideas", "oracles", "heuristics", mode="before")
     @classmethod
     def none_is_empty(cls, value):
         # Charters saved before these columns existed have NULL here.
@@ -1433,10 +1435,11 @@ class CoverageMap(BaseModel):
 
 class NudgeOut(BaseModel):
     id: str
-    kind: str  # problem | risk | idea | field | choice | upload | submit | page | time
+    kind: str  # problem | risk | idea | heuristic | field | choice | upload | submit | page | time
     title: str
     why: str
     heuristic: str
+    heuristic_key: Optional[str] = None  # its card in the heuristics library
     suggestions: list[str]
     priority: int
 
@@ -1515,3 +1518,7 @@ class ReportSummaryOut(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CharterHeuristics(BaseModel):
+    keys: list[str] = Field(default=[], max_length=20)

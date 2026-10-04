@@ -7,7 +7,7 @@ import RegressionTestPanel from '../components/RegressionTestPanel'
 import ReproductionPanel from '../components/ReproductionPanel'
 import BugStepsPanel from '../components/BugStepsPanel'
 import IsolationPanel from '../components/IsolationPanel'
-import { useProject } from '../project'
+import { useProject, useProjectPath } from '../project'
 import { Screenshot, SignalList } from '../components/Evidence'
 
 const SEVERITY_COLOR: Record<string, string> = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-tertiary)' }
@@ -311,6 +311,7 @@ function ReviewForm({ bug, onCancel, onSaved, onRedraft, drafting }: {
   const [error, setError] = useState<string | null>(null)
 
   const missingOracle = kind === 'bug' && (!oracle || !oracleWhy.trim())
+  const libraryPath = useProjectPath()
   const canSave = title.trim().length >= 3 && !missingOracle && !saving
 
   async function save() {
@@ -405,6 +406,10 @@ function ReviewForm({ bug, onCancel, onSaved, onRedraft, drafting }: {
               <option key={o} value={o}>{o.replace(/_/g, ' ')}: {ORACLES[o]}</option>
             ))}
           </select>
+          <a href={libraryPath(`/heuristics${oracle ? `#${oracle}` : ''}`)} target="_blank" rel="noreferrer"
+            style={{ fontSize: 11.5, color: 'var(--text-tertiary)', display: 'inline-block', marginTop: 4 }}>
+            {oracle ? 'About this oracle ↗' : 'How to choose an oracle ↗'}
+          </a>
         </div>
         <div>
           <label htmlFor={id('oracle-why')} style={fieldLabel}>Why it's a problem</label>

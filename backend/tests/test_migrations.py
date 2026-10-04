@@ -51,7 +51,7 @@ def test_old_database_is_upgraded_in_place(tmp_path):
     assert renamed == ["products -> projects", "artifacts.product_id -> artifacts.project_id",
                        "charters.product_id -> charters.project_id"]
     assert set(added) == {"projects.testing_mission", "projects.github_repo", "projects.jira_project_key",
-                          "charters.test_ideas", "charters.oracles"} | NEW_PROJECT_COLUMNS
+                          "charters.test_ideas", "charters.oracles", "charters.heuristics"} | NEW_PROJECT_COLUMNS
     tables = set(inspect(engine).get_table_names())
     assert {"projects", "risks", "product_models", "charter_risks"} <= tables
     assert "products" not in tables

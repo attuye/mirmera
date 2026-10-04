@@ -3,19 +3,26 @@
  *  A suggestion goes into the note box; "Tried it" logs a test note; "Not now"
  *  hides the idea for the rest of the session. */
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api, Note, Nudge } from '../api/client'
+import { useProjectPath } from '../project'
 
 const POLL_MS = 8000
 const SHOWN = 3
 const KIND_COLOR: Record<Nudge['kind'], string> = {
-  problem: 'var(--danger)', risk: 'var(--warning)', idea: 'var(--info)', field: 'var(--accent)', choice: 'var(--accent)',
+  problem: 'var(--danger)', risk: 'var(--warning)', idea: 'var(--info)', heuristic: 'var(--accent)', field: 'var(--accent)', choice: 'var(--accent)',
   upload: 'var(--accent)', submit: 'var(--accent)', page: 'var(--question)', time: 'var(--text-tertiary)',
 }
 
 /** The note "Tried it" logs: the idea itself for charter ideas and risks, else the title. */
 function triedNote(n: Nudge): string {
+  if (n.kind === 'heuristic') return `Tried: ${n.title.replace(/^Try: /, '')}`
   return n.kind === 'idea' || n.kind === 'risk' ? `Tried: ${n.suggestions[0]}` : `Tried: ${n.title}`
 }
+
+/** Ideas whose suggestions are questions or advice, not values to try: listed, with "Write a note". */
+const LISTED: Nudge['kind'][] = ['problem', 'heuristic']
+const notePrefix = (n: Nudge) => n.kind === 'heuristic' ? `Tried ${n.title.replace(/^Try: /, '')}: ` : `Investigated ${n.title.replace(/^Investigate: /, '')}: `
 
 export default function TestIdeas({ sessionId, refreshKey, disabled, onNote, onUse }: {
   sessionId: string
@@ -28,6 +35,7 @@ export default function TestIdeas({ sessionId, refreshKey, disabled, onNote, onU
   const [all, setAll] = useState(false)
   const [hidden, setHidden] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
+  const path = useProjectPath()
 
   const load = useCallback(() => api.listNudges(sessionId).then(setNudges).catch(() => {}), [sessionId])
   useEffect(() => { load() }, [load, refreshKey])
@@ -67,11 +75,16 @@ export default function TestIdeas({ sessionId, refreshKey, disabled, onNote, onU
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{n.title}</div>
-                <span className="mono" title="The testing heuristic behind this idea"
-                  style={{ fontSize: 10, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{n.heuristic}</span>
+                {n.heuristic_key ? (
+                  <Link to={path(`/heuristics#${n.heuristic_key}`)} className="mono" title="Open this heuristic in the library"
+                    style={{ fontSize: 10, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', textDecoration: 'underline dotted' }}>{n.heuristic}</Link>
+                ) : (
+                  <span className="mono" title="The testing heuristic behind this idea"
+                    style={{ fontSize: 10, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{n.heuristic}</span>
+                )}
               </div>
               <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2 }}>{n.why}</div>
-              {n.kind === 'problem' ? (
+              {LISTED.includes(n.kind) ? (
                 <ul style={{ margin: '6px 0 0', paddingLeft: 16, fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
                   {n.suggestions.map((s) => <li key={s}>{s}</li>)}
                 </ul>
@@ -87,8 +100,8 @@ export default function TestIdeas({ sessionId, refreshKey, disabled, onNote, onU
               </div>
               )}
               <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-                {n.kind === 'problem' && (
-                  <button onClick={() => onUse(`Investigated ${n.title.replace(/^Investigate: /, '')}: `)} disabled={disabled}
+                {LISTED.includes(n.kind) && (
+                  <button onClick={() => onUse(notePrefix(n))} disabled={disabled}
                     style={{ background: 'none', padding: 0, fontSize: 11.5, color: 'var(--text-secondary)', fontWeight: 500 }}>Write a note</button>
                 )}
                 <button onClick={() => act(n, true)} disabled={disabled || busy === n.id}

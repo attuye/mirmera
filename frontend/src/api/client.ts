@@ -91,10 +91,15 @@ export interface Charter {
   risk_ids: string[]
   test_ideas: string[]
   oracles: string[]
+  heuristics: string[]  // keys from the heuristics library
   source_artifact_id: string | null
   source_label: string | null  // the change it was suggested from, e.g. "PR #42: …"
   source_url: string | null
 }
+
+export interface Heuristic { key: string; group: 'oracle' | 'element' | 'quality' | 'technique'; name: string; summary: string; questions: string[]; example: string }
+export interface HeuristicGroup { key: Heuristic['group']; name: string; mnemonic: string; about: string }
+export interface HeuristicsLibrary { groups: HeuristicGroup[]; heuristics: Heuristic[] }
 
 export interface CharterSuggestion {
   mission_statement: string
@@ -677,10 +682,11 @@ export interface RetestCheck { checked: number; filed: number; retests: Retest[]
 
 export interface Nudge {
   id: string
-  kind: 'problem' | 'risk' | 'idea' | 'field' | 'choice' | 'upload' | 'submit' | 'page' | 'time'
+  kind: 'problem' | 'risk' | 'idea' | 'heuristic' | 'field' | 'choice' | 'upload' | 'submit' | 'page' | 'time'
   title: string
   why: string
   heuristic: string
+  heuristic_key: string | null  // its card in the heuristics library
   suggestions: string[]
   priority: number
 }
@@ -818,6 +824,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ artifact_ids: artifactIds, provider }),
     }),
+  heuristics: () => request<HeuristicsLibrary>('/heuristics'),
+  setCharterHeuristics: (charterId: string, keys: string[]) =>
+    request<Charter>(`/charters/${charterId}/heuristics`, { method: 'PUT', body: JSON.stringify({ keys }) }),
   saveCharter: (projectId: string, charter: CharterInput) =>
     request<Charter>(`/projects/${projectId}/charters`, { method: 'POST', body: JSON.stringify(charter) }),
 

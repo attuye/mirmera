@@ -142,6 +142,7 @@ class Charter(Base):
     # Added in the risk-model step:
     test_ideas = Column(JSON, default=list)  # starting ideas, not scripted steps
     oracles = Column(JSON, default=list)  # FEW HICCUPPS heuristics to spot problems
+    heuristics = Column(JSON, nullable=True)  # keys from the heuristics library, chosen by the tester
 
     project = relationship("Project", back_populates="charters")
     sessions = relationship("Session", back_populates="charter")

@@ -97,6 +97,16 @@ On the Risks page, **Add an artifact** has two tabs. **Paste** takes text, or **
 Imports use the same `GITHUB_TOKEN` and Jira settings as filing (read access is enough), and the project's repo
 and Jira key from Settings. Very large diffs are cut at 60,000 characters, and the artifact says so.
 
+### Heuristics library
+
+**Plan → Heuristics** collects the heuristics Mirmera uses, with a one-line summary, questions to ask and a KYC
+example for each: **oracles** (FEW HICCUPPS: how you recognise a problem), **product elements** (SFDIPOT: what
+to cover), **quality criteria** (which kinds of good matter) and **techniques** (Goldilocks, interruptions,
+follow the data, personas, starve it…). Search them, filter by group, and **add one to a charter**: the charter
+shows it ("Try Goldilocks"), and its sessions bring it back as a test idea until a note mentions it. Test ideas,
+charter oracles and the bug review's oracle picker link to the library. FEW HICCUPPS, SFDIPOT and the quality
+criteria come from James Bach and Michael Bolton's Rapid Software Testing; the summaries are Mirmera's own.
+
 ### Charters from a change
 
 The **Charters** page lists the project's charters (click one to start or resume a session) and has **Suggest from

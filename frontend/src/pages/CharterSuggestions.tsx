@@ -7,6 +7,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import TesterField, { useTesterName } from '../components/TesterField'
 import ArtifactImport from '../components/ArtifactImport'
+import HeuristicChips from '../components/HeuristicChips'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton } from '../components/ui'
 import { API_URL, api, Artifact, Charter, CharterSuggestion } from '../api/client'
 import { useProject, useProjectPath } from '../project'
@@ -136,6 +137,7 @@ export default function CharterSuggestions() {
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 13 }}>{c.mission_statement}</div>
                   <SourceTag label={c.source_label} url={c.source_url} />
+                  <HeuristicChips heuristics={c.heuristics} oracles={c.oracles} />
                 </div>
                 <span className="mono" style={{ fontSize: 9.5, color: c.status === 'active' ? 'var(--accent)' : 'var(--text-tertiary)', flexShrink: 0 }}>
                   {c.status.toUpperCase()}
