@@ -59,7 +59,8 @@ export default function BrowserPanel({ sessionId, runner, disabled, project }: {
     }
   }
 
-  const signals = evidence.filter((e) => SIGNAL_KINDS.includes(e.kind)).reverse()
+  const signals = evidence.filter((e) => SIGNAL_KINDS.includes(e.kind) && e.kind !== 'accessibility').reverse()
+  const a11y = evidence.filter((e) => e.kind === 'accessibility')
   const pages = evidence.filter((e) => e.kind === 'navigation').reverse().slice(0, 8)
   const running = !!status?.running
   const viaChrome = !running && !!status?.extension_active
@@ -146,8 +147,16 @@ export default function BrowserPanel({ sessionId, runner, disabled, project }: {
             What the page reported <span style={{ color: 'var(--text-quiet)' }}>(evidence, not verdicts: you decide)</span>
           </div>
           <div style={{ maxHeight: 240, overflowY: 'auto' }}>
-            <SignalList items={signals} empty="Nothing yet: no console errors or failed requests." />
+            <SignalList items={signals} empty="Nothing yet: no console errors, failed or slow requests." />
           </div>
+          {a11y.length > 0 && (
+            <details style={{ marginTop: 10 }}>
+              <summary style={{ fontSize: 11.5, color: 'var(--text-tertiary)', cursor: 'pointer' }}>
+                Accessibility: {a11y.length} finding{a11y.length === 1 ? '' : 's'} <span style={{ color: 'var(--text-quiet)' }}>(checked on each page load)</span>
+              </summary>
+              <div style={{ maxHeight: 200, overflowY: 'auto', marginTop: 4 }}><SignalList items={a11y} /></div>
+            </details>
+          )}
         </section>
       )}
 

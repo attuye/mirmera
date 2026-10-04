@@ -1,12 +1,14 @@
 /** Display pieces for what the browser runner recorded. */
 import { Evidence, EvidenceKind, evidenceFileUrl } from '../api/client'
 
-export const SIGNAL_KINDS: EvidenceKind[] = ['console_error', 'page_error', 'failed_request']
+export const SIGNAL_KINDS: EvidenceKind[] = ['console_error', 'page_error', 'failed_request', 'slow_request', 'accessibility']
 
 export const KIND_META: Record<EvidenceKind, { one: string; plural: string; color: string }> = {
   console_error: { one: 'console error', plural: 'console errors', color: 'var(--danger)' },
   page_error: { one: 'page error', plural: 'page errors', color: 'var(--danger)' },
   failed_request: { one: 'failed request', plural: 'failed requests', color: 'var(--warning)' },
+  slow_request: { one: 'slow request', plural: 'slow requests', color: 'var(--warning)' },
+  accessibility: { one: 'accessibility finding', plural: 'accessibility findings', color: 'var(--question)' },
   navigation: { one: 'page visited', plural: 'pages visited', color: 'var(--info)' },
   action: { one: 'action recorded', plural: 'actions recorded', color: 'var(--question)' },
   screenshot: { one: 'screenshot', plural: 'screenshots', color: 'var(--accent)' },

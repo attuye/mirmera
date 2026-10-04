@@ -26,7 +26,8 @@ from app.runner import describe_locator
 from app.timeutil import utcnow
 
 STALE_DAYS = 14
-PROBLEM_KINDS = ("failed_request", "console_error", "page_error")
+ERROR_KINDS = ("failed_request", "console_error", "page_error")  # something broke: "problems, no bug" counts these
+PROBLEM_KINDS = ERROR_KINDS + ("slow_request", "accessibility")
 _ID = re.compile(r"^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{12,}|(?=.*\d)[A-Za-z0-9_-]{16,})$", re.I)
 
 
@@ -53,7 +54,8 @@ class Page:
     visits: int = 0
     actions: int = 0
     controls: set[str] = field(default_factory=set)
-    problems: dict[str, int] = field(default_factory=lambda: defaultdict(int))  # summary -> count
+    problems: dict[tuple[str, str], int] = field(default_factory=lambda: defaultdict(int))  # (kind, summary) -> count
+    errors: int = 0  # how many of the problems are errors (not slowness or accessibility)
     bugs: list[dict] = field(default_factory=list)
     first_seen: datetime | None = None
     last_seen: datetime | None = None
@@ -124,7 +126,9 @@ def build(db: DBSession, project: models.Project, since: datetime | None = None)
                     if control:
                         p.controls.add(control)
             elif e.kind in PROBLEM_KINDS and current:
-                page(current).problems[_problem(e)] += e.count or 1
+                page(current).problems[(e.kind, _problem(e))] += e.count or 1
+                if e.kind in ERROR_KINDS:
+                    page(current).errors += e.count or 1
         for b in bugs_by_session.get(sid, []):  # the page the tester was on when logging it
             where = next((k for ts, k in reversed(timeline) if ts <= b.created_at), timeline[0][1] if timeline else None)
             if where:
@@ -136,7 +140,7 @@ def build(db: DBSession, project: models.Project, since: datetime | None = None)
         flags = []
         if p.actions == 0:
             flags.append("not_tried")
-        if p.problems and not p.bugs:
+        if p.errors and not p.bugs:
             flags.append("problems_without_bug")
         if stale:
             flags.append("stale")
@@ -145,7 +149,7 @@ def build(db: DBSession, project: models.Project, since: datetime | None = None)
         rows.append({
             "path": p.path, "hosts": sorted(p.hosts), "sessions": len(p.sessions), "testers": sorted(p.testers),
             "charters": sorted(p.charters), "visits": p.visits, "actions": p.actions, "controls": sorted(p.controls),
-            "problems": [{"summary": k, "count": v} for k, v in sorted(p.problems.items(), key=lambda kv: -kv[1])],
+            "problems": [{"summary": k[1], "count": v, "kind": k[0]} for k, v in sorted(p.problems.items(), key=lambda kv: -kv[1])],
             "bugs": p.bugs, "first_seen": p.first_seen, "last_seen": p.last_seen, "flags": flags,
         })
 
@@ -185,7 +189,7 @@ def _gaps(rows: list[dict], areas: list[dict]) -> list[str]:
             gaps.append(f"Product area not explored: {a['name']} ({a['category']}): {why}")
     for r in rows:
         if "problems_without_bug" in r["flags"]:
-            top = r["problems"][0]
+            top = next(x for x in r["problems"] if x["kind"] in ERROR_KINDS)
             gaps.append(f"{r['path']}: {top['summary']} (x{top['count']}) was recorded but no bug was logged there")
     for r in rows:
         if "not_tried" in r["flags"]:

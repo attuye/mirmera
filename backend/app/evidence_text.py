@@ -9,9 +9,9 @@ from datetime import datetime
 
 from app import models
 
-PROBLEM_KINDS = ("console_error", "page_error", "failed_request")
-LABELS = {"console_error": "console error", "page_error": "page error",
-          "failed_request": "failed request", "navigation": "page"}
+PROBLEM_KINDS = ("console_error", "page_error", "failed_request", "slow_request", "accessibility")
+LABELS = {"console_error": "console error", "page_error": "page error", "failed_request": "failed request",
+          "slow_request": "slow request", "accessibility": "accessibility finding", "navigation": "page"}
 NOT_USED = "(the recorded browser was not used)"
 
 

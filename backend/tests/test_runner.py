@@ -19,12 +19,35 @@ HOME = b"""<!doctype html><title>KYC upload</title>
   fetch('/api/documents');
 </script>"""
 UPLOAD = b"<!doctype html><title>Upload</title><h1>Choose a file</h1>"
+# Accessible except for what each line plants: lang, alt, label, button name, contrast, duplicate id.
+A11Y = b"""<!doctype html><title>Register</title>
+<body style="background:#fff">
+<img src="/logo.png" width="10" height="10">
+<input id="phone" name="phone"> <label for="email">Email</label><input id="email">
+<button style="width:20px;height:20px"></button>
+<p style="color:#bbb">Fine print nobody can read</p>
+<p id="dup">a</p><p id="dup">b</p>
+<p>Readable text</p></body>"""
+SLOW = b"""<!doctype html><html lang="en"><title>Slow</title><h1>Search</h1>
+<script>fetch('/api/slow?q=1'); fetch('/api/fast')</script></html>"""
 
 
 class Target(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/documents":
             self._send(500, b'{"error":"boom"}', "application/json")
+        elif self.path.startswith("/api/slow"):
+            time.sleep(0.6)
+            self._send(200, b"{}", "application/json")
+        elif self.path == "/api/fast":
+            self._send(200, b"{}", "application/json")
+        elif self.path == "/a11y":
+            self._send(200, A11Y, "text/html")
+        elif self.path == "/slow":
+            self._send(200, SLOW, "text/html")
+        elif self.path == "/slowdoc":
+            time.sleep(0.6)
+            self._send(200, b'<!doctype html><html lang="en"><title>Late</title><h1>Late</h1></html>', "text/html")
         elif self.path == "/upload":
             self._send(200, UPLOAD, "text/html")
         elif self.path == "/":
@@ -224,3 +247,42 @@ def test_windows_gets_an_event_loop_that_can_start_the_browser(monkeypatch):
     monkeypatch.setattr(runner.sys, "platform", "win32")
     monkeypatch.setattr(asyncio, "ProactorEventLoop", FakeProactor, raising=False)
     assert isinstance(runner._new_loop(), FakeProactor)
+
+
+
+# ---------- accessibility and slowness ----------
+
+def test_each_page_load_is_checked_for_accessibility(client, session, site, chromium_available):
+    client.post(f"/sessions/{session['id']}/runner", json={"url": site + "/a11y"})
+    wait_for(client, session, lambda c: c.get("accessibility", 0) >= 6)
+    found = sorted(e["summary"] for e in evidence(client, session, "accessibility"))
+    assert "Page has no language (<html lang>)" in found
+    assert "Image without alt text: img logo.png" in found
+    assert "Form field without a label: input#phone" in found  # input#email has one
+    assert "Button without a name: button" in found
+    assert any(f.startswith('Low contrast text (1.9:1, needs 4.5:1): "Fine print nobody can read"') for f in found)
+    assert 'Duplicate id "dup" (2 elements)' in found
+    assert not any("Readable text" in f for f in found)
+
+
+def test_slow_calls_and_slow_pages_are_recorded(client, session, site, chromium_available, monkeypatch):
+    monkeypatch.setattr(settings, "slow_request_ms", 300)
+    monkeypatch.setattr(settings, "slow_page_ms", 300)
+    client.post(f"/sessions/{session['id']}/runner", json={"url": site + "/slow"})
+    wait_for(client, session, lambda c: c.get("slow_request", 0) >= 1)
+    slow = [e for e in evidence(client, session, "slow_request")]
+    assert [e["summary"] for e in slow] == [f"GET {site}/api/slow took longer than 0.3 s"]  # no query, /api/fast not listed
+    page = client.get(f"/sessions/{session['id']}/runner").json()
+    from app.runner import manager
+    manager.loop.run(manager.get(session["id"])._current_page().goto(site + "/slowdoc"), timeout=10)
+    wait_for(client, session, lambda c: c.get("slow_request", 0) >= 2)
+    assert f"Page {site}/slowdoc took longer than 0.3 s to load" in [e["summary"] for e in evidence(client, session, "slow_request")]
+    assert page["running"]
+
+
+def test_accessibility_checks_can_be_turned_off(client, session, site, chromium_available, monkeypatch):
+    monkeypatch.setattr(settings, "runner_accessibility_checks", False)
+    client.post(f"/sessions/{session['id']}/runner", json={"url": site + "/a11y"})
+    wait_for(client, session, lambda c: c.get("navigation", 0) >= 1)
+    time.sleep(1.0)
+    assert evidence(client, session, "accessibility") == []

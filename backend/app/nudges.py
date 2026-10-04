@@ -145,18 +145,42 @@ def build(db: DBSession, session: models.Session) -> list[dict]:
 
     # Something went wrong and nothing covers it.
     for e in evidence:
-        if e.kind not in coverage.PROBLEM_KINDS:
+        if e.kind not in coverage.ERROR_KINDS + ("slow_request",):
             continue
         summary = coverage._problem(e)
         if any(b.created_at >= e.captured_at for b in bugs) or _covered(summary, note_text + bug_text):
             continue  # a bug logged after it, or a note about it
+        times = f" {e.count} times" if (e.count or 1) > 1 else ""
+        if e.kind == "slow_request":
+            nudges.append(Nudge(
+                _id("problem", summary), "problem", f"Investigate: {summary}",
+                f"The browser recorded this{times}, and no bug or note covers it yet.",
+                "Performance: is it slow for users?", [
+                    "Repeat it: slow every time, or only the first time (cold cache)?",
+                    "Try a slow connection (DevTools → Network → Slow 4G): does the page say it's working?",
+                    "Click again while it's still loading: does it send the request twice?",
+                ], priority=1))
+            continue
         nudges.append(Nudge(
             _id("problem", summary), "problem", f"Investigate: {summary}",
-            f"The browser recorded this{f' {e.count} times' if (e.count or 1) > 1 else ''}, and no bug or note covers it yet.",
+            f"The browser recorded this{times}, and no bug or note covers it yet.",
             "Investigate what the app tells you", [
                 "Repeat what you did just before it: does it happen every time?",
                 "Log a bug if it's a problem, or a note saying why it's fine",
             ], priority=0))
+
+    # Accessibility findings: one nudge for them all, with ways to check by hand.
+    findings = [e for e in evidence if e.kind == "accessibility"]
+    if findings and not any(w in n for n in note_text + bug_text for w in ("accessib", "a11y", "screen reader", "keyboard", "contrast")):
+        nudges.append(Nudge(
+            _id("a11y", str(len(findings) > 0)), "problem", f"Accessibility: {len(findings)} finding{'s' if len(findings) != 1 else ''} recorded",
+            "e.g. " + "; ".join(f.summary for f in findings[:2]) + ". Checks find leads; people find barriers.",
+            "Accessibility: can everyone use it?", [
+                "Use the main form with the keyboard only: Tab, Shift+Tab, Enter, Esc",
+                "Zoom to 200%: is anything cut off or overlapping?",
+                "Turn on a screen reader (NVDA, or VoiceOver) and fill the form",
+                "Log a bug for any finding that blocks someone",
+            ], priority=2))
 
     # The charter's risks and ideas that no note mentions yet.
     for r in charter.risks:

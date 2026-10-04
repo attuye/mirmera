@@ -55,7 +55,7 @@ class RunnerConflict(RunnerError):
 
 @dataclass
 class Signal:
-    kind: str  # "console_error" | "page_error" | "failed_request" | "navigation" | "action"
+    kind: str  # "console_error" | "page_error" | "failed_request" | "slow_request" | "accessibility" | "navigation" | "action"
     summary: str
     url: str | None
     at: datetime
@@ -63,6 +63,17 @@ class Signal:
 
 
 RECORDER_JS = (Path(__file__).parent / "recorder.js").read_text(encoding="utf-8")
+A11Y_JS = (Path(__file__).parent / "a11y_check.js").read_text(encoding="utf-8")
+TIMED_TYPES = ("fetch", "xhr")  # requests timed for "slow request"; page loads are timed separately
+
+
+def _without_query(url: str) -> str:
+    """Slow signals are grouped per address: /search?q=a and ?q=b are the same request."""
+    return url.split("?", 1)[0].split("#", 1)[0]
+
+
+def _seconds(ms: int) -> str:
+    return f"{ms / 1000:g} s"
 ACTIONS = {"click", "fill", "select", "check", "uncheck", "press", "upload"}
 LOCATOR_METHODS = {"testid", "label", "placeholder", "role", "text", "css"}
 
@@ -204,6 +215,7 @@ class BrowserRunner:
         self._context.on("page", self._watch)
         self._context.on("response", self._on_response)
         self._context.on("requestfailed", self._on_request_failed)
+        self._context.on("requestfinished", self._on_request_finished)
 
         page = await self._context.new_page()
         self._watch(page)
@@ -293,6 +305,7 @@ class BrowserRunner:
         page.on("console", lambda msg: self._on_console(msg, page))
         page.on("pageerror", lambda err: self._add("page_error", str(err), page.url))
         page.on("framenavigated", lambda frame: frame == page.main_frame and self._on_navigation(frame.url))
+        page.on("load", lambda: asyncio.ensure_future(self._after_load(page)))
 
     def _on_console(self, msg, page) -> None:
         # Chrome also logs every failed request as "Failed to load resource";
@@ -308,6 +321,37 @@ class BrowserRunner:
     def _on_response(self, response) -> None:
         if response.status >= 400 and not response.url.endswith(IGNORED_URL_SUFFIXES):
             self._add("failed_request", f"{response.request.method} {response.url} → {response.status}", response.url)
+
+    def _on_request_finished(self, request) -> None:
+        from app.config import settings
+        if request.resource_type not in TIMED_TYPES:
+            return
+        try:
+            ms = request.timing.get("responseEnd", -1)
+        except Exception:  # timing not available for this request
+            return
+        if ms > settings.slow_request_ms:
+            url = _without_query(request.url)
+            self._add("slow_request", f"{request.method} {url} took longer than {_seconds(settings.slow_request_ms)}", url,
+                      {"ms": round(ms)})
+
+    async def _after_load(self, page) -> None:
+        """When a page has loaded: how long it took, and the accessibility check."""
+        from app.config import settings
+        try:
+            url = page.url
+            if not url.startswith(("http://", "https://")):
+                return
+            ms = await page.evaluate("(() => { const n = performance.getEntriesByType('navigation')[0];"
+                                     " return n ? Math.round(n.loadEventStart || n.duration) : -1 })()")
+            if ms and ms > settings.slow_page_ms:
+                base = _without_query(url)
+                self._add("slow_request", f"Page {base} took longer than {_seconds(settings.slow_page_ms)} to load", base, {"ms": ms})
+            if settings.runner_accessibility_checks:
+                for finding in await page.evaluate(A11Y_JS) or []:
+                    self._add("accessibility", str(finding.get("text", ""))[:300], url, {"rule": finding.get("rule")})
+        except Exception as err:  # the page navigated away or closed mid-check: nothing to record
+            logger.debug("Page check skipped: %s", err)
 
     def _on_request_failed(self, request) -> None:
         failure = request.failure or "no response"
