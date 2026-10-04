@@ -5,6 +5,7 @@ from app import models, schemas
 from app.ai import tasks
 from app.ai.routing import provider_for
 from app.database import get_db
+from app import heuristics
 
 router = APIRouter(tags=["charters"])
 
@@ -65,6 +66,9 @@ def save_charter(project_id: str, payload: schemas.CharterCreate, db: DBSession 
         if missing:
             raise HTTPException(400, f"Unknown risk ids for this project: {sorted(missing)}")
 
+    unknown = [k for k in data.get("heuristics") or [] if k not in heuristics.BY_KEY]
+    if unknown:
+        raise HTTPException(400, f"Unknown heuristics: {', '.join(unknown)}")
     if data.get("source_artifact_id"):
         source = db.get(models.Artifact, data["source_artifact_id"])
         if not source or source.project_id != project_id:
@@ -99,3 +103,24 @@ def get_active_session(charter_id: str, db: DBSession = Depends(get_db)):
     if not session:
         raise HTTPException(404, "No active session for this charter")
     return session
+
+
+@router.get("/heuristics")
+def heuristics_library():
+    """The heuristics library: oracles, product elements, quality criteria and techniques."""
+    return heuristics.catalog()
+
+
+@router.put("/charters/{charter_id}/heuristics", response_model=schemas.CharterOut)
+def set_charter_heuristics(charter_id: str, payload: schemas.CharterHeuristics, db: DBSession = Depends(get_db)):
+    """The heuristics a tester picked for this charter; they come back as test ideas in its sessions."""
+    charter = db.get(models.Charter, charter_id)
+    if not charter:
+        raise HTTPException(404, "Charter not found")
+    unknown = [k for k in payload.keys if k not in heuristics.BY_KEY]
+    if unknown:
+        raise HTTPException(400, f"Unknown heuristics: {', '.join(unknown)}")
+    charter.heuristics = list(dict.fromkeys(payload.keys))  # no repeats, order kept
+    db.commit()
+    db.refresh(charter)
+    return charter

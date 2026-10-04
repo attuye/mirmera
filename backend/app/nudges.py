@@ -41,6 +41,7 @@ class Nudge:
     heuristic: str  # the testing heuristic behind it, named
     suggestions: list[str] = field(default_factory=list)  # concrete things to try
     priority: int = 5  # lower first
+    heuristic_key: str | None = None  # its card in the heuristics library
 
 
 def _id(*parts: str) -> str:
@@ -159,7 +160,7 @@ def build(db: DBSession, session: models.Session) -> list[dict]:
                     "Repeat it: slow every time, or only the first time (cold cache)?",
                     "Try a slow connection (DevTools → Network → Slow 4G): does the page say it's working?",
                     "Click again while it's still loading: does it send the request twice?",
-                ], priority=1))
+                ], priority=1, heuristic_key="performance"))
             continue
         nudges.append(Nudge(
             _id("problem", summary), "problem", f"Investigate: {summary}",
@@ -180,7 +181,7 @@ def build(db: DBSession, session: models.Session) -> list[dict]:
                 "Zoom to 200%: is anything cut off or overlapping?",
                 "Turn on a screen reader (NVDA, or VoiceOver) and fill the form",
                 "Log a bug for any finding that blocks someone",
-            ], priority=2))
+            ], priority=2, heuristic_key="usability"))
 
     # The charter's risks and ideas that no note mentions yet.
     for r in charter.risks:
@@ -193,6 +194,14 @@ def build(db: DBSession, session: models.Session) -> list[dict]:
         if not _covered(idea, note_text):
             nudges.append(Nudge(_id("idea", idea), "idea", "From the charter", "A starting idea on the charter that no note mentions yet.",
                                 "Charter test ideas", [idea], priority=2))
+
+    # Heuristics the tester picked for this charter, until a note mentions them.
+    from app import heuristics as library
+    for key in charter.heuristics or []:
+        h = library.BY_KEY.get(key)
+        if h and not any(h.name.lower() in n or key.replace("_", " ") in n for n in note_text):
+            nudges.append(Nudge(_id("heuristic", key), "heuristic", f"Try: {h.name}", h.summary,
+                                "Chosen for this charter", h.questions, priority=3, heuristic_key=key))
 
     # What the recorded browser saw the tester do.
     fills: dict[str, list[str]] = defaultdict(list)
@@ -222,7 +231,7 @@ def build(db: DBSession, session: models.Session) -> list[dict]:
             nudges.append(Nudge(
                 _id("field", name), "field", f'Vary "{name}"',
                 f"You've tried {tried}. It looks like a {kind} field.",
-                "Boundaries and odd inputs", todo[:5], priority=3))
+                "Boundaries and odd inputs", todo[:5], priority=3, heuristic_key="goldilocks"))
     for name, values in choices.items():
         picked = list(dict.fromkeys(values))
         if len(picked) < 3:
@@ -230,17 +239,17 @@ def build(db: DBSession, session: models.Session) -> list[dict]:
                 _id("choice", name, str(len(picked))), "choice", f'Other choices in "{name}"',
                 f"You've chosen {', '.join(picked) or 'one option'}.",
                 "Cover the options", ["each other option, through to the end", "change the choice after filling the rest of the form"],
-                priority=4))
+                priority=4, heuristic_key="configurations"))
     for name in uploads:
         nudges.append(Nudge(_id("upload", name), "upload", f'Odd files for "{name}"', "You uploaded a file here.",
                             "Files are inputs too", [
                                 "a very large file (20 MB+)", "a zero-byte file", "the wrong type renamed (.pdf named .jpg)",
-                                "a very long file name with spaces and non-Latin letters", "the same file twice"], priority=4))
+                                "a very long file name with spaces and non-Latin letters", "the same file twice"], priority=4, heuristic_key="goldilocks"))
     for name in submits:
         nudges.append(Nudge(_id("submit", name), "submit", f'Interrupt "{name}"', f'You clicked "{name}".',
                             "Interruptions and timing", [
                                 f'double-click "{name}"', "press Back after it, then submit again", "refresh while it's working",
-                                "leave the form open 30 minutes, then submit (session timeout)"], priority=4))
+                                "leave the form open 30 minutes, then submit (session timeout)"], priority=4, heuristic_key="interruptions"))
 
     # Pages others opened but nobody tried.
     here = {coverage.page_key(e.url) for e in evidence if e.kind in ("navigation", "action")} - {None}
@@ -261,7 +270,7 @@ def build(db: DBSession, session: models.Session) -> list[dict]:
                             "Change your approach", [
                                 "Goldilocks: too small, too big, just right", "a different user: new, impatient, on a slow connection",
                                 "follow the data: create, change, delete, then look for it everywhere", "ask a question you've been assuming the answer to"],
-                            priority=6))
+                            priority=6, heuristic_key="personas"))
 
     dismissed = set(session.dismissed_nudges or [])
     unique = list({n.id: n for n in nudges}.values())  # the same problem recorded twice is one nudge
