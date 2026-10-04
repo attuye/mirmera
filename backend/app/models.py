@@ -63,6 +63,47 @@ class Artifact(Base):
     project = relationship("Project", back_populates="artifacts")
 
 
+# Which stories a risk or charter belongs to (many-to-many). A story links to
+# risks and charters; it doesn't own them, so a risk outlives its story.
+story_risks = Table(
+    "story_risks",
+    Base.metadata,
+    Column("story_id", String, ForeignKey("stories.id"), primary_key=True),
+    Column("risk_id", String, ForeignKey("risks.id"), primary_key=True),
+)
+story_charters = Table(
+    "story_charters",
+    Base.metadata,
+    Column("story_id", String, ForeignKey("stories.id"), primary_key=True),
+    Column("charter_id", String, ForeignKey("charters.id"), primary_key=True),
+)
+
+
+class Story(Base):
+    """A user story (or any change the team plans): its claims are one oracle among
+    several. Risks and charters are linked to it, not kept inside it."""
+    __tablename__ = "stories"
+    id = Column(String, primary_key=True, default=gen_id)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    key = Column(String, nullable=True)  # "KYC-12", "#45"; None for one written here
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)  # what it claims, acceptance criteria included
+    url = Column(String, nullable=True)
+    tracker = Column(String, nullable=True)  # "github" | "jira" | None
+    tracker_status = Column(String, nullable=True)  # as the tracker says it, e.g. "In Progress"
+    closed = Column(Boolean, default=False)
+    artifact_id = Column(String, ForeignKey("artifacts.id"), nullable=True)  # made for charter suggestions
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    risks = relationship("Risk", secondary=story_risks, back_populates="stories")
+    charters = relationship("Charter", secondary=story_charters, back_populates="stories")
+
+    @property
+    def ref(self) -> dict:
+        return {"id": self.id, "key": self.key, "title": self.title}
+
+
 # Which risks a charter investigates (many-to-many).
 charter_risks = Table(
     "charter_risks",
@@ -120,12 +161,17 @@ class Risk(Base):
 
     project = relationship("Project", back_populates="risks")
     charters = relationship("Charter", secondary=charter_risks, back_populates="risks")
+    stories = relationship("Story", secondary="story_risks", back_populates="risks")
     changes = relationship("RiskChange", back_populates="risk", cascade="all, delete-orphan",
                            order_by="RiskChange.created_at")
 
     @property
     def score(self) -> int:
         return self.impact * self.likelihood
+
+    @property
+    def story_refs(self) -> list[dict]:
+        return [st.ref for st in self.stories]
 
 
 class Charter(Base):
@@ -149,10 +195,15 @@ class Charter(Base):
     sessions = relationship("Session", back_populates="charter")
     risks = relationship("Risk", secondary=charter_risks, back_populates="charters")
     source_artifact = relationship("Artifact")
+    stories = relationship("Story", secondary="story_charters", back_populates="charters")
 
     @property
     def risk_ids(self) -> list[str]:
         return [r.id for r in self.risks]
+
+    @property
+    def story_refs(self) -> list[dict]:
+        return [st.ref for st in self.stories]
 
     @property
     def source_label(self) -> str | None:

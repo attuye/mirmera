@@ -61,7 +61,7 @@ class JiraTracker(IssueTracker):
             key=item["key"], title=f.get("summary", ""), url=self._url(item["key"]),
             status=status.get("name", "unknown"),
             closed=(status.get("statusCategory") or {}).get("key") == "done",
-            snippet=adf_text(f.get("description")).strip()[:300],
+            snippet=adf_text(f.get("description")).strip()[:300], body=adf_text(f.get("description")).strip(),
         )
 
     async def list_issues(self, jql: str, limit: int = 50) -> list[dict]:

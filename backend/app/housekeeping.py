@@ -11,7 +11,7 @@ from collections import Counter
 
 from sqlalchemy.orm import Session as DBSession
 
-from app import models
+from app import models, stories
 from app.agent import reproduce as agent
 from app.regression import isolate
 from app.routers.runner import session_folder
@@ -126,6 +126,10 @@ def delete_project(db: DBSession, project: models.Project) -> dict:
     if summaries:
         counts["report_summaries"] += summaries
     risk_ids = [r.id for r in db.query(models.Risk.id).filter(models.Risk.project_id == pid)]
+    story_ids = [st.id for st in db.query(models.Story.id).filter(models.Story.project_id == pid)]
+    stories.unlink_all(db, story_ids=story_ids, risk_ids=risk_ids, charter_ids=charter_ids)
+    if story_ids:
+        counts["stories"] += db.query(models.Story).filter(models.Story.project_id == pid).delete(synchronize_session=False)
     if risk_ids:
         counts["risk_changes"] += db.query(models.RiskChange).filter(models.RiskChange.risk_id.in_(risk_ids)).delete(synchronize_session=False)
     if charter_ids or risk_ids:

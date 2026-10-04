@@ -78,6 +78,16 @@ async def poll_forever(minutes: int) -> None:
             log.exception("Retest check failed; trying again in %s minutes", minutes)
 
 
+@router.post("/mock-trackers/issues")
+def add_mock_issue(payload: schemas.MockIssueCreate):
+    """With MOCK_TRACKERS=true only: add an issue (a story, say) to the in-memory tracker."""
+    if not settings.mock_trackers:
+        raise HTTPException(404, "Only available with MOCK_TRACKERS=true.")
+    from app.trackers.mock import MockTracker
+    issue = MockTracker(payload.tracker, payload.target)._add(payload.title, payload.body)
+    return {"issue_key": issue.key, "url": issue.url}
+
+
 @router.post("/mock-trackers/issue-state")
 def set_mock_issue_state(payload: schemas.MockIssueState):
     """With MOCK_TRACKERS=true only: close or reopen an issue in the in-memory tracker,

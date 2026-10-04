@@ -209,6 +209,13 @@ class CharterCreate(BaseModel):
     test_ideas: list[str] = []
     oracles: list[str] = []
     heuristics: list[str] = []  # keys from the heuristics library
+    story_ids: list[str] = []  # stories this charter belongs to (same project)
+
+
+class StoryRef(BaseModel):
+    id: str
+    key: Optional[str] = None
+    title: str
 
 
 class CharterOut(BaseModel):
@@ -228,8 +235,9 @@ class CharterOut(BaseModel):
     source_artifact_id: Optional[str] = None
     source_label: Optional[str] = None  # the change it was suggested from
     source_url: Optional[str] = None
+    stories: list[StoryRef] = Field(default=[], validation_alias="story_refs")
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     @field_validator("risk_areas", "test_ideas", "oracles", "heuristics", mode="before")
     @classmethod
@@ -599,8 +607,9 @@ class RiskOut(BaseModel):
     last_change: Optional[str]
     created_at: datetime
     updated_at: datetime
+    stories: list[StoryRef] = Field(default=[], validation_alias="story_refs")
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class ChartersFromRisksRequest(BaseModel):
@@ -1379,6 +1388,13 @@ class MockIssueState(BaseModel):
     closed: bool = True
 
 
+class MockIssueCreate(BaseModel):
+    tracker: Literal["github", "jira"]
+    target: str
+    title: str
+    body: str = ""
+
+
 class ProjectReport(BaseModel):
     """The test report as blocks: heading, paragraph, table, bullets, quote."""
     project_id: str
@@ -1556,3 +1572,59 @@ class NotificationsOut(BaseModel):
     settings: NotificationSettings
     channels: dict  # {"telegram": {"configured", "problem"}, "slack": {...}, "mock": bool}
     recent: list[NotificationLogOut]
+
+
+# ---- User stories ------------------------------------------------------------
+
+class StoryCreate(BaseModel):
+    """A story written here, for teams whose tracker isn't connected."""
+    title: str = Field(min_length=3, max_length=300)
+    key: Optional[str] = Field(default=None, max_length=40)
+    description: Optional[str] = Field(default=None, max_length=20_000)
+    url: Optional[str] = Field(default=None, max_length=500)
+
+
+class StoryImport(BaseModel):
+    ref: str = Field(min_length=1, max_length=500)  # KYC-12, #45, or an address
+
+
+class StoryUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=3, max_length=300)
+    key: Optional[str] = Field(default=None, max_length=40)
+    description: Optional[str] = Field(default=None, max_length=20_000)
+    url: Optional[str] = Field(default=None, max_length=500)
+    closed: Optional[bool] = None
+
+
+class StoryLinks(BaseModel):
+    ids: list[str] = Field(default=[], max_length=200)
+
+
+class StorySummary(BaseModel):
+    id: str
+    key: Optional[str]
+    title: str
+    url: Optional[str]
+    tracker: Optional[str]
+    tracker_status: Optional[str]
+    closed: bool
+    created_at: datetime
+    risks: int
+    charters: int
+    sessions: int
+    minutes: int
+    bugs: int
+    high_bugs: int
+    left: int
+
+
+class StoryDetail(StorySummary):
+    description: Optional[str]
+    artifact_id: Optional[str]
+    risk_list: list[dict]  # [{"id", "ref", "title", "failure_mode", "score", "status", "quality_criterion", "charters", "other_stories"}]
+    charter_list: list[dict]  # [{"id", "mission_statement", "status", "priority", "risk_refs", "sessions", "minutes", "bugs"}]
+    session_list: list[dict]  # [{"id", "charter_id", "mission_statement", "tester", "started_at", "ended_at", "minutes", "bugs", "debrief"}]
+    bug_list: list[dict]  # [{"id", "title", "kind", "severity", "session_id", "issue_key", "issue_url"}]
+    pages: list[dict]  # [{"page", "sessions", "actions"}]
+    more_pages: int
+    left_list: list[dict]  # [{"text", "to", "action"}]

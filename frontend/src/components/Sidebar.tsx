@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, BookOpen, Bug, ChevronRight, Compass, FileText, FlaskConical, FolderKanban, LayoutDashboard, Lightbulb, Map as MapIcon,
-  MessageSquareText, ScanSearch, ScrollText, Settings, ShieldAlert, TrendingUp, type LucideIcon,
+  MessageSquareText, ScanSearch, ScrollText, Settings, ShieldAlert, StickyNote, TrendingUp, type LucideIcon,
 } from 'lucide-react'
 import { api, ProjectSummary } from '../api/client'
 
@@ -14,6 +14,7 @@ type Entry = Item | Group
 const MENU: Entry[] = [
   { label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard },
   { label: 'Plan', icon: Compass, items: [
+    { label: 'Stories', to: '/stories', icon: StickyNote },
     { label: 'Risks', to: '/risks', icon: ShieldAlert },
     { label: 'Charters', to: '/charters/suggest', icon: ScrollText },
     { label: 'Heuristics', to: '/heuristics', icon: BookOpen },
