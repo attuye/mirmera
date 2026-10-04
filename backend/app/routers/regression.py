@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from app import models, schemas
 from app.ai import tasks
-from app.ai.base import get_provider
+from app.ai.routing import provider_for
 from app.config import settings
 from app.database import get_db
 from app.evidence_text import _defang as defang
@@ -128,7 +128,7 @@ async def generate(bug_id: str, payload: schemas.RegressionRequest, db: DBSessio
                                  "steps yourself under Steps to the bug.")
     session = bug.session
     project = db.get(models.Project, bug.charter.project_id)
-    provider = get_provider(payload.provider or project.default_ai_provider)
+    provider = provider_for(project, "regression", payload.provider)
     evidence = [e for e in runner_api.evidence_for_bug(db, bug) if e.kind != "action"]
     browser = browser_context(evidence, session.started_at, used=True)
     warnings: list[str] = []

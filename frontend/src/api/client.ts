@@ -51,6 +51,8 @@ export interface Project {
   default_tester: string | null
   /** Set while archived: hidden from the Projects page, still usable. */
   archived_at: string | null
+  /** Provider per AI task, e.g. { debrief: 'local' }; other tasks use default_ai_provider. */
+  ai_task_providers: Record<string, string>
   created_at: string
 }
 
@@ -65,7 +67,7 @@ export interface ProjectSummary extends Project {
 
 export type ProjectChanges = Partial<Pick<Project,
   'name' | 'description' | 'testing_mission' | 'default_ai_provider' | 'github_repo' | 'jira_project_key' |
-  'app_url' | 'environments' | 'default_tester'>>
+  'app_url' | 'environments' | 'default_tester' | 'ai_task_providers'>>
 
 /** Every address a project knows, default first, without repeats. */
 export function projectUrls(project: Project): Environment[] {
@@ -598,6 +600,22 @@ export function deletedText(d: Deleted): string {
   return parts.join(', ') || 'nothing else'
 }
 
+// ---- AI tasks and model check ------------------------------------------------
+
+export interface AIOverview {
+  tasks: { key: string; label: string; hint: string }[]
+  providers: { name: string; configured: boolean; model: string | null; problem: string | null }[]
+}
+export interface AICheckResult {
+  provider: string
+  model: string | null
+  task: string
+  result: 'ok' | 'retried' | 'failed'
+  seconds: number
+  sample: string | null
+  detail: string | null
+}
+
 // ---- Regression suite ---------------------------------------------------------
 
 export interface SuiteTest {
@@ -655,6 +673,9 @@ export const api = {
   checkClosedIssues: (projectId: string, base_url?: string) =>
     request<RetestCheck>(`/projects/${projectId}/retests/check`, { method: 'POST', body: JSON.stringify({ base_url }) }),
   listRetests: (projectId: string) => request<Retest[]>(`/projects/${projectId}/retests`),
+  aiOverview: () => request<AIOverview>('/ai'),
+  aiCheck: (provider: string, task: string) =>
+    request<AICheckResult>('/ai/check', { method: 'POST', body: JSON.stringify({ provider, task }) }),
   listProjects: () => request<ProjectSummary[]>('/projects'),
   archiveProject: (projectId: string) => request<Project>(`/projects/${projectId}/archive`, { method: 'POST' }),
   unarchiveProject: (projectId: string) => request<Project>(`/projects/${projectId}/unarchive`, { method: 'POST' }),

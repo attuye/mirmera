@@ -113,7 +113,7 @@ def test_second_analysis_continues_numbering_and_sees_existing_risks(client, mod
         "quality_criterion": "capability", "elements": ["convert_currency"],
         "impact": 2, "likelihood": 3, "rationale": "r", "evidence": "inferred",
     }]})
-    monkeypatch.setattr("app.routers.risks.get_provider", lambda name: provider)
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: provider)
     new = client.post(f"/projects/{modelled['id']}/risks/analyze", json={}).json()
     assert [r["ref"] for r in new] == ["R4"]
     assert risks[0]["title"] in provider.users[0]  # told what already exists
@@ -187,7 +187,7 @@ def test_invented_risk_refs_are_dropped_with_a_warning(client, modelled, risks, 
         {"target": "ghost area", "resources": "x", "information": "y", "rationale": "r",
          "risk_refs": ["R42"], "test_ideas": ["a"], "oracles": ["world"], "priority": "low"},
     ]})
-    monkeypatch.setattr("app.routers.risks.get_provider", lambda name: provider)
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: provider)
     out = client.post(f"/projects/{modelled['id']}/charters/from-risks", json={}).json()
     assert [c["risk_refs"] for c in out["charters"]] == [["R1"]]
     assert len(out["warnings"]) == 3  # R99 ignored, R42 ignored, ghost charter dropped
