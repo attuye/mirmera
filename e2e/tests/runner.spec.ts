@@ -58,6 +58,22 @@ test('recorded browser: signals, screenshots, bug evidence and the trace', async
     await expect(bug.getByText(/it only knows your notes and what the browser recorded/)).toBeVisible()
   })
 
+  await test.step('the coverage map shows the page, what went wrong there, and the bug logged on it', async () => {
+    await page.getByRole('link', { name: 'Coverage', exact: true }).click()
+    await expect(page.getByRole('status', { name: 'Coverage summary' })).toContainText(/\d+ pages? from \d+ recorded sessions?/)
+    const pages = page.getByRole('region', { name: 'Pages' })
+    const home = pages.getByRole('row', { name: '/', exact: true })
+    await expect(home).toBeVisible()
+    await home.getByRole('button', { name: 'Details for /' }).click()
+    const details = pages.getByRole('row').filter({ hasText: 'Problems recorded' })
+    await expect(details).toContainText('GET /api/documents → 500')
+    await expect(details).toContainText('Upload widget failed to init')
+    await expect(details.getByRole('link', { name: 'Upload widget never loads' })).toBeVisible()
+    await expect(details).toContainText('localhost:5190')
+    await pages.getByRole('button', { name: /^Problems, no bug/ }).click()
+    await expect(home).toHaveCount(0)  // a bug was logged there
+  })
+
   await test.step('ending the session closes the browser and keeps the trace and network log', async () => {
     await page.goto(`/projects/${project.id}/sessions/${session.id}`)
     await page.getByRole('button', { name: 'End Session' }).click()

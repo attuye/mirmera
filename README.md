@@ -163,6 +163,16 @@ check on a timer while the backend runs. With `MOCK_TRACKERS=true`, close a mock
 issue with `POST /mock-trackers/issue-state`
 (`{"tracker": "github", "target": "owner/repo", "issue_key": "#3"}`).
 
+### Coverage map
+
+The **Coverage** page shows where the testing actually went. Every page the recorded browser (or the Chrome
+extension) opened is listed by path, with ids collapsed (`/orders/42` and `/orders/43` are `/orders/:id`; staging
+and production count as one page): how many sessions went there, the actions and distinct controls used (never
+the values typed), the failed requests and errors recorded there, and the bugs logged while on it. Pages are
+flagged **Not tried** (opened, nothing clicked), **Problems, no bug**, **Stale** (not visited for 14 days) or
+**One tester**. **Product areas** shows each element of the product model, explored when a session's charter
+targets a risk naming it. **Where to look next** lists the gaps.
+
 ### Test report
 
 The **Report** page tells the project's testing story for a period (or all time):
