@@ -91,7 +91,7 @@ def test_draft_gets_charter_risks_trail_and_environment(client, project, session
         "kind": "question", "title": "t?", "summary": "s", "steps_to_reproduce": [], "expected": "e",
         "actual": "a", "severity": "low", "severity_rationale": "r", "reproducibility": "unknown",
     })
-    monkeypatch.setattr("app.routers.bugs.get_provider", lambda name: provider)
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: provider)
     client.post(f"/bugs/{b['id']}/draft", json={})
 
     user = provider.users[0]
@@ -106,7 +106,7 @@ def test_ai_bug_without_an_oracle_is_drafted_as_a_question(client, bug, monkeypa
         "kind": "bug", "title": "t", "summary": "s", "steps_to_reproduce": [], "expected": "e", "actual": "a",
         "severity": "low", "severity_rationale": "r", "reproducibility": "unknown",
     }
-    monkeypatch.setattr("app.routers.bugs.get_provider", lambda name: Scripted(bad))
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: Scripted(bad))
     r = client.post(f"/bugs/{bug['id']}/draft", json={})
     assert r.status_code == 200, r.text
     draft = client.get(f"/bugs/{bug['id']}").json()["ai_draft"]

@@ -73,6 +73,13 @@ def update_project(project_id: str, payload: schemas.ProjectUpdate, db: DBSessio
     provider = changes.get("default_ai_provider")
     if provider is not None and provider not in PROVIDER_NAMES:
         raise HTTPException(400, f"Unknown AI provider '{provider}'. Use one of: {', '.join(PROVIDER_NAMES)}")
+    if "ai_task_providers" in changes:
+        from app.ai.routing import TASK_KEYS
+        choices = {k: v for k, v in (changes["ai_task_providers"] or {}).items() if v}
+        bad = [k for k in choices if k not in TASK_KEYS] + [v for v in choices.values() if v not in PROVIDER_NAMES]
+        if bad:
+            raise HTTPException(400, f"Unknown AI task or provider: {', '.join(bad)}")
+        changes["ai_task_providers"] = choices or None
     if changes.get("name") is not None:
         changes["name"] = changes["name"].strip()
         if not changes["name"]:

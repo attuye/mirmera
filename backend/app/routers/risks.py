@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from app import models, schemas
 from app.ai import tasks
-from app.ai.base import get_provider
+from app.ai.routing import provider_for
 from app.database import get_db
 from app.timeutil import utcnow
 
@@ -50,7 +50,7 @@ async def build_product_model(project_id: str, payload: schemas.ProductModelRequ
     if not artifacts:
         raise HTTPException(400, "No matching artifacts found for this project")
 
-    provider = get_provider(payload.provider or project.default_ai_provider)
+    provider = provider_for(project, "product_model", payload.provider)
     result, truncated = await tasks.build_product_model(
         provider,
         project_name=project.name,
@@ -99,7 +99,7 @@ async def analyze_risks(project_id: str, payload: schemas.RiskAnalyzeRequest, db
         .filter(models.Risk.project_id == project_id, models.Risk.status != "retired")
         .all()
     )
-    provider = get_provider(payload.provider or project.default_ai_provider)
+    provider = provider_for(project, "risk_analysis", payload.provider)
     proposed = await tasks.analyze_risks(
         provider,
         project_name=project.name,
@@ -213,7 +213,7 @@ async def charters_from_risks(project_id: str, payload: schemas.ChartersFromRisk
         raise HTTPException(400, "No accepted risks to plan from. Accept at least one risk first.")
 
     snapshot = _latest_model(db, project_id)
-    provider = get_provider(payload.provider or project.default_ai_provider)
+    provider = provider_for(project, "risk_charters", payload.provider)
     drafts = await tasks.charters_from_risks(
         provider,
         project_name=project.name,

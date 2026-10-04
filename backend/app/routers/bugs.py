@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from app import models, schemas
 from app.ai import tasks
-from app.ai.base import get_provider
+from app.ai.routing import provider_for
 from app.database import get_db
 from app.evidence_text import browser_context
 from app.routers import runner as runner_api
@@ -38,7 +38,7 @@ async def draft_report(bug_id: str, payload: schemas.BugDraftRequest, db: DBSess
     charter = bug.charter
     project = db.get(models.Project, charter.project_id)
 
-    provider = get_provider(payload.provider or project.default_ai_provider)
+    provider = provider_for(project, "bug_report", payload.provider)
     runner_api.sync_signals(db, bug.session_id)  # include anything the open browser saw since the last poll
     browser = browser_context(
         runner_api.evidence_for_bug(db, bug), bug.session.started_at,

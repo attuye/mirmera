@@ -60,7 +60,7 @@ def test_debrief_is_still_saved_when_the_ai_fails(client, session, monkeypatch):
         async def complete(self, system, user, **kwargs):
             raise ProviderError("provider down")
 
-    monkeypatch.setattr("app.routers.sessions.get_provider", lambda name: Broken())
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name: Broken())
     r = client.post(f"/sessions/{session['id']}/end")
     assert r.status_code == 200
     assert r.json()["coverage_summary"] is None
