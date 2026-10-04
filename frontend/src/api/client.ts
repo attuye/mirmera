@@ -691,6 +691,22 @@ export interface Nudge {
   priority: number
 }
 
+// ---- Testing trends ---------------------------------------------------------------
+
+export interface TrendRow {
+  week: string  // Monday, YYYY-MM-DD
+  sessions: number; hours: number; testers: number
+  bugs: { high: number; medium: number; low: number }
+  questions: number; unreviewed: number
+  bugs_per_hour: number | null
+  time_split: Record<string, number>
+  charters: { fulfilled: number; partly: number; not: number }
+  fixes: { verified: number; still_fails: number }
+  risk_exposure: number | null
+}
+export interface TrendChange { name: string; before: number; recent: number; direction: 'up' | 'down' | 'same'; text: string; note: string | null }
+export interface Trends { project_id: string; weeks: number; generated_at: string; phases: Record<string, string>; rows: TrendRow[]; changes: TrendChange[] }
+
 // ---- Coverage map ---------------------------------------------------------------
 
 export type CoverageFlag = 'not_tried' | 'problems_without_bug' | 'stale' | 'one_tester'
@@ -793,6 +809,7 @@ export const api = {
     request<void>(`/sessions/${sessionId}/nudges/${nudgeId}/dismiss`, { method: 'POST' }),
   triedNudge: (sessionId: string, nudgeId: string, note: string) =>
     request<Note>(`/sessions/${sessionId}/nudges/${nudgeId}/tried`, { method: 'POST', body: JSON.stringify({ note }) }),
+  getTrends: (projectId: string, weeks: number) => request<Trends>(`/projects/${projectId}/trends?weeks=${weeks}`),
   getCoverage: (projectId: string, since?: string) =>
     request<CoverageMap>(`/projects/${projectId}/coverage${since ? `?since=${since}` : ''}`),
   draftReportSummary: (projectId: string, since?: string, until?: string) =>

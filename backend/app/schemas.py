@@ -1522,3 +1522,13 @@ class ReportSummaryOut(BaseModel):
 
 class CharterHeuristics(BaseModel):
     keys: list[str] = Field(default=[], max_length=20)
+
+
+class Trends(BaseModel):
+    """Week by week (Monday to Sunday, UTC), oldest first."""
+    project_id: str
+    weeks: int
+    generated_at: datetime
+    phases: dict  # time-split keys and their names
+    rows: list[dict]  # [{"week", "sessions", "hours", "testers", "bugs": {...}, "bugs_per_hour", "time_split", "charters", "fixes", "risk_exposure"}]
+    changes: list[dict]  # the last 4 weeks against the 4 before: [{"name", "before", "recent", "direction", "text", "note"}]

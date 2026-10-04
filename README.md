@@ -232,6 +232,15 @@ flagged **Not tried** (opened, nothing clicked), **Problems, no bug**, **Stale**
 **One tester**. **Product areas** shows each element of the product model, explored when a session's charter
 targets a risk naming it. **Where to look next** lists the gaps.
 
+### Trends
+
+**Insights → Trends** shows the direction, week by week (Monday to Sunday, the last 8, 12 or 26 weeks): testing
+time, bugs found by severity, bugs per hour of testing, where the time went, fixes checked after an issue closed,
+and risk exposure (the sum of the accepted risks' scores at the end of each week, rebuilt from their re-scores).
+**What changed** compares the last four weeks with the four before ("Bugs per hour of testing: 0.87 → 0.37"),
+with a note on what a change can mean, never a verdict. Every chart has a hover tooltip, and **Show as table**
+gives the numbers.
+
 ### Test report
 
 The **Report** page tells the project's testing story for a period, in two views:
