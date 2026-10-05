@@ -28,6 +28,10 @@ cp .env.example .env   # then set ANTHROPIC_API_KEY
 uvicorn app.main:app --reload
 ```
 
+`backend/.env`, the SQLite database (`backend/mirmera.db`), the evidence folder and `secret.key` are always found in
+`backend/`, even if you start the server from another folder (for example `uvicorn app.main:app --app-dir backend` from
+the repo root). Relative paths in `DATABASE_URL`, `EVIDENCE_DIR` and `SECRET_KEY_FILE` are taken inside `backend/`.
+
 API docs at http://localhost:8000/docs once it's running.
 
 ### Accounts and workspaces

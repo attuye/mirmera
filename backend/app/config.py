@@ -1,8 +1,32 @@
+from pathlib import Path
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# backend/. The .env file, the SQLite database and the evidence folder are found here
+# whichever folder the server is started from; otherwise starting it from the repo root
+# would skip backend/.env and create a new, empty mirmera.db next to it.
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
+def in_backend(path: str) -> str:
+    """A relative path, taken inside backend/; an absolute one as it is."""
+    p = Path(path).expanduser()
+    return str(p if p.is_absolute() else (BACKEND_DIR / p).resolve())
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env")
+    model_config = SettingsConfigDict(env_file=BACKEND_DIR / ".env")
+
+    @model_validator(mode="after")
+    def _paths_in_backend(self):
+        prefix = "sqlite:///"
+        if self.database_url.startswith(prefix):
+            db = self.database_url[len(prefix):]
+            if db and db != ":memory:" and not db.startswith("file:"):
+                self.database_url = prefix + Path(in_backend(db)).as_posix()
+        self.evidence_dir = in_backend(self.evidence_dir)
+        return self
 
     database_url: str = "sqlite:///./mirmera.db"
 
