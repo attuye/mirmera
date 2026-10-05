@@ -90,6 +90,7 @@ function Workspaces() {
                 <Link to={`/workspaces/${w.id}/members`} style={{ ...quietButton, fontSize: 12, padding: '3px 9px' }}>Members</Link>
                 {workspace?.id !== w.id && <button onClick={() => setWorkspace(w.id)} style={{ ...quietButton, fontSize: 12, padding: '3px 9px' }}>Switch</button>}
                 {(w.role === 'owner' || w.role === 'admin') && <Link to={`/workspaces/${w.id}/keys`} style={{ ...quietButton, fontSize: 12, padding: '3px 9px' }}>Keys</Link>}
+                {(w.role === 'owner' || w.role === 'admin') && <Link to={`/workspaces/${w.id}/jira`} style={{ ...quietButton, fontSize: 12, padding: '3px 9px' }}>Jira</Link>}
                 {(w.role === 'owner' || w.role === 'admin') && <button onClick={() => setRenaming({ id: w.id, name: w.name })} style={{ ...quietButton, fontSize: 12, padding: '3px 9px' }}>Rename</button>}
               </>
             )}

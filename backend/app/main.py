@@ -9,7 +9,7 @@ from app.ai.base import ProviderError, ProviderNotConfigured, UnknownProvider
 from app.auth import guard
 from app.config import settings
 from app.database import Base, add_missing_columns, apply_renames, engine
-from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension, isolate, suite, retests, report, coverage, nudges, notifications, stories, sprints, ai, members, workspace_keys, api_explore, openapi, strategy, auth as auth_routes
+from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension, isolate, suite, retests, report, coverage, nudges, notifications, stories, sprints, ai, members, workspace_keys, jira_app, api_explore, openapi, strategy, auth as auth_routes
 from app.runner import RunnerConflict, RunnerUnavailable, manager as runner_manager
 from app.trackers import TrackerError, TrackerNotConfigured, UnknownTracker
 
@@ -90,6 +90,7 @@ async def runner_conflict(_: Request, err: RunnerConflict):
 app.include_router(auth_routes.router)  # signing in can't require being signed in
 app.include_router(members.router)  # checks membership itself; invitation links work signed out
 app.include_router(workspace_keys.router)  # admins of the workspace only
+app.include_router(jira_app.router)  # workspace admins, or the Jira app with an Atlassian-signed token
 app.include_router(extension.router, dependencies=GUARDED)  # before sessions: /sessions/active must not match /sessions/{id}
 app.include_router(projects.router, dependencies=GUARDED)
 app.include_router(artifacts.router, dependencies=GUARDED)

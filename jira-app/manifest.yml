@@ -1,0 +1,46 @@
+# The Mirmera app for Jira (Atlassian Forge). See README.md for setting it up.
+# `forge register` replaces app.id with this app's own ID; put the same ID in Mirmera's
+# backend/.env as JIRA_APP_ID. Set the remote's baseUrl to the address Atlassian can reach
+# your Mirmera API on (a tunnel while developing), then `forge deploy`.
+modules:
+  jira:issuePanel:
+    - key: mirmera-issue-panel
+      resource: panel
+      resolver:
+        function: panel-resolver
+      render: native
+      title: Mirmera
+      icon: resource:icons;mirmera.svg
+  jira:adminPage:
+    - key: mirmera-admin-page
+      resource: admin
+      resolver:
+        function: admin-resolver
+      render: native
+      title: Mirmera
+  function:
+    - key: panel-resolver
+      handler: index.panelHandler
+    - key: admin-resolver
+      handler: index.adminHandler
+resources:
+  - key: panel
+    path: src/frontend/panel.jsx
+  - key: admin
+    path: src/frontend/admin.jsx
+  - key: icons
+    path: static/icons
+remotes:
+  - key: mirmera
+    baseUrl: https://mirmera-api.example.com
+    operations:
+      - compute
+permissions:
+  external:
+    fetch:
+      backend:
+        - remote: mirmera
+app:
+  id: ari:cloud:ecosystem::app/00000000-0000-0000-0000-000000000000
+  runtime:
+    name: nodejs22.x

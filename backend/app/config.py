@@ -113,5 +113,11 @@ class Settings(BaseSettings):
     # Where testers open Mirmera; when set, filed issues link back to the bug.
     public_app_url: str | None = None
 
+    # The Mirmera app for Jira (jira-app/, built on Atlassian Forge). Its requests carry a token
+    # signed by Atlassian; it is accepted only when its audience is this app's ID, which
+    # `forge register` prints (ari:cloud:ecosystem::app/...). Unset: the Jira app is turned off.
+    jira_app_id: str | None = None
+    forge_jwks_url: str = "https://forge.cdn.prod.atlassian-dev.net/.well-known/jwks.json"
+
 
 settings = Settings()

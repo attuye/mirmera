@@ -347,6 +347,18 @@ check on a timer while the backend runs. With `MOCK_TRACKERS=true`, close a mock
 issue with `POST /mock-trackers/issue-state`
 (`{"tracker": "github", "target": "owner/repo", "issue_key": "#3"}`).
 
+### Mirmera in Jira
+
+`jira-app/` is an Atlassian Forge app. It puts a **Mirmera** panel on every Jira issue:
+
+- for a story, the risks, charters and sessions behind it, and what hasn't been looked at yet;
+- for a bug Mirmera filed, where it was found and the latest retest.
+
+A workspace admin links a Jira site under **Account → workspace → Jira**, with a one-time
+code that a Jira admin pastes into the app. Calls from the app carry a token signed by
+Atlassian, and Mirmera checks it against `JIRA_APP_ID`. Setup steps (Forge CLI, a tunnel,
+deploy, install) are in [`jira-app/README.md`](jira-app/README.md).
+
 ### Test-idea nudges
 
 While a session runs, **Test ideas** under the note box suggests what to try next, from what this session has
@@ -419,7 +431,7 @@ instead of sending them. Tokens and webhook addresses are removed from any error
 
 ## Tests
 
-CI runs all three on every pull request.
+CI runs all four on every pull request.
 
 ### Backend (pytest)
 
@@ -439,6 +451,14 @@ without Chromium installed they are skipped locally (and fail in CI).
 ```bash
 cd frontend
 npm run build
+```
+
+### Jira app (manifest and bundles)
+
+```bash
+cd jira-app
+npm install
+npm run check
 ```
 
 ### Browser tests (Playwright)

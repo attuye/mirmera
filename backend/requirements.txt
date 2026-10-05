@@ -11,3 +11,4 @@ python-multipart==0.0.9
 playwright==1.56.0
 cryptography==46.0.7
 PyYAML==6.0.3
+PyJWT==2.12.1

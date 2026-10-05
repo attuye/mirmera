@@ -676,3 +676,34 @@ class TestStrategy(Base):
 
     sprint = relationship("Sprint")
     author = relationship("User")
+
+
+class JiraLinkCode(Base):
+    """A one-time code a workspace admin makes in Mirmera and a Jira admin pastes into the
+    Mirmera app in Jira, to link that Jira site to the workspace. Only its hash is stored."""
+    __tablename__ = "jira_link_codes"
+    id = Column(String, primary_key=True, default=gen_id)
+    workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=False, index=True)
+    code_hash = Column(String, nullable=False, unique=True, index=True)  # sha256 of the code
+    created_by = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    expires_at = Column(DateTime, nullable=False)
+
+
+class JiraInstallation(Base):
+    """The Mirmera app installed on a Jira site (a Forge installation), linked to one workspace.
+    Requests from the app carry a token signed by Atlassian that names the installation."""
+    __tablename__ = "jira_installations"
+    id = Column(String, primary_key=True, default=gen_id)
+    installation_id = Column(String, nullable=False, unique=True, index=True)  # from the Forge invocation token
+    cloud_id = Column(String, nullable=True)  # the Jira site
+    site_url = Column(String, nullable=True)  # "https://acme.atlassian.net", as the app reports it
+    environment = Column(String, nullable=True)  # Forge environment: DEVELOPMENT | STAGING | PRODUCTION
+    workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=False, index=True)
+    linked_by = Column(String, ForeignKey("users.id"), nullable=True)  # who made the code
+    linked_by_jira = Column(String, nullable=True)  # Atlassian account id that pasted it
+    linked_at = Column(DateTime, default=utcnow)
+    last_seen_at = Column(DateTime, nullable=True)
+
+    workspace = relationship("Workspace")
+    linker = relationship("User")

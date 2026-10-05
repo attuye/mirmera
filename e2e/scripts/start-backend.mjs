@@ -13,6 +13,7 @@ const evidenceDir = path.join(dataDir, 'evidence')
 
 const port = process.env.E2E_API_PORT ?? '8100'
 const webUrl = process.env.E2E_WEB_URL ?? 'http://localhost:5180'
+const targetUrl = process.env.E2E_TARGET_URL ?? 'http://localhost:5190'
 
 // Prefer the backend's own virtualenv when there is one (Windows or Unix layout).
 const venvPython = [
@@ -42,6 +43,9 @@ const child = spawn(python, ['-m', 'uvicorn', 'app.main:app', '--port', port], {
     MOCK_NOTIFICATIONS: 'true',
     MOCK_EMAIL: 'true',  // invitations and reset links are kept, readable at GET /mock-email
     MIRMERA_SECRET_KEY: 'e2e-only key for workspace secrets',  // so no secret.key file is written in backend/
+    // The Jira app, with the target server standing in for Atlassian's signing keys.
+    JIRA_APP_ID: 'ari:cloud:ecosystem::app/e2e-mirmera',
+    FORGE_JWKS_URL: `${targetUrl}/fake-forge/jwks.json`,
     ...(process.env.PW_CHROMIUM_PATH ? { RUNNER_CHROMIUM_PATH: process.env.PW_CHROMIUM_PATH } : {}),
   },
 })

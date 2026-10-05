@@ -1943,3 +1943,87 @@ class StrategySave(BaseModel):
     ai_provider: Optional[str] = Field(default=None, max_length=40)
     ai_model: Optional[str] = Field(default=None, max_length=120)
     prompt_version: Optional[str] = Field(default=None, max_length=40)
+
+
+# ---------- the Mirmera app for Jira ----------
+
+class JiraInstallationOut(BaseModel):
+    id: str
+    site_url: Optional[str] = None
+    cloud_id: Optional[str] = None
+    environment: Optional[str] = None
+    linked_by: Optional[str] = None  # the Mirmera admin who made the code
+    linked_at: datetime
+    last_seen_at: Optional[datetime] = None
+
+
+class JiraAppOverview(BaseModel):
+    configured: bool  # JIRA_APP_ID is set on this server
+    installations: list[JiraInstallationOut]
+
+
+class JiraLinkCodeOut(BaseModel):
+    code: str  # shown once
+    expires_at: datetime
+
+
+class JiraLinkIn(BaseModel):
+    code: str = Field(min_length=8, max_length=200)
+    site_url: Optional[str] = Field(default=None, max_length=300)
+
+
+class JiraAppStatus(BaseModel):
+    linked: bool
+    workspace: Optional[str] = None
+    site_url: Optional[str] = None
+    linked_at: Optional[datetime] = None
+    app_url: Optional[str] = None
+
+
+class JiraIssuePanelIn(BaseModel):
+    issue_key: str = Field(min_length=3, max_length=50, pattern=r"^[A-Za-z][A-Za-z0-9_]+-\d+$")
+    project_key: Optional[str] = Field(default=None, max_length=30)
+
+
+class JiraPanelStory(BaseModel):
+    id: str
+    project_id: str
+    project: str
+    title: str
+    risks: int
+    charters: int
+    sessions: int
+    minutes: int
+    bugs: int
+    high_bugs: int
+    left: list[str]
+    sprint: Optional[str] = None
+    url: Optional[str] = None
+
+
+class JiraPanelBug(BaseModel):
+    id: str
+    project_id: str
+    project: str
+    title: str
+    kind: Optional[str] = None
+    severity: Optional[str] = None
+    filed_as: str
+    found_in: Optional[str] = None
+    retest: Optional[str] = None
+    url: Optional[str] = None
+
+
+class JiraPanelProject(BaseModel):
+    id: str
+    name: str
+    stories_url: Optional[str] = None
+
+
+class JiraIssuePanel(BaseModel):
+    issue_key: str
+    workspace: str
+    stories: list[JiraPanelStory]
+    bugs: list[JiraPanelBug]
+    projects: list[JiraPanelProject]
+    app_url: Optional[str] = None

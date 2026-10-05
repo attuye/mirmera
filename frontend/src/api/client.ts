@@ -731,6 +731,12 @@ export interface WorkspaceKey {
   set: boolean; shown: string | null; unreadable: boolean; updated_at: string | null; updated_by: string | null; server_fallback: boolean
 }
 export interface WorkspaceKeys { keys: WorkspaceKey[]; server_keys_for_all: boolean }
+export interface JiraInstallation {
+  id: string; site_url: string | null; cloud_id: string | null; environment: string | null
+  linked_by: string | null; linked_at: string; last_seen_at: string | null
+}
+export interface JiraAppOverview { configured: boolean; installations: JiraInstallation[] }
+export interface JiraLinkCode { code: string; expires_at: string }
 export interface InvitationView { workspace_name: string; email: string; role: Role; invited_by: string | null; has_account: boolean }
 
 // ---- API exploration ----------------------------------------------------------------
@@ -977,6 +983,10 @@ export const api = {
   workspaceKeys: (workspaceId: string) => request<WorkspaceKeys>(`/workspaces/${workspaceId}/keys`),
   saveWorkspaceKeys: (workspaceId: string, values: Record<string, string>) =>
     request<WorkspaceKeys>(`/workspaces/${workspaceId}/keys`, { method: 'PUT', body: JSON.stringify({ values }) }),
+  jiraApp: (workspaceId: string) => request<JiraAppOverview>(`/workspaces/${workspaceId}/jira-app`),
+  jiraLinkCode: (workspaceId: string) => request<JiraLinkCode>(`/workspaces/${workspaceId}/jira-app/codes`, { method: 'POST' }),
+  unlinkJiraSite: (workspaceId: string, installationId: string) =>
+    request<void>(`/workspaces/${workspaceId}/jira-app/installations/${installationId}`, { method: 'DELETE' }),
   listProjects: () => request<ProjectSummary[]>('/projects'),
   archiveProject: (projectId: string) => request<Project>(`/projects/${projectId}/archive`, { method: 'POST' }),
   unarchiveProject: (projectId: string) => request<Project>(`/projects/${projectId}/unarchive`, { method: 'POST' }),
