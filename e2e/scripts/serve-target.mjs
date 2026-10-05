@@ -1,6 +1,7 @@
 // A tiny stand-in for "the app under test" in the browser-runner tests. It
 // misbehaves on purpose: console errors on load and an API call that fails.
 import http from 'node:http'
+import { createSign, generateKeyPairSync } from 'node:crypto'
 
 const port = Number(process.env.E2E_TARGET_PORT ?? 5190)
 
@@ -38,6 +39,21 @@ const openapi = {
   },
 }
 
+// A stand-in for Atlassian, for the Jira app spec: it publishes a signing key (as the
+// Forge JWKS) and signs Forge invocation tokens for whichever installation the test names.
+// The key pair is made fresh on every start; nothing secret is kept in the repo.
+const forge = generateKeyPairSync('rsa', { modulusLength: 2048 })
+const jwks = { keys: [{ ...forge.publicKey.export({ format: 'jwk' }), kid: 'e2e', alg: 'RS256', use: 'sig' }] }
+const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url')
+function forgeToken({ installationId, appId }) {
+  const now = Math.floor(Date.now() / 1000)
+  const body = `${b64({ alg: 'RS256', typ: 'JWT', kid: 'e2e' })}.${b64({
+    iss: 'forge/invocation-token', aud: appId, iat: now, nbf: now, exp: now + 300, principal: 'e2e-jira-admin',
+    app: { installationId, id: appId, environment: { type: 'DEVELOPMENT', id: 'e2e' } }, context: { cloudId: 'e2e-cloud' },
+  })}`
+  return `${body}.${createSign('RSA-SHA256').update(body).sign(forge.privateKey).toString('base64url')}`
+}
+
 http
   .createServer((req, res) => {
     const path = new URL(req.url, 'http://localhost').pathname
@@ -55,6 +71,11 @@ http
       } else {
         res.writeHead(401, { 'Content-Type': 'application/json' }).end('{"error":"sign in first"}')
       }
+    } else if (path === '/fake-forge/jwks.json') {
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(jwks))
+    } else if (path === '/fake-forge/token') {  // ?installation=...&app=...
+      const q = new URL(req.url, 'http://localhost').searchParams
+      res.writeHead(200, { 'Content-Type': 'text/plain' }).end(forgeToken({ installationId: q.get('installation'), appId: q.get('app') }))
     } else if (path === '/api/documents') {
       res.writeHead(500, { 'Content-Type': 'application/json' }).end('{"error":"storage unavailable"}')
     } else {

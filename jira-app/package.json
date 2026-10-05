@@ -1,0 +1,25 @@
+{
+  "name": "mirmera-jira-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mirmera inside Jira: what Mirmera knows about an issue, in a panel on the issue (Atlassian Forge app).",
+  "main": "src/index.js",
+  "license": "UNLICENSED",
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "lint": "forge lint",
+    "deploy": "forge deploy",
+    "tunnel": "forge tunnel"
+  },
+  "dependencies": {
+    "@forge/api": "^8.2.0",
+    "@forge/bridge": "^7.1.0",
+    "@forge/react": "^12.3.0",
+    "@forge/resolver": "^2.0.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@forge/manifest": "^13.6.0",
+    "esbuild": "^0.28.2"
+  }
+}

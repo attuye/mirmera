@@ -43,7 +43,7 @@ export default defineConfig({
     {
       command: 'node scripts/start-backend.mjs',
       url: `${API_URL}/health`,
-      env: { E2E_API_PORT: String(API_PORT), E2E_WEB_URL: WEB_URL },
+      env: { E2E_API_PORT: String(API_PORT), E2E_WEB_URL: WEB_URL, E2E_TARGET_URL: `http://localhost:${TARGET_PORT}` },
       reuseExistingServer: false,
       timeout: 60_000,
     },
