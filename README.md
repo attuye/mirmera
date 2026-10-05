@@ -109,6 +109,13 @@ Start a request three ways:
 - **Paste curl**: from DevTools (Network → Copy as cURL), docs or a teammate; bash and Windows `^` line breaks work.
 - **From the browser**: requests the recorded browser (or the Chrome extension) saw fail or go slow in this session,
   with their body when it was text.
+- **From OpenAPI**: import the API's OpenAPI 3 or Swagger 2.0 file once per project (its address, or paste the JSON or
+  YAML), then pick an endpoint. Each comes with a ready request: required query and header parameters, an example JSON
+  body built from the schema (its examples first), and a note when it needs auth or a path value such as `{id}`.
+  **Send to** picks the spec's server or the project's app URL. The list shows how often this project's sessions tried
+  each endpoint and its last status ("2 of 14 endpoints tried"), so untried ones stand out. Importing the same API again
+  replaces it; **Refresh from its address** fetches the latest. The spec is also a project artifact, so **Charters →
+  Imported before** can suggest charters from its endpoint list.
 
 **Session headers** (a token, say) go with every request in the session and stay in that browser tab only. The answer
 shows status, time, size, body (JSON indented) and headers; redirects are shown, not followed. Then vary it (**Send
@@ -463,7 +470,7 @@ This is the Phase 1 scaffold from the scoping discussion:
 - ✅ Sprints: dates and stories, everything tested in those dates (inside and outside the plan), report and coverage per sprint
 - ✅ Accounts and workspaces: sign up and in, every route checked against the workspace and role, extension tokens
 - ✅ Members: invitations by email or link, roles, removing and leaving, password reset
-- ✅ API exploration in sessions: typed, curl or replayed requests, kept as redacted evidence, logged as bugs
+- ✅ API exploration in sessions: typed, curl, replayed or OpenAPI requests, kept as redacted evidence, logged as bugs
 - ✅ Workspace keys: each workspace's GitHub, Jira, AI, Telegram and Slack keys, encrypted, never shown back
 - ✅ Notifications: Telegram and Slack messages for fixes that didn't hold, regression problems and high bugs
 

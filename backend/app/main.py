@@ -9,7 +9,7 @@ from app.ai.base import ProviderError, ProviderNotConfigured, UnknownProvider
 from app.auth import guard
 from app.config import settings
 from app.database import Base, add_missing_columns, apply_renames, engine
-from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension, isolate, suite, retests, report, coverage, nudges, notifications, stories, sprints, ai, members, workspace_keys, api_explore, auth as auth_routes
+from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension, isolate, suite, retests, report, coverage, nudges, notifications, stories, sprints, ai, members, workspace_keys, api_explore, openapi, auth as auth_routes
 from app.runner import RunnerConflict, RunnerUnavailable, manager as runner_manager
 from app.trackers import TrackerError, TrackerNotConfigured, UnknownTracker
 
@@ -115,6 +115,7 @@ app.include_router(notifications.router, dependencies=GUARDED)
 app.include_router(stories.router, dependencies=GUARDED)
 app.include_router(sprints.router, dependencies=GUARDED)
 app.include_router(api_explore.router, dependencies=GUARDED)
+app.include_router(openapi.router, dependencies=GUARDED)
 app.include_router(ai.router, dependencies=GUARDED)
 
 

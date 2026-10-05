@@ -275,7 +275,7 @@ function ArtifactsAndModel({ project, artifacts, model, onArtifactAdded, onModel
                   <span style={{ minWidth: 0 }}>
                     <span style={{ fontSize: 13, display: 'block' }}>{a.label}</span>
                     <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
-                      {{ spec: 'Spec', diff: 'Diff', bug_import: 'Bug history' }[a.type]}
+                      {{ spec: 'Spec', diff: 'Diff', bug_import: 'Bug history', openapi: 'OpenAPI' }[a.type]}
                       {a.file_ref && (a.file_ref.startsWith('http')
                         ? <> · <a href={a.file_ref} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>imported ↗</a></>
                         : ' · imported')}

@@ -14,7 +14,7 @@ import { API_URL, api, Artifact, Charter, CharterSuggestion, StoryDetail } from 
 import { useProject, useProjectPath } from '../project'
 
 const PRIORITY_COLOR: Record<string, string> = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-tertiary)' }
-const KIND: Record<Artifact['type'], string> = { spec: 'Spec', diff: 'Diff', bug_import: 'Bug history' }
+const KIND: Record<Artifact['type'], string> = { spec: 'Spec', diff: 'Diff', bug_import: 'Bug history', openapi: 'OpenAPI' }
 type Mode = 'paste' | 'import' | 'earlier'
 
 function SourceTag({ label, url, prefix = 'from' }: { label: string | null; url: string | null; prefix?: string }) {

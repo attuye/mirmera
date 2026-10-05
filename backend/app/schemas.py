@@ -1853,3 +1853,42 @@ class ApiResponseOut(BaseModel):
 class ApiSendOut(BaseModel):
     evidence: EvidenceOut
     response: ApiResponseOut
+
+
+# ---- OpenAPI ------------------------------------------------------------------------
+
+class OpenApiImport(BaseModel):
+    url: Optional[str] = Field(default=None, max_length=2000)
+    text: Optional[str] = Field(default=None, max_length=5_000_000)
+
+
+class OpenApiSpecOut(BaseModel):
+    id: str
+    label: str
+    title: str
+    version: str
+    servers: list[str]
+    operations: int
+    source: Optional[str]  # the address it was imported from, or None when pasted
+    imported_at: datetime
+
+
+class OpenApiEndpoint(BaseModel):
+    key: str  # "GET /documents/{id}"
+    method: str
+    path: str
+    url: str  # the path with example values filled in where the spec gives them
+    summary: str
+    tag: str
+    deprecated: bool
+    auth: list[str]  # "bearer token", "API key in header X-Api-Key"...
+    headers: list[ApiHeader]
+    body: Optional[str]
+    unfilled: list[str]  # path parameters still to fill in, e.g. ["id"]
+    tried: int  # requests this project's sessions sent to it
+    last_status: Optional[int]
+
+
+class OpenApiOperationsOut(OpenApiSpecOut):
+    endpoints: list[OpenApiEndpoint]
+    tried: int  # endpoints tried at least once

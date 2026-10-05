@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { api, ApiDraft, ApiHeader, ApiMethod, ApiRequestInput, ApiResponse, Evidence, Note, Project, RecordedRequest } from '../api/client'
 import { ErrorLine, errorText, input, quietButton } from './ui'
 import { clock } from './Evidence'
+import OpenApiPicker from './OpenApiPicker'
 
 const METHODS: ApiMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
 const AUTH = /^(authorization|cookie|x-api-key|api-key|x-auth-token)$/i
@@ -66,7 +67,7 @@ export default function ApiPanel({ sessionId, project, disabled, onNote }: {
   const [source, setSource] = useState<ApiRequestInput['source']>('manual')
   const [sessionHeaders, setSessionHeaders] = useSessionHeaders(sessionId)
   const [showShared, setShowShared] = useState(sessionHeaders.length > 0)
-  const [importing, setImporting] = useState<'curl' | 'recorded' | null>(null)
+  const [importing, setImporting] = useState<'curl' | 'recorded' | 'openapi' | null>(null)
   const [curl, setCurl] = useState('')
   const [recorded, setRecorded] = useState<RecordedRequest[]>([])
   const [history, setHistory] = useState<Evidence[]>([])
@@ -126,6 +127,7 @@ export default function ApiPanel({ sessionId, project, disabled, onNote }: {
           if (importing === 'recorded') { setImporting(null); return }
           try { setRecorded(await api.recordedRequests(sessionId)); setImporting('recorded') } catch (e) { setError(errorText(e)) }
         }}>From the browser</button>
+        <button type="button" onClick={() => setImporting(importing === 'openapi' ? null : 'openapi')} aria-pressed={importing === 'openapi'} style={small}>From OpenAPI</button>
       </div>
 
       {importing === 'curl' && (
@@ -135,6 +137,11 @@ export default function ApiPanel({ sessionId, project, disabled, onNote }: {
           <button type="button" disabled={!curl.trim()} style={{ ...small, marginTop: 4 }} onClick={async () => {
             try { load(await api.parseCurl(sessionId, curl), 'curl', 'Filled in from the curl command.'); setCurl('') } catch (e) { setError(errorText(e)) }
           }}>Use this command</button>
+        </div>
+      )}
+      {importing === 'openapi' && (
+        <div style={{ marginTop: 8 }}>
+          <OpenApiPicker project={project} onPick={(d, message) => load(d, 'openapi', message)} />
         </div>
       )}
       {importing === 'recorded' && (

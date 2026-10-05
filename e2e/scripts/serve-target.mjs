@@ -21,6 +21,23 @@ const signup = `<!doctype html><title>Sign up</title>
 <p style="color:#c8c8c8">By signing up you accept the terms</p>
 <script>fetch('/api/slow')</script></body>`
 
+const openapi = {
+  openapi: '3.0.3',
+  info: { title: 'Target API', version: '1.0' },
+  servers: [{ url: `http://localhost:${port}` }],
+  components: { securitySchemes: { bearer: { type: 'http', scheme: 'bearer' } } },
+  paths: {
+    '/api/profile': { get: { tags: ['Account'], summary: 'Who is signed in', security: [{ bearer: [] }] } },
+    '/api/documents': {
+      get: { tags: ['Documents'], summary: 'List documents' },
+      post: {
+        tags: ['Documents'], summary: 'Upload a document',
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { type: { type: 'string', enum: ['passport'] }, number: { type: 'string', example: 'EP1234567' } } } } } },
+      },
+    },
+  },
+}
+
 http
   .createServer((req, res) => {
     const path = new URL(req.url, 'http://localhost').pathname
@@ -30,6 +47,8 @@ http
       res.writeHead(200, { 'Content-Type': 'text/html' }).end(signup)
     } else if (path === '/api/slow') {
       setTimeout(() => res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}'), 2300)
+    } else if (path === '/openapi.json') {  // for API exploration: the target describes itself
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(openapi))
     } else if (path === '/api/profile') {  // for API exploration: needs a token
       if (req.headers.authorization === 'Bearer demo-token') {
         res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"name":"Abebe","documents":2}')
