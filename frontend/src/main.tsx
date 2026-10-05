@@ -20,6 +20,7 @@ import StoriesPage from './pages/Stories'
 import StoryPage from './pages/StoryPage'
 import SprintsPage from './pages/Sprints'
 import SprintPage from './pages/SprintPage'
+import StrategyPage from './pages/StrategyPage'
 import { ProjectLayout, SessionRedirect, lastProjectId } from './project'
 import { AuthProvider, RequireAuth } from './auth'
 import SignIn from './pages/SignIn'
@@ -53,6 +54,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/projects/:projectId" element={<ProjectLayout />}>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
+          <Route path="strategy" element={<StrategyPage />} />
           <Route path="sprints" element={<SprintsPage />} />
           <Route path="sprints/:sprintId" element={<SprintPage />} />
           <Route path="stories" element={<StoriesPage />} />

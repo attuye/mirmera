@@ -87,10 +87,11 @@ def set_sprint_stories(sprint_id: str, payload: schemas.StoryLinks, db: DBSessio
 
 @router.delete("/sprints/{sprint_id}", response_model=schemas.Deleted)
 def delete_sprint(sprint_id: str, db: DBSession = Depends(get_db)):
-    """The sprint goes; its stories stay, outside any sprint."""
+    """The sprint goes, with its test strategy versions; its stories stay, outside any sprint."""
     sprint = _sprint_or_404(db, sprint_id)
     for story in sprint.stories:
         story.sprint_id = None
+    strategies = db.query(models.TestStrategy).filter(models.TestStrategy.sprint_id == sprint.id).delete(synchronize_session=False)
     db.delete(sprint)
     db.commit()
-    return {"deleted": {"sprints": 1}}
+    return {"deleted": {"sprints": 1, **({"test_strategies": strategies} if strategies else {})}}

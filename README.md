@@ -215,6 +215,25 @@ risk can belong to several stories. On a story's page:
 Stories from a tracker have **Refresh from Jira/GitHub**; stories written here have **Mark done**. Charters and risks
 show their stories as links everywhere they appear. Deleting a story keeps its risks, charters and sessions.
 
+### Test strategy
+
+**Plan → Strategy** holds the project's test strategy, or a sprint's (**For**: the whole project or a sprint), in the
+sections of the Heuristic Test Strategy Model: mission, context, what we'll test, quality criteria, risks driving the
+testing, approach, coverage and gaps, what we won't test and why, logistics. A strategy says what you'll test, how and
+why, and what you won't; it is revised as you learn, not a test plan.
+
+- **Draft from the project** fills each section from what Mirmera knows: the testing mission and sprint goal, people and
+  environments, stories and the product model, OpenAPI endpoints tried, risks by quality criterion (the sprint's own risks
+  first, explored or not), heuristics and oracles in charters, tools used, coverage gaps, charters and testing time.
+  **What Mirmera knows** under each section lists those facts.
+- **Write it as prose with AI** (optional) drafts every section from the same facts; like the report summary it may only
+  use numbers that appear in them (one retry, then refused). It's its own task in **Settings → AI** ("Write the test
+  strategy").
+- **What we won't test** is never decided for you: Mirmera lists candidates (retired risks, low-scoring ones, deprecated
+  endpoints) as questions for the team.
+- **Save as version N** keeps every version per focus; open an older one from **Version**. **Markdown** and **Print**
+  export a saved version. A sprint's page links to its strategy; deleting a sprint deletes its strategy versions.
+
 ### Sprints
 
 A sprint is a name, its dates (the end day included), an optional goal and the stories planned for it. Open
@@ -467,6 +486,7 @@ This is the Phase 1 scaffold from the scoping discussion:
 - ✅ Test report (Summary and Full views, optional AI summary), coverage map, test-idea nudges
 - ✅ Import specs, diffs and past bugs: GitHub pull requests and issues, Jira issues, local git diffs, files
 - ✅ User stories: import from Jira or GitHub, link risks and charters, see the testing under each and what is left
+- ✅ Test strategy: HTSM sections drafted from the project (and a sprint), optional AI prose, versions, exports
 - ✅ Sprints: dates and stories, everything tested in those dates (inside and outside the plan), report and coverage per sprint
 - ✅ Accounts and workspaces: sign up and in, every route checked against the workspace and role, extension tokens
 - ✅ Members: invitations by email or link, roles, removing and leaving, password reset

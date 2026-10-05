@@ -656,3 +656,23 @@ class NotificationLog(Base):
     status = Column(String, nullable=False)  # sent | failed | mock
     error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=utcnow)
+
+
+class TestStrategy(Base):
+    """One saved version of a project's test strategy (Heuristic Test Strategy Model sections),
+    for the whole project or focused on a sprint. Saving makes a new version; old ones stay."""
+    __tablename__ = "test_strategies"
+    __test__ = False  # not a pytest test class, despite the name
+    id = Column(String, primary_key=True, default=gen_id)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    sprint_id = Column(String, ForeignKey("sprints.id"), nullable=True, index=True)  # None: the whole project
+    version = Column(Integer, nullable=False)
+    sections = Column(JSON, nullable=False)  # {"mission": "...", "context": "...", ...}
+    ai_provider = Column(String, nullable=True)  # set when an AI drafted the prose it started from
+    ai_model = Column(String, nullable=True)
+    prompt_version = Column(String, nullable=True)
+    created_by = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    sprint = relationship("Sprint")
+    author = relationship("User")

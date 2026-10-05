@@ -82,7 +82,7 @@ test('projects: create one, set it up, work inside it, switch away', async ({ pa
     const nav = page.getByRole('navigation', { name: 'Project pages' })
     await page.goto(`/projects/${shared.id}/coverage`)
     await expect(nav.getByRole('group', { name: 'Insights' }).getByRole('link', { name: 'Coverage' })).toHaveAttribute('aria-current', 'page')
-    await expect(nav.getByRole('group', { name: 'Plan' }).getByRole('link')).toHaveText(['Sprints', 'Stories', 'Risks', 'Charters', 'Heuristics'])
+    await expect(nav.getByRole('group', { name: 'Plan' }).getByRole('link')).toHaveText(['Strategy', 'Sprints', 'Stories', 'Risks', 'Charters', 'Heuristics'])
     await expect(nav.getByRole('group', { name: 'Findings' }).getByRole('link')).toHaveText(['Bugs', 'Regression'])
     const insights = nav.getByRole('button', { name: 'Insights' })
     await insights.click()

@@ -49,7 +49,7 @@ def test_choices_are_validated_and_can_be_removed(client, project):
 def test_the_overview_lists_tasks_and_which_providers_are_set_up(client, monkeypatch):
     monkeypatch.setattr("app.config.settings.anthropic_api_key", "", raising=False)
     o = client.get("/ai").json()
-    assert [t["key"] for t in o["tasks"]][:2] == ["artifact_summary", "product_model"] and len(o["tasks"]) == 12
+    assert [t["key"] for t in o["tasks"]][:2] == ["artifact_summary", "product_model"] and len(o["tasks"]) == 13
     by_name = {p["name"]: p for p in o["providers"]}
     assert by_name["mock"]["configured"] is True
     assert by_name["claude"]["configured"] is False and "ANTHROPIC_API_KEY" in by_name["claude"]["problem"]

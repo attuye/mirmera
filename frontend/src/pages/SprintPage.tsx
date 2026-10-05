@@ -124,10 +124,11 @@ export default function SprintPage() {
             {sprint.goal && <p style={{ fontSize: 13.5, color: 'var(--text-secondary)', margin: '4px 0 0' }}>{sprint.goal}</p>}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <Link to={path(`/strategy?sprint=${sprint.id}`)} style={{ ...quietButton, display: 'inline-flex', gap: 6, alignItems: 'center' }}>Strategy</Link>
             <Link to={path(`/report?${period}`)} style={{ ...quietButton, display: 'inline-flex', gap: 6, alignItems: 'center' }}><FileText size={13} aria-hidden />Report</Link>
             <Link to={path(`/coverage?${period}`)} style={{ ...quietButton, display: 'inline-flex', gap: 6, alignItems: 'center' }}><MapIcon size={13} aria-hidden />Coverage</Link>
             <button onClick={() => setEditing(!editing)} style={quietButton}>Edit</button>
-            <ConfirmDelete label="Delete sprint" question="Delete this sprint? Its stories stay, outside any sprint."
+            <ConfirmDelete label="Delete sprint" question="Delete this sprint and its test strategy versions? Its stories stay, outside any sprint."
               onConfirm={async () => { await api.deleteSprint(sprint.id); navigate(path('/sprints')) }} />
           </div>
         </div>
