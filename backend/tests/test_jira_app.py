@@ -106,7 +106,7 @@ def test_keys_are_cached_and_a_new_key_is_picked_up(anon, forge):
 
 def test_linking_a_site_with_a_one_time_code(client, anon, forge):
     overview = client.get(f"/workspaces/{ws(client)}/jira-app").json()
-    assert overview == {"configured": True, "installations": []}
+    assert overview == {"configured": True, "installations": [], "agent_tasks": []}
     made = client.post(f"/workspaces/{ws(client)}/jira-app/codes").json()
     assert made["code"].startswith("mjl_")
     with SessionLocal() as db:

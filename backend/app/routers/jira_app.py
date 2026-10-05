@@ -5,12 +5,12 @@ Two kinds of caller:
   one-time link code, unlink a site.
 - The Jira app itself (requests from Atlassian's servers carrying a Forge invocation
   token, see app/jira_app.py): link with a code, ask for its status, unlink, and fetch the
-  panel for an issue.
+  panel for an issue, and talk to the Mirmera agent (an issue assigned to it, a mention).
 """
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session as DBSession
 
-from app import auth, jira_app, models, schemas
+from app import auth, jira_agent, jira_app, models, schemas
 from app.config import settings
 from app.database import get_db
 from app.routers.workspace_keys import _admin
@@ -33,7 +33,10 @@ def overview(workspace_id: str, user: models.User = Depends(auth.current_user), 
     _admin(db, user, workspace_id)
     rows = (db.query(models.JiraInstallation).filter(models.JiraInstallation.workspace_id == workspace_id)
             .order_by(models.JiraInstallation.linked_at).all())
-    return {"configured": bool(settings.jira_app_id), "installations": [_installation_out(r) for r in rows]}
+    agent_tasks = (db.query(models.JiraAgentTask).filter(models.JiraAgentTask.workspace_id == workspace_id)
+                   .order_by(models.JiraAgentTask.created_at.desc()).limit(20).all())
+    return {"configured": bool(settings.jira_app_id), "installations": [_installation_out(r) for r in rows],
+            "agent_tasks": agent_tasks}
 
 
 @router.post("/workspaces/{workspace_id}/jira-app/codes", response_model=schemas.JiraLinkCodeOut)
@@ -109,3 +112,42 @@ def issue_panel(payload: schemas.JiraIssuePanelIn, inv: jira_app.Invocation = De
     out = jira_app.issue_panel(db, inst, payload.issue_key, payload.project_key)
     db.commit()
     return out
+
+
+# ---------- the Mirmera agent (Rovo, A2A JSON-RPC) ----------
+
+def _rpc_error(rpc_id, code: int, message: str) -> dict:
+    return {"jsonrpc": "2.0", "id": rpc_id, "error": {"code": code, "message": message}}
+
+
+@router.post("/jira-app/a2a")
+async def agent(request: Request, background: BackgroundTasks, inv: jira_app.Invocation = Depends(invocation),
+                db: DBSession = Depends(get_db)):
+    """Jira's calls to the agent: SendMessage (assigned or mentioned), GetTask (polling), CancelTask.
+    Errors are JSON-RPC errors in a 200 response, as JSON-RPC expects."""
+    try:
+        body = await request.json()
+    except ValueError:
+        return _rpc_error(None, -32700, "Parse error")
+    if not isinstance(body, dict) or body.get("jsonrpc") != "2.0" or not isinstance(body.get("method"), str):
+        return _rpc_error(body.get("id") if isinstance(body, dict) else None, -32600, "Invalid request")
+    rpc_id, method, params = body.get("id"), body["method"], body.get("params") or {}
+    try:
+        if method == "SendMessage":
+            task, run = jira_agent.send_message(db, inv, params)
+            db.commit()
+            if run:
+                background.add_task(jira_agent.run_plan, task.id)
+        elif method == "GetTask":
+            task = jira_agent.get_task(db, inv, params)
+        elif method == "CancelTask":
+            task = jira_agent.get_task(db, inv, params)
+            if task.state in jira_agent.ACTIVE:
+                jira_agent._set(task, "TASK_STATE_CANCELED", "Canceled. Anything already proposed stays in Mirmera for a tester.")
+                db.commit()
+        else:
+            return _rpc_error(rpc_id, -32601, f"Method not found: {method}")
+    except jira_agent.RpcError as err:
+        db.rollback()
+        return _rpc_error(rpc_id, err.code, err.message)
+    return {"jsonrpc": "2.0", "id": rpc_id, "result": {"task": jira_agent.task_json(task)}}

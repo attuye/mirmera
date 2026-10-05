@@ -9,6 +9,14 @@ import { ConfirmDelete, ErrorLine, errorText, primaryButton, quietButton } from 
 import { api, JiraAppOverview, JiraLinkCode } from '../api/client'
 import { useAuth } from '../auth'
 
+const STATE: Record<string, [string, string]> = {
+  TASK_STATE_SUBMITTED: ['Waiting', 'var(--text-tertiary)'],
+  TASK_STATE_WORKING: ['Working…', 'var(--info)'],
+  TASK_STATE_COMPLETED: ['Done', 'var(--accent)'],
+  TASK_STATE_FAILED: ['Failed', 'var(--danger)'],
+  TASK_STATE_REJECTED: ['Refused', 'var(--warning)'],
+  TASK_STATE_CANCELED: ['Canceled', 'var(--text-tertiary)'],
+}
 const small: React.CSSProperties = { ...quietButton, fontSize: 12, padding: '5px 10px' }
 const step: React.CSSProperties = { fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }
 
@@ -101,6 +109,35 @@ export default function JiraAppPage() {
                 </>
               )}
             </div>
+          </section>
+        )}
+
+        {data && data.installations.length > 0 && (
+          <section aria-label="Mirmera agent" style={{ borderTop: '1px solid var(--border-soft)', marginTop: 20, paddingTop: 14 }}>
+            <h2 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 6px' }}>Mirmera agent</h2>
+            <p style={{ ...step, margin: '0 0 10px', maxWidth: 720 }}>
+              In Jira, assign a work item to <strong>Mirmera</strong>: it becomes a story in the project with that Jira key,
+              with proposed risks and charters for a tester to accept. Mention <strong>@Mirmera</strong> in a comment to hear
+              what's left to test. Needs Rovo on the Jira site.
+            </p>
+            {data.agent_tasks.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Nothing assigned to Mirmera yet.</div>}
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+              {data.agent_tasks.map((t) => (
+                <li key={t.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border-soft)' }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                    <span className="mono" style={{ fontSize: 12.5 }}>{t.issue_key ?? '—'}</span>
+                    <span style={{ fontSize: 13, flex: 1, minWidth: 200 }}>{t.issue_title ?? ''}</span>
+                    <span style={{ fontSize: 11.5, color: STATE[t.state]?.[1] ?? 'var(--text-tertiary)' }}>{STATE[t.state]?.[0] ?? t.state}</span>
+                    <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+                      {t.action === 'plan' ? 'Plan' : t.action === 'status' ? "What's left" : ''} · {utcDate(t.created_at).toLocaleString()}
+                    </span>
+                    {t.project_id && t.story_id && <Link to={`/projects/${t.project_id}/stories/${t.story_id}`} style={{ fontSize: 12 }}>Open story</Link>}
+                  </div>
+                  {t.state === 'TASK_STATE_FAILED' || t.state === 'TASK_STATE_REJECTED'
+                    ? <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>{t.message}</div> : null}
+                </li>
+              ))}
+            </ul>
           </section>
         )}
       </main>

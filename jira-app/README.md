@@ -83,16 +83,38 @@ screens. CI runs the same check. `forge lint` and `forge deploy` check more, but
 
 | File | What it is |
 | --- | --- |
-| `manifest.yml` | Modules (issue panel, admin page), the two resolver functions, the `mirmera` remote |
+| `manifest.yml` | Modules (issue panel, admin page, Rovo agent), the two resolver functions, the `mirmera` remote |
 | `src/index.js` | Resolvers: `issuePanel` for the panel; `status`, `link`, `unlink` for the admin page |
 | `src/frontend/panel.jsx` | The issue panel (UI Kit) |
 | `src/frontend/admin.jsx` | The admin page: link with a code, or unlink |
 | `scripts/check.mjs` | `npm run check` |
 
+## The Mirmera agent (Rovo)
+
+The app also adds **Mirmera** as a Rovo agent (`rovo:agentConnector`). It needs Rovo on the
+Jira site.
+
+- **Assign a work item to Mirmera.** It becomes a story in the Mirmera project whose Jira
+  project key matches. The AI proposes risks for the story and charters for those risks.
+  All of them stay **proposed** until a tester accepts them. Assigning it again doesn't
+  duplicate anything: Mirmera says it's already planned.
+- **Mention @Mirmera in a comment.** Mirmera answers with what's left to test. If the comment
+  asks it to plan (it contains "plan", "risks" or "charters"), it plans as if assigned.
+- **Follow-up questions in the Rovo chat** are answered about the same work item.
+
+Jira shows Mirmera's answer in the work item. Agents can't post comments themselves, so you
+choose **Draft comment** to turn the answer into one.
+
+How it works: Jira calls Mirmera's `/jira-app/a2a` directly (Agent2Agent 1.0, JSON-RPC
+`SendMessage` / `GetTask` / `CancelTask`), with the same Atlassian-signed token as the panel.
+Planning runs in the background, and Jira polls until it's done. Every request appears on
+Mirmera's Jira page, under **Mirmera agent**.
+
+After updating from a version without the agent, run `forge deploy`, then
+`forge install --upgrade`. The new `read:jira-work` permission needs a Jira admin's
+approval.
+
 ## What's next
 
-The next step is assigning issues to Mirmera as a Rovo agent, so it acts on them:
-
-- a story → propose risks and charters;
-- a bug → try to reproduce it;
-- a fixed bug → retest it.
+- A bug assigned to Mirmera → try to reproduce it.
+- A fixed bug → retest it.

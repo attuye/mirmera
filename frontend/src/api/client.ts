@@ -735,7 +735,11 @@ export interface JiraInstallation {
   id: string; site_url: string | null; cloud_id: string | null; environment: string | null
   linked_by: string | null; linked_at: string; last_seen_at: string | null
 }
-export interface JiraAppOverview { configured: boolean; installations: JiraInstallation[] }
+export interface JiraAgentTask {
+  id: string; issue_key: string | null; issue_title: string | null; invocation: string | null; action: string | null
+  state: string; message: string | null; project_id: string | null; story_id: string | null; created_at: string; updated_at: string | null
+}
+export interface JiraAppOverview { configured: boolean; installations: JiraInstallation[]; agent_tasks: JiraAgentTask[] }
 export interface JiraLinkCode { code: string; expires_at: string }
 export interface InvitationView { workspace_name: string; email: string; role: Role; invited_by: string | null; has_account: boolean }
 
