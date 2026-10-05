@@ -11,7 +11,8 @@ from app import models
 
 PROBLEM_KINDS = ("console_error", "page_error", "failed_request", "slow_request", "accessibility")
 LABELS = {"console_error": "console error", "page_error": "page error", "failed_request": "failed request",
-          "slow_request": "slow request", "accessibility": "accessibility finding", "navigation": "page"}
+          "slow_request": "slow request", "accessibility": "accessibility finding", "navigation": "page",
+          "api_call": "API request"}
 NOT_USED = "(the recorded browser was not used)"
 
 
@@ -66,4 +67,8 @@ def browser_context(rows: list[models.Evidence], start: datetime, *, used: bool,
         lines += [signal_line(e, start) for e in pages[-max_pages:]]
         if len(pages) > max_pages:
             lines.insert(lines.index("Pages visited:") + 1, f"(first {len(pages) - max_pages} not shown)")
+    calls = [e for e in rows if e.kind == "api_call"]
+    if calls:
+        lines.append(f"API requests the tester sent ({len(calls)}):")
+        lines += [signal_line(e, start) for e in calls[-max_problems:]]
     return "\n".join(lines)

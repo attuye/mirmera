@@ -100,6 +100,26 @@ They contain whatever the tested app showed, so they are git-ignored. Set
 `RUNNER_HEADLESS=true` to run without a window (CI), or `RUNNER_CHROMIUM_PATH`
 to use a specific Chromium.
 
+### API exploration
+
+In a session, the **API** tab (next to **Browser**) sends requests and keeps each one as evidence of the session.
+Start a request three ways:
+
+- **Type it**: method, address (a path like `/api/documents` goes to the project's app URL), headers, body.
+- **Paste curl**: from DevTools (Network → Copy as cURL), docs or a teammate; bash and Windows `^` line breaks work.
+- **From the browser**: requests the recorded browser (or the Chrome extension) saw fail or go slow in this session,
+  with their body when it was text.
+
+**Session headers** (a token, say) go with every request in the session and stay in that browser tab only. The answer
+shows status, time, size, body (JSON indented) and headers; redirects are shown, not followed. Then vary it (**Send
+again**, **Without auth**, **Empty body**), **Note it**, or **Log as bug**, which attaches the request to the bug.
+Requests also appear in the session's debrief and AI drafts.
+
+What is kept is redacted: `Authorization`, cookies, API-key and token headers, and password/token fields in JSON or form
+bodies and query strings become `•••`. The full answer is shown; its first 20 KB are kept. Requests are sent from the
+Mirmera server, so `localhost` and internal staging work; on a server other companies use, set `API_BLOCK_PRIVATE=true`
+to refuse private and cloud-metadata addresses. `API_TIMEOUT_SECONDS` (default 30) limits each request.
+
 ### Slow requests and accessibility
 
 The recorded browser also records, as evidence (never verdicts):
@@ -443,6 +463,7 @@ This is the Phase 1 scaffold from the scoping discussion:
 - ✅ Sprints: dates and stories, everything tested in those dates (inside and outside the plan), report and coverage per sprint
 - ✅ Accounts and workspaces: sign up and in, every route checked against the workspace and role, extension tokens
 - ✅ Members: invitations by email or link, roles, removing and leaving, password reset
+- ✅ API exploration in sessions: typed, curl or replayed requests, kept as redacted evidence, logged as bugs
 - ✅ Workspace keys: each workspace's GitHub, Jira, AI, Telegram and Slack keys, encrypted, never shown back
 - ✅ Notifications: Telegram and Slack messages for fixes that didn't hold, regression problems and high bugs
 

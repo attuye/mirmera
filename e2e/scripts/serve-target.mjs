@@ -30,6 +30,12 @@ http
       res.writeHead(200, { 'Content-Type': 'text/html' }).end(signup)
     } else if (path === '/api/slow') {
       setTimeout(() => res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}'), 2300)
+    } else if (path === '/api/profile') {  // for API exploration: needs a token
+      if (req.headers.authorization === 'Bearer demo-token') {
+        res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"name":"Abebe","documents":2}')
+      } else {
+        res.writeHead(401, { 'Content-Type': 'application/json' }).end('{"error":"sign in first"}')
+      }
     } else if (path === '/api/documents') {
       res.writeHead(500, { 'Content-Type': 'application/json' }).end('{"error":"storage unavailable"}')
     } else {

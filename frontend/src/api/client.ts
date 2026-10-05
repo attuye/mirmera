@@ -230,7 +230,7 @@ export interface FileRequest { tracker: TrackerName; mode: 'new' | 'comment'; is
 
 export type EvidenceKind =
   | 'screenshot' | 'trace' | 'har' | 'console_error' | 'page_error' | 'failed_request' | 'slow_request' | 'accessibility'
-  | 'navigation' | 'action'
+  | 'navigation' | 'action' | 'api_call'
 
 /** Something the runner recorded. Files are fetched with evidenceFileUrl(). */
 export interface Evidence {
@@ -245,6 +245,7 @@ export interface Evidence {
   count: number
   captured_at: string
   last_seen_at: string | null
+  data?: ApiCallData | null  // API requests only
 }
 
 export interface RunnerStatus {
@@ -732,6 +733,26 @@ export interface WorkspaceKey {
 export interface WorkspaceKeys { keys: WorkspaceKey[]; server_keys_for_all: boolean }
 export interface InvitationView { workspace_name: string; email: string; role: Role; invited_by: string | null; has_account: boolean }
 
+// ---- API exploration ----------------------------------------------------------------
+
+export type ApiMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS'
+export interface ApiHeader { name: string; value: string }
+export interface ApiDraft { method: ApiMethod; url: string; headers: ApiHeader[]; body: string | null }
+export interface RecordedRequest extends ApiDraft { seen: string; count: number; kind: 'failed_request' | 'slow_request' }
+export interface ApiRequestInput extends ApiDraft {
+  base_url?: string | null
+  source: 'manual' | 'curl' | 'recorded' | 'openapi' | 'variation'
+}
+export interface ApiResponse {
+  url: string; status: number | null; reason: string | null; ms: number; size: number; headers: ApiHeader[]
+  content_type: string; body: string | null; truncated: boolean; error: string | null
+}
+export interface ApiCallData {
+  method: ApiMethod; source: string; request_headers: ApiHeader[]; request_body: string | null
+  status: number | null; ms: number; size: number; error: string | null
+  response_headers: ApiHeader[]; content_type: string; response_body: string | null
+}
+
 // ---- User stories ---------------------------------------------------------------
 
 export interface StoryRef { id: string; key: string | null; title: string }
@@ -995,11 +1016,17 @@ export const api = {
   endSession: (sessionId: string) => request<Debrief>(`/sessions/${sessionId}/end`, { method: 'POST' }),
 
   listNotes: (sessionId: string) => request<Note[]>(`/sessions/${sessionId}/notes`),
+  sendApiRequest: (sessionId: string, req: ApiRequestInput) =>
+    request<{ evidence: Evidence; response: ApiResponse }>(`/sessions/${sessionId}/api/send`, { method: 'POST', body: JSON.stringify(req) }),
+  parseCurl: (sessionId: string, command: string) =>
+    request<ApiDraft>(`/sessions/${sessionId}/api/parse-curl`, { method: 'POST', body: JSON.stringify({ command }) }),
+  recordedRequests: (sessionId: string) => request<RecordedRequest[]>(`/sessions/${sessionId}/api/recorded`),
+  apiHistory: (sessionId: string) => request<Evidence[]>(`/sessions/${sessionId}/api/history`),
   addNote: (sessionId: string, tag: Note['tag'], content: string) =>
     request<Note>(`/sessions/${sessionId}/notes`, { method: 'POST', body: JSON.stringify({ tag, content }) }),
 
   listBugs: (sessionId: string) => request<Bug[]>(`/sessions/${sessionId}/bugs`),
-  logBug: (sessionId: string, bug: { title: string; description?: string; severity: Bug['severity'] }) =>
+  logBug: (sessionId: string, bug: { title: string; description?: string; severity: Bug['severity']; evidence_ids?: string[] }) =>
     request<Bug>(`/sessions/${sessionId}/bugs`, { method: 'POST', body: JSON.stringify(bug) }),
   startRunner: (sessionId: string, url: string) =>
     request<RunnerStatus>(`/sessions/${sessionId}/runner`, { method: 'POST', body: JSON.stringify({ url }) }),

@@ -14,6 +14,7 @@ export const KIND_META: Record<EvidenceKind, { one: string; plural: string; colo
   screenshot: { one: 'screenshot', plural: 'screenshots', color: 'var(--accent)' },
   trace: { one: 'trace', plural: 'traces', color: 'var(--text-tertiary)' },
   har: { one: 'network log', plural: 'network logs', color: 'var(--text-tertiary)' },
+  api_call: { one: 'API request', plural: 'API requests', color: 'var(--info)' },
 }
 
 /** Timestamps from the API are naive UTC. */
