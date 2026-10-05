@@ -21,6 +21,8 @@ for column in add_missing_columns():  # adds new columns to existing tables
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    from app.keys import ensure_server_key
+    ensure_server_key()  # the key that encrypts workspace keys exists from the start, at a known place
     poller = None
     if settings.retest_poll_minutes > 0:  # check closed issues on a timer
         import asyncio

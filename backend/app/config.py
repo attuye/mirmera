@@ -24,9 +24,10 @@ class Settings(BaseSettings):
     mock_email: bool = False  # keep emails in memory instead of sending (tests)
 
     # Workspace keys (GitHub, Jira, AI, Telegram, Slack) are encrypted with this. Any long
-    # random phrase; without it, one is generated into SECRET_KEY_FILE on first use.
+    # random phrase; without it, one is generated into SECRET_KEY_FILE when the backend starts.
+    # A relative path is inside the backend folder, wherever the server is started from.
     mirmera_secret_key: str | None = None
-    secret_key_file: str = "./secret.key"
+    secret_key_file: str = "secret.key"
     # Workspaces without their own key use the keys below in this file. Set false when other
     # companies use your Mirmera, so each workspace must bring its own.
     server_keys_for_all: bool = True

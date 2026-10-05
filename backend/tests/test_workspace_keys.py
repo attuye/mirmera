@@ -138,3 +138,21 @@ def test_the_server_key_file_is_made_once(tmp_path, monkeypatch):
         assert oct(path.stat().st_mode & 0o777) == "0o600"
     keys.reset_box()  # read again from the same file
     assert keys.decrypt(secret) == "hello"
+
+
+def test_the_key_file_is_made_at_startup_in_the_backend_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "mirmera_secret_key", None)
+    monkeypatch.setattr(keys, "BACKEND_DIR", tmp_path / "backend")
+    monkeypatch.setattr(settings, "secret_key_file", "secret.key")
+    monkeypatch.chdir(tmp_path)  # started from the repo root, say
+    assert keys.key_file() == tmp_path / "backend" / "secret.key"
+    assert keys.ensure_server_key() == str(tmp_path / "backend" / "secret.key")
+    assert (tmp_path / "backend" / "secret.key").exists() and not (tmp_path / "secret.key").exists()
+    first = (tmp_path / "backend" / "secret.key").read_text()
+    keys.ensure_server_key()  # a restart keeps the same key
+    assert (tmp_path / "backend" / "secret.key").read_text() == first
+    absolute = tmp_path / "elsewhere" / "mirmera.key"
+    monkeypatch.setattr(settings, "secret_key_file", str(absolute))
+    assert keys.key_file() == absolute
+    monkeypatch.setattr(settings, "mirmera_secret_key", "a phrase in .env")
+    assert keys.ensure_server_key() == "MIRMERA_SECRET_KEY" and not absolute.exists()

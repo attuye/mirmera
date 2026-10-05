@@ -58,8 +58,8 @@ database, and never come back out: the page shows only whether each is set and i
 imports, retests, AI tasks, model checks and notifications in a project all use its workspace's keys, and tokens are
 scrubbed from error messages.
 
-- The server key is `MIRMERA_SECRET_KEY` (any long random phrase), or else a `secret.key` file created in `backend/`
-  on first use. **Back it up with the database**: without it, saved keys can't be read and must be entered again (the
+- The server key is `MIRMERA_SECRET_KEY` (any long random phrase), or else a `secret.key` file the backend creates in
+  `backend/` when it starts (wherever you start it from); the terminal shows its full path on every start. **Back it up with the database**: without it, saved keys can't be read and must be entered again (the
   page says which). Never commit it; it is in `.gitignore`.
 - Until a workspace sets a key, the server's own value in `backend/.env` is used. When other companies use your
   Mirmera, set `SERVER_KEYS_FOR_ALL=false` so each workspace must bring its own (and nobody uses yours).

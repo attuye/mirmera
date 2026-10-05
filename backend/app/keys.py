@@ -73,19 +73,43 @@ def server_keys() -> Keys:
 _fernet: Fernet | None = None
 
 
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+startup_log = logging.getLogger("uvicorn.error")  # shown in the terminal running the backend
+
+
+def key_file() -> Path:
+    """SECRET_KEY_FILE, with a relative path taken inside the backend folder (not the folder the
+    server was started from, which would make a second key and leave saved keys unreadable)."""
+    path = Path(settings.secret_key_file).expanduser()
+    return path if path.is_absolute() else BACKEND_DIR / path
+
+
+def ensure_server_key() -> str:
+    """Called when the backend starts: makes the key file if needed, and says where the key is,
+    so it can be backed up before any workspace saves a key."""
+    if settings.mirmera_secret_key:
+        startup_log.info("Workspace keys are encrypted with MIRMERA_SECRET_KEY from backend/.env.")
+        return "MIRMERA_SECRET_KEY"
+    path = key_file()
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(Fernet.generate_key().decode())
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass  # Windows: no POSIX modes
+        startup_log.warning("Created %s to encrypt workspace keys. Back it up with the database; "
+                            "without it, saved keys can't be read.", path)
+    else:
+        startup_log.info("Workspace keys are encrypted with %s (back it up with the database).", path)
+    return str(path)
+
+
 def _server_key() -> bytes:
     raw = settings.mirmera_secret_key
     if not raw:
-        path = Path(settings.secret_key_file)
-        if not path.exists():
-            path.write_text(Fernet.generate_key().decode())
-            try:
-                os.chmod(path, 0o600)
-            except OSError:
-                pass  # Windows: no POSIX modes
-            log.warning("Created %s to encrypt workspace keys. Back it up with the database; "
-                        "without it the saved keys can't be read.", path.resolve())
-        raw = path.read_text().strip()
+        ensure_server_key()  # normally done at startup already
+        raw = key_file().read_text().strip()
     # Any passphrase works: it is stretched into a Fernet key.
     return base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest())
 
