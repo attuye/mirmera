@@ -1892,3 +1892,54 @@ class OpenApiEndpoint(BaseModel):
 class OpenApiOperationsOut(OpenApiSpecOut):
     endpoints: list[OpenApiEndpoint]
     tried: int  # endpoints tried at least once
+
+
+# ---- Test strategy -------------------------------------------------------------------
+
+class LLMStrategy(BaseModel):
+    sections: dict[str, str]  # section key -> draft text
+
+
+class StrategySection(BaseModel):
+    key: str
+    title: str
+    hint: str
+
+
+class StrategyVersionOut(BaseModel):
+    id: str
+    version: int
+    sprint_id: Optional[str]
+    sprint_name: Optional[str]
+    sections: dict[str, str]
+    ai_provider: Optional[str]
+    ai_model: Optional[str]
+    author: Optional[str]
+    created_at: datetime
+
+
+class StrategyOverview(BaseModel):
+    sections: list[StrategySection]
+    versions: list[StrategyVersionOut]  # newest first, for this focus
+    draft: dict[str, str]  # from the facts, for a fresh start
+    facts: dict[str, list[str]]  # what Mirmera knows, per section
+
+
+class StrategyAIRequest(BaseModel):
+    sprint_id: Optional[str] = None
+    provider: Optional[str] = None
+
+
+class StrategyAIDraft(BaseModel):
+    sections: dict[str, str]
+    ai_provider: str
+    ai_model: Optional[str]
+    prompt_version: str
+
+
+class StrategySave(BaseModel):
+    sprint_id: Optional[str] = None
+    sections: dict[str, str]
+    ai_provider: Optional[str] = Field(default=None, max_length=40)
+    ai_model: Optional[str] = Field(default=None, max_length=120)
+    prompt_version: Optional[str] = Field(default=None, max_length=40)

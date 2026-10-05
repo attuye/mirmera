@@ -763,6 +763,18 @@ export interface OpenApiEndpoint {
 }
 export interface OpenApiOperations extends OpenApiSpec { endpoints: OpenApiEndpoint[]; tried: number }
 
+// ---- Test strategy -------------------------------------------------------------------
+
+export interface StrategySection { key: string; title: string; hint: string }
+export interface StrategyVersion {
+  id: string; version: number; sprint_id: string | null; sprint_name: string | null; sections: Record<string, string>
+  ai_provider: string | null; ai_model: string | null; author: string | null; created_at: string
+}
+export interface StrategyOverview { sections: StrategySection[]; versions: StrategyVersion[]; draft: Record<string, string>; facts: Record<string, string[]> }
+export interface StrategyAIDraft { sections: Record<string, string>; ai_provider: string; ai_model: string | null; prompt_version: string }
+export const strategyExportUrl = (projectId: string, versionId: string, format: 'md' | 'html') =>
+  `${BASE_URL}/projects/${projectId}/strategy/${versionId}/export?format=${format}`
+
 // ---- User stories ---------------------------------------------------------------
 
 export interface StoryRef { id: string; key: string | null; title: string }
@@ -1030,6 +1042,12 @@ export const api = {
     request<{ evidence: Evidence; response: ApiResponse }>(`/sessions/${sessionId}/api/send`, { method: 'POST', body: JSON.stringify(req) }),
   parseCurl: (sessionId: string, command: string) =>
     request<ApiDraft>(`/sessions/${sessionId}/api/parse-curl`, { method: 'POST', body: JSON.stringify({ command }) }),
+  strategy: (projectId: string, sprintId?: string) =>
+    request<StrategyOverview>(`/projects/${projectId}/strategy${sprintId ? `?sprint_id=${sprintId}` : ''}`),
+  strategyAiDraft: (projectId: string, sprintId?: string) =>
+    request<StrategyAIDraft>(`/projects/${projectId}/strategy/ai-draft`, { method: 'POST', body: JSON.stringify({ sprint_id: sprintId ?? null }) }),
+  saveStrategy: (projectId: string, body: { sprint_id: string | null; sections: Record<string, string>; ai_provider?: string | null; ai_model?: string | null; prompt_version?: string | null }) =>
+    request<StrategyVersion>(`/projects/${projectId}/strategy`, { method: 'POST', body: JSON.stringify(body) }),
   openApiSpecs: (projectId: string) => request<OpenApiSpec[]>(`/projects/${projectId}/openapi`),
   importOpenApi: (projectId: string, from: { url?: string; text?: string }) =>
     request<OpenApiSpec>(`/projects/${projectId}/openapi`, { method: 'POST', body: JSON.stringify(from) }),

@@ -59,7 +59,28 @@ class MockProvider(LLMProvider):
             return json.dumps(self._reproduce_step(user))
         if task == "report_summary":
             return json.dumps(self._report_summary(user))
+        if task == "test_strategy":
+            return json.dumps(self._strategy(user))
         return json.dumps({"note": f"mock provider has no canned answer for task '{task}'"})
+
+    @staticmethod
+    def _strategy(user: str) -> dict:
+        """One sentence per section from its own fact lines, so its numbers are always grounded."""
+        sections, key = {}, None
+        for line in _between(user, "facts").splitlines():
+            if line.startswith("[") and line.endswith("]"):
+                key = line[1:-1]
+                sections[key] = []
+            elif key and line.startswith("- "):
+                sections[key].append(line[2:])
+        out = {}
+        for k, lines in sections.items():
+            if k == "out_of_scope":
+                out[k] = "(mock) " + (" ".join(f"Do we leave out {l.split(': ', 1)[-1]}?" for l in lines[:3])
+                                      or "What has the team agreed not to test?")
+            else:
+                out[k] = "(mock) " + ("; ".join(lines[:3]) + "." if lines else "Nothing recorded yet.")
+        return {"sections": out}
 
     @staticmethod
     def _report_summary(user: str) -> dict:

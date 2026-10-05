@@ -97,6 +97,13 @@ async def _run(task: str, p: LLMProvider) -> str:
             "At a glance: 1 fix verified after the issue closed: KYC-12 Expired national ID accepted",
             "Accepted risks tested: 4 of 6"])
         return r.summary[:160]
+    if task == "test_strategy":
+        r = await tasks.write_strategy(p, project_name=PROJECT, focus="Sprint 14", facts={
+            "mission": ["Testing mission: find what stops a customer verifying with a passport"],
+            "risks": ["R3 Selfie liveness accepts printed photos (score 20, security): not explored in this sprint",
+                      "R1 Expired IDs pass (score 15, capability): explored"],
+            "out_of_scope": ["Candidate (retired risk): R7 Fax upload"]})
+        return next(iter(r.sections.values()), "")[:160]
     raise ValueError(f"Unknown task {task}")
 
 

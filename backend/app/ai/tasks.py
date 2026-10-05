@@ -31,6 +31,7 @@ PROMPT_VERSIONS = {
     "regression_test": "regression-test-v2",
     "regression_checks": "regression-checks-v1",
     "report_summary": "report-summary-v1",
+    "test_strategy": "test-strategy-v1",
 }
 PLANNING_TOKENS = 4000
 MAX_ARTIFACT_CHARS = 15_000
@@ -260,4 +261,28 @@ async def summarize_report(provider: LLMProvider, *, project_name: str, facts: l
                 "summary was not shown. Try again, or choose a stronger model for 'Summarise the test report' in Settings.")
     joined = "\n".join(facts)
     result.basis = [b.strip() for b in result.basis if b.strip() and b.strip() in joined][:8]  # only real lines
+    return result
+
+
+# ---- Test strategy --------------------------------------------------------------
+
+async def write_strategy(provider: LLMProvider, *, project_name: str, focus: str, facts: dict[str, list[str]]):
+    """Prose for each strategy section from the facts. Numbers must come from the facts; one retry."""
+    from app.ai.llm_json import LLMOutputError
+    from app.schemas import LLMStrategy
+    lines = [line for section in facts.values() for line in section]
+    blocks = "\n\n".join(f"[{key}]\n" + ("\n".join(f"- {l}" for l in rows) or "(nothing recorded)") for key, rows in facts.items())
+    user = f"<project>{project_name}</project>\n<focus>{focus}</focus>\n\n<facts>\n{blocks}\n</facts>"
+    system = load_prompt("test_strategy.md")
+    result = await complete_json(provider, system, user, LLMStrategy, task="test_strategy", max_tokens=3000)
+    bad = ungrounded_numbers("\n".join(result.sections.values()), lines)
+    if bad:
+        retry = f"{user}\n\nYour draft used numbers that are not in the facts: {', '.join(bad)}. Use only numbers from <facts>."
+        result = await complete_json(provider, system, retry, LLMStrategy, task="test_strategy", max_tokens=3000)
+        bad = ungrounded_numbers("\n".join(result.sections.values()), lines)
+        if bad:
+            raise LLMOutputError(
+                f"The AI ({provider.name}) kept using numbers that are not in the project's facts ({', '.join(bad)}), so its "
+                "draft was not shown. Try again, or choose a stronger model for 'Write the test strategy' in Settings.")
+    result.sections = {k: v.strip() for k, v in result.sections.items() if k in facts and v.strip()}
     return result
