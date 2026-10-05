@@ -291,6 +291,7 @@ class BugCreate(BaseModel):
     attachments: list[str] = []
     # how many preceding notes to snapshot into the reproduction trail
     trail_window: int = 6
+    evidence_ids: list[str] = Field(default=[], max_length=20)  # e.g. the API request that showed it
 
 
 class EvidenceOut(BaseModel):
@@ -305,6 +306,7 @@ class EvidenceOut(BaseModel):
     count: int = 1
     captured_at: datetime
     last_seen_at: Optional[datetime] = None
+    data: Optional[dict] = None  # an API request: method, redacted request, status, timing, response start
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -315,7 +317,8 @@ class EvidenceOut(BaseModel):
         if hasattr(data, "file_path"):
             return {**{c: getattr(data, c) for c in (
                 "id", "session_id", "bug_id", "kind", "summary", "url", "count", "captured_at", "last_seen_at")},
-                "has_file": bool(data.file_path)}
+                "has_file": bool(data.file_path),
+                "data": data.data if data.kind == "api_call" else None}  # other kinds' details stay on the server
         return data
 
 
@@ -1796,3 +1799,57 @@ class WorkspaceKeysIn(BaseModel):
 class WorkspaceKeysOut(BaseModel):
     keys: list[dict]  # [{"name", "label", "group", "secret", "hint", "set", "shown", "unreadable", "updated_at", "updated_by", "server_fallback"}]
     server_keys_for_all: bool
+
+
+# ---- API exploration --------------------------------------------------------------
+
+ApiMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+
+
+class ApiHeader(BaseModel):
+    name: str = Field(max_length=200)
+    value: str = Field(max_length=8000)
+
+
+class ApiRequestIn(BaseModel):
+    method: ApiMethod = "GET"
+    url: str = Field(min_length=1, max_length=8000)
+    headers: list[ApiHeader] = Field(default=[], max_length=50)
+    body: Optional[str] = Field(default=None, max_length=1_000_000)
+    base_url: Optional[str] = Field(default=None, max_length=2000)  # for a path like /api/x; default: the project's app URL
+    source: Literal["manual", "curl", "recorded", "openapi", "variation"] = "manual"
+
+
+class ApiRequestDraft(BaseModel):
+    method: str
+    url: str
+    headers: list[ApiHeader]
+    body: Optional[str]
+
+
+class RecordedRequest(ApiRequestDraft):
+    seen: str  # what the browser recorded, e.g. "POST https://… → 500"
+    count: int
+    kind: str  # failed_request | slow_request
+
+
+class CurlIn(BaseModel):
+    command: str = Field(min_length=1, max_length=200_000)
+
+
+class ApiResponseOut(BaseModel):
+    url: str
+    status: Optional[int]
+    reason: Optional[str]
+    ms: int
+    size: int
+    headers: list[ApiHeader]
+    content_type: str
+    body: Optional[str]
+    truncated: bool
+    error: Optional[str]
+
+
+class ApiSendOut(BaseModel):
+    evidence: EvidenceOut
+    response: ApiResponseOut

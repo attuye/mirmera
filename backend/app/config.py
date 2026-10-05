@@ -62,6 +62,11 @@ class Settings(BaseSettings):
     # Where screenshots, traces and HAR files are kept, one folder per session.
     # They can contain whatever the tested app shows, so keep them out of git.
     evidence_dir: str = "./evidence"
+    # API exploration in sessions: requests are sent from this server. true refuses private
+    # and cloud-metadata addresses (localhost, 10.x, 169.254.169.254...): set it when other
+    # companies use your Mirmera. Left false, localhost and internal staging work.
+    api_block_private: bool = False
+    api_timeout_seconds: int = 30
 
     # Issue trackers. Secrets live here only; which GitHub repo / Jira project
     # each Mirmera project files to is set in the app (project settings).

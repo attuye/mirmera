@@ -150,6 +150,14 @@ def log_bug(session_id: str, payload: schemas.BugCreate, db: DBSession = Depends
         reproduction_trail=trail,
     )
     db.add(bug)
+    db.flush()
+    if payload.evidence_ids:
+        rows = db.query(models.Evidence).filter(models.Evidence.id.in_(payload.evidence_ids),
+                                                models.Evidence.session_id == session_id).all()
+        if len(rows) != len(set(payload.evidence_ids)):
+            raise HTTPException(400, "Evidence from another session can't be attached to this bug")
+        for row in rows:
+            row.bug_id = bug.id
     db.commit()
 
     # With the browser running, the bug gets a screenshot of what was on screen.

@@ -318,9 +318,22 @@ class BrowserRunner:
             self._last_navigation = url
             self._add("navigation", url, url)
 
+    @staticmethod
+    def _request_data(request) -> dict | None:
+        """What a replay needs (API exploration): the body, passwords and tokens blanked, and its type."""
+        from app.api_explore import KEPT_REQUEST_BYTES, redact_body
+        try:
+            body, content_type = request.post_data, request.headers.get("content-type", "")
+        except Exception:  # binary bodies can't be read as text
+            return None
+        if not body and not content_type:
+            return None
+        return {"body": (redact_body(body, content_type) or "")[:KEPT_REQUEST_BYTES] or None, "content_type": content_type or None}
+
     def _on_response(self, response) -> None:
         if response.status >= 400 and not response.url.endswith(IGNORED_URL_SUFFIXES):
-            self._add("failed_request", f"{response.request.method} {response.url} → {response.status}", response.url)
+            self._add("failed_request", f"{response.request.method} {response.url} → {response.status}", response.url,
+                      self._request_data(response.request))
 
     def _on_request_finished(self, request) -> None:
         from app.config import settings
