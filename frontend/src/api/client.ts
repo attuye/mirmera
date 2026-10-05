@@ -452,7 +452,7 @@ export interface BugListItem extends Bug {
 export interface Artifact {
   id: string
   project_id: string
-  type: 'spec' | 'diff' | 'bug_import'
+  type: 'spec' | 'diff' | 'bug_import' | 'openapi'
   label: string
   file_ref: string | null  // where an imported artifact came from
   ai_summary: string | null
@@ -753,6 +753,16 @@ export interface ApiCallData {
   response_headers: ApiHeader[]; content_type: string; response_body: string | null
 }
 
+export interface OpenApiSpec {
+  id: string; label: string; title: string; version: string; servers: string[]; operations: number
+  source: string | null; imported_at: string
+}
+export interface OpenApiEndpoint {
+  key: string; method: ApiMethod; path: string; url: string; summary: string; tag: string; deprecated: boolean
+  auth: string[]; headers: ApiHeader[]; body: string | null; unfilled: string[]; tried: number; last_status: number | null
+}
+export interface OpenApiOperations extends OpenApiSpec { endpoints: OpenApiEndpoint[]; tried: number }
+
 // ---- User stories ---------------------------------------------------------------
 
 export interface StoryRef { id: string; key: string | null; title: string }
@@ -1020,6 +1030,13 @@ export const api = {
     request<{ evidence: Evidence; response: ApiResponse }>(`/sessions/${sessionId}/api/send`, { method: 'POST', body: JSON.stringify(req) }),
   parseCurl: (sessionId: string, command: string) =>
     request<ApiDraft>(`/sessions/${sessionId}/api/parse-curl`, { method: 'POST', body: JSON.stringify({ command }) }),
+  openApiSpecs: (projectId: string) => request<OpenApiSpec[]>(`/projects/${projectId}/openapi`),
+  importOpenApi: (projectId: string, from: { url?: string; text?: string }) =>
+    request<OpenApiSpec>(`/projects/${projectId}/openapi`, { method: 'POST', body: JSON.stringify(from) }),
+  openApiEndpoints: (projectId: string, specId: string) => request<OpenApiOperations>(`/projects/${projectId}/openapi/${specId}`),
+  refreshOpenApi: (projectId: string, specId: string) =>
+    request<OpenApiSpec>(`/projects/${projectId}/openapi/${specId}/refresh`, { method: 'POST' }),
+  deleteOpenApi: (projectId: string, specId: string) => request<void>(`/projects/${projectId}/openapi/${specId}`, { method: 'DELETE' }),
   recordedRequests: (sessionId: string) => request<RecordedRequest[]>(`/sessions/${sessionId}/api/recorded`),
   apiHistory: (sessionId: string) => request<Evidence[]>(`/sessions/${sessionId}/api/history`),
   addNote: (sessionId: string, tag: Note['tag'], content: string) =>
