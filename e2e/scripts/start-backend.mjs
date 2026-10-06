@@ -23,7 +23,7 @@ const venvPython = [
 const python = process.env.PYTHON ?? venvPython ?? 'python'
 
 mkdirSync(dataDir, { recursive: true })
-rmSync(dbFile, { force: true })
+for (const f of [dbFile, `${dbFile}-wal`, `${dbFile}-shm`]) rmSync(f, { force: true })  // WAL files belong to the old database
 rmSync(evidenceDir, { recursive: true, force: true })
 
 const child = spawn(python, ['-m', 'uvicorn', 'app.main:app', '--port', port], {
