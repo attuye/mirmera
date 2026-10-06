@@ -736,6 +736,23 @@ class JiraAgentTask(Base):
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class AiJob(Base):
+    """A step where the AI works for a while on a tester's request (build the product model,
+    propose risks, draft charters from risks). It runs in the background and its result is
+    kept, so a refresh, another tab or a colleague sees it working and then sees the result."""
+    __tablename__ = "ai_jobs"
+    id = Column(String, primary_key=True, default=gen_id)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    kind = Column(String, nullable=False)  # product_model | risk_analysis | charters_from_risks
+    status = Column(String, default="running")  # running | done | failed
+    request = Column(JSON, default=dict)
+    result = Column(JSON, nullable=True)
+    error = Column(Text, nullable=True)
+    started_by = Column(String, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    finished_at = Column(DateTime, nullable=True)
+
+
 class ExplorationRun(Base):
     """The exploration agent working through one charter: an AI drives a headless browser
     on the app, records a session (notes, actions, signals) and drafts bugs for a tester to

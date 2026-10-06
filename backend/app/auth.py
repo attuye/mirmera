@@ -171,6 +171,7 @@ RESOLVE = {
     "test_id": lambda db, v, path: (lambda t: _via_bug(db, t.bug_id) if t else None)(db.get(models.RegressionTest, v)),
     "evidence_id": lambda db, v, path: (lambda e: _via_session(db, e.session_id) if e else None)(db.get(models.Evidence, v)),
     "run_id": lambda db, v, path: _run_project(db, v, path),
+    "job_id": lambda db, v, path: _project(db, models.AiJob, v),
 }
 
 

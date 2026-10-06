@@ -89,9 +89,28 @@ test('plan from risks: model the product, review risks, save a charter', async (
     await expect(page.getByText(/^Explore .* to discover/).first()).toBeVisible()
   })
 
-  await test.step('everything survives a reload', async () => {
+  await test.step('everything survives a reload, the drafted charters too', async () => {
     await page.goto(`/projects/${project.id}/risks`)
     await expect(page.getByText('Accepted (3)')).toBeVisible()
     await expect(page.getByText('Questions for the team')).toBeVisible()
+    await expect(page.getByText(/^Drafted .+ ago for /)).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Saved. Start it from Charters' })).toHaveCount(1)  // the one saved before
+    await expect(page.getByRole('button', { name: 'Save charter' }).first()).toBeVisible()
+  })
+
+  await test.step('a reload while the AI drafts shows it still working, then the drafts', async () => {
+    let runningUntil = Infinity  // for its first 2 s after the reload, the job looks mid-draft
+    const midDraft = async (route: import('@playwright/test').Route) => {
+      if (runningUntil === Infinity) runningUntil = Date.now() + 2000
+      const real = await (await route.fetch()).json()
+      await route.fulfill({ json: Date.now() < runningUntil ? { ...real, status: 'running', result: null, finished_at: null } : real })
+    }
+    await page.route('**/ai-jobs/latest?kind=charters_from_risks', midDraft)
+    await page.route(/\/ai-jobs\/[^/?]+$/, midDraft)
+    await page.reload()
+    await expect(page.getByRole('button', { name: /^Drafting… / })).toBeDisabled()
+    await expect(page.getByText("You can refresh or leave this page; the result will be here when it's done.")).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Draft charters' })).toBeVisible({ timeout: 10_000 })  // it checked again: done
+    await expect(page.getByText(/^Drafted .+ ago for /)).toBeVisible()
   })
 })

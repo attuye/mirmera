@@ -2,7 +2,7 @@
 import logging
 import re
 from datetime import date, datetime
-from typing import ClassVar, Optional, Literal
+from typing import Any, ClassVar, Optional, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -2162,7 +2162,7 @@ class AgentExploration(BaseModel):
 
 class AgentActivity(BaseModel):
     id: str
-    kind: Literal["jira", "explore"]
+    kind: Literal["jira", "explore", "ai"]
     state: str  # running | done | failed | cancelled
     stage: str
     title: str
@@ -2180,3 +2180,25 @@ class AgentActivity(BaseModel):
 class AgentActivityList(BaseModel):
     items: list[AgentActivity]
     running: int
+
+
+# ---------- AI jobs: AI steps that survive a refresh ----------
+
+class AiJobCreate(BaseModel):
+    kind: Literal["product_model", "risk_analysis", "charters_from_risks"]
+    request: dict = Field(default_factory=dict)
+
+
+class AiJobOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    project_id: str
+    kind: str
+    label: str = ""
+    status: str
+    request: dict = {}
+    result: Optional[Any] = None
+    error: Optional[str] = None
+    started_by: Optional[str] = None
+    created_at: datetime
+    finished_at: Optional[datetime] = None
