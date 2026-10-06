@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { api, Note } from '../api/client'
+import { Bot } from 'lucide-react'
+import { api, ExplorationRun, Note } from '../api/client'
 import Sidebar from '../components/Sidebar'
 import { errorText, ConfirmDelete } from '../components/ui'
 import BrowserPanel, { useRunner } from '../components/BrowserPanel'
@@ -17,6 +18,58 @@ const TAGS: { key: Note['tag']; label: string; color: string }[] = [
   { key: 'question', label: 'Question', color: 'var(--question)' },
   { key: 'setup', label: 'Setup', color: 'var(--neutral-tag)' },
 ]
+
+/** The exploration Mirmera's agent is running in this session, if any: checked on load, then
+ *  every 2 s while it runs. onStep runs on each check (new notes), onDone once when it stops. */
+function useAgentRun(charterId: string | null, sessionId: string | undefined, onDone: () => void, onStep: () => void): ExplorationRun | null {
+  const [run, setRun] = useState<ExplorationRun | null>(null)
+  useEffect(() => {
+    if (!charterId || !sessionId) return
+    let stopped = false
+    let timer: number | undefined
+    let wasRunning = false
+    const tick = async () => {
+      const latest = await api.charterExploration(charterId).catch(() => null)
+      if (stopped) return
+      const mine = latest && latest.session_id === sessionId ? latest : null
+      setRun(mine)
+      if (mine?.status === 'running') {
+        if (wasRunning) onStep()
+        wasRunning = true
+        timer = window.setTimeout(tick, 2000)
+      } else if (wasRunning) {
+        onDone()
+      }
+    }
+    tick()
+    return () => { stopped = true; if (timer) window.clearTimeout(timer) }
+  }, [charterId, sessionId])  // eslint-disable-line react-hooks/exhaustive-deps
+  return run
+}
+
+/** Beside the clock while Mirmera's agent runs this session: how far it has got, and a way to stop it. */
+function AgentAtWork({ run }: { run: ExplorationRun }) {
+  const [stopping, setStopping] = useState(false)
+  const last = run.steps[run.steps.length - 1]
+  return (
+    <div role="status" aria-label="Mirmera at work" title={last ? `Last step: ${last.action}` : undefined} style={{
+      display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '6px 10px', borderRadius: 8,
+      border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--info)', maxWidth: 320,
+    }}>
+      <Bot size={14} aria-hidden className="mm-pulse" style={{ flexShrink: 0 }} />
+      <span style={{ minWidth: 0 }}>
+        {stopping ? 'Mirmera is stopping…' : `Mirmera is exploring · step ${run.steps.length} of ${run.max_steps}`}
+        {last && !stopping && <span style={{ display: 'block', color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{last.action}</span>}
+      </span>
+      {!stopping && (
+        <button onClick={() => { setStopping(true); api.cancelExploration(run.id).catch(() => setStopping(false)) }}
+          style={{ fontSize: 11.5, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+          Stop
+        </button>
+      )}
+    </div>
+  )
+}
 
 function useElapsed(startedAt: string | undefined, running: boolean, paused: boolean, pausedAt: string | null, totalPausedSeconds: number) {
   const [elapsed, setElapsed] = useState('00:00:00')
@@ -69,6 +122,14 @@ export default function ActiveSession() {
   const [charterHeuristics, setCharterHeuristics] = useState<{ heuristics: string[]; oracles: string[] }>({ heuristics: [], oracles: [] })
   const runner = useRunner(sessionId)
   const box = useRef<HTMLTextAreaElement>(null)
+  const [charterId, setCharterId] = useState<string | null>(null)
+  const agentRun = useAgentRun(charterId, sessionId, () => {
+    // Mirmera finished: show its last notes, and the pause it left the session in.
+    if (!sessionId) return
+    api.listNotes(sessionId).then(setNotes).catch(() => {})
+    api.getSession(sessionId).then((s) => { setPaused(!!s.paused_at); setPausedAt(s.paused_at); setTotalPausedSeconds(s.total_paused_seconds) }).catch(() => {})
+  }, () => { if (sessionId) api.listNotes(sessionId).then(setNotes).catch(() => {}) })
+  const agentWorking = agentRun?.status === 'running'
 
   // Notes and bugs can also arrive from the Chrome extension's popup: refresh while it records.
   const extensionActive = !!runner.status?.extension_active
@@ -89,6 +150,7 @@ export default function ActiveSession() {
       setPausedAt(session.paused_at)
       setTotalPausedSeconds(session.total_paused_seconds)
       setSessionProjectId(session.project_id)
+      setCharterId(session.charter_id)
       api.getCharter(session.charter_id).then((charter) => {
         setCharterMission(charter.mission_statement)
         setCharterHeuristics({ heuristics: charter.heuristics, oracles: charter.oracles })
@@ -172,16 +234,19 @@ export default function ActiveSession() {
               </div>
             )}
           </div>
-          <div className="mono" style={{ fontSize: 26, fontWeight: 600, color: paused ? 'var(--text-tertiary)' : 'var(--accent)' }}>{elapsed}</div>
-          <button onClick={togglePause} disabled={ending} style={{
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            {agentRun && agentWorking && <AgentAtWork run={agentRun} />}
+            <div className="mono" style={{ fontSize: 26, fontWeight: 600, color: paused ? 'var(--text-tertiary)' : 'var(--accent)' }}>{elapsed}</div>
+          </div>
+          <button onClick={togglePause} disabled={ending || agentWorking} style={{
             border: '1px solid #2E323A', background: 'transparent', color: '#C9CDD4', fontSize: 12.5, fontWeight: 500,
             padding: '10px 16px', borderRadius: 8, marginRight: 8,
           }}>
             {paused ? 'Resume' : 'Pause'}
           </button>
-          <button onClick={endSession} disabled={ending} style={{
-            background: ending ? 'var(--border)' : 'var(--danger)', color: '#0C0D0F', fontSize: 12.5, fontWeight: 600,
-            padding: '10px 16px', borderRadius: 8, cursor: ending ? 'default' : 'pointer',
+          <button onClick={endSession} disabled={ending || agentWorking} title={agentWorking ? 'Mirmera is still exploring: stop it first' : undefined} style={{
+            background: ending || agentWorking ? 'var(--border)' : 'var(--danger)', color: '#0C0D0F', fontSize: 12.5, fontWeight: 600,
+            padding: '10px 16px', borderRadius: 8, cursor: ending || agentWorking ? 'default' : 'pointer',
           }}>
             {ending ? 'Ending session…' : 'End Session'}
           </button>
