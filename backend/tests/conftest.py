@@ -85,3 +85,12 @@ def pytest_runtest_logreport(report):
     errors = [l for l in lines if l.startswith("E ")][-12:] or lines[-3:]
     message = "%0A".join(l.replace("%", "%25").replace("\r", "") for l in errors)
     print(f"\n::error file=backend/{path},line={(line or 0) + 1},title={report.nodeid} ({report.when})::{message}")
+
+
+def end_and_draft(client, session_id: str) -> dict:
+    """Ends a session and returns its debrief once the AI has written it (the test client
+    returns after the background drafting has run)."""
+    r = client.post(f"/sessions/{session_id}/end")
+    assert r.status_code == 200, r.text
+    assert r.json()["drafting"] is True  # the answer comes before the AI's draft
+    return client.get(f"/sessions/{session_id}/debrief").json()

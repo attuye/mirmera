@@ -10,6 +10,7 @@ from app.database import SessionLocal
 from tests.test_regression import App, app_url, bug_present  # noqa: F401  (fixtures)
 from tests.test_reproduce import Scripted, step
 from tests.test_runner import chromium_available, headless_runner  # noqa: F401
+from tests.conftest import end_and_draft
 
 VERIFY = {"method": "role", "role": "button", "name": "Verify"}
 
@@ -87,7 +88,7 @@ def test_it_explores_and_drafts_a_checked_bug(client, kyc, monkeypatch, chromium
 
     # A tester reviews the paused session and ends it: the debrief is drafted from the agent's notes,
     # and the time the session sat paused doesn't count as testing.
-    debrief = client.post(f"/sessions/{run['session_id']}/end").json()
+    debrief = end_and_draft(client, run['session_id'])
     assert debrief["session_id"] == run["session_id"]
     with SessionLocal() as db:
         session = db.get(models.Session, run["session_id"])

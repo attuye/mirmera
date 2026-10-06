@@ -1,14 +1,14 @@
 import logging
 from app.timeutil import utcnow
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session as DBSession
 
 from app import auth, models, schemas
 from app.ai import tasks
 from app.ai.base import ProviderError
 from app.ai.routing import provider_for
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.evidence_text import browser_context
 from app.session_text import bug_line, note_line, riskiest_first
 from app.routers import runner as runner_api
@@ -192,7 +192,10 @@ def list_all_bugs(project_id: str, db: DBSession = Depends(get_db)):
     ]
 
 @router.post("/{session_id}/end", response_model=schemas.DebriefOut)
-async def end_session(session_id: str, db: DBSession = Depends(get_db)):
+async def end_session(session_id: str, background: BackgroundTasks, db: DBSession = Depends(get_db)):
+    """Ends the session at once and answers with its debrief, still being written: the AI
+    drafts it in the background (a local model takes minutes), and the debrief page shows
+    that and fills in when it is done."""
     session = db.get(models.Session, session_id)
     if not session:
         raise HTTPException(404, "Session not found")
@@ -211,61 +214,63 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
                   .filter(models.Session.charter_id == charter.id, models.Session.id != session_id, models.Session.ended_at.is_(None))
                   .count())
     charter.status = "active" if still_open else "done"  # done when its last open session ends
-    project = db.get(models.Project, charter.project_id)
 
     notes = db.query(models.Note).filter(models.Note.session_id == session_id).order_by(models.Note.timestamp).all()
     bugs = db.query(models.Bug).filter(models.Bug.session_id == session_id).all()
-
     time_breakdown = _compute_time_breakdown(notes, session.ended_at)
-    duration_minutes = round(
-        ((session.ended_at - session.started_at).total_seconds() - (session.total_paused_seconds or 0)) / 60
-    )
     recorded = (
         db.query(models.Evidence).filter(models.Evidence.session_id == session_id)
         .order_by(models.Evidence.captured_at).all()
     )
-    browser = browser_context(recorded, session.started_at, used=bool(recorded))
-    # The session is ended now, before the AI writes the debrief (a local model takes minutes):
-    # a refresh or a second click sees it ended, and no write is held open while the AI thinks.
+    draft_input = dict(
+        charter_mission=charter.mission_statement,
+        risks=[{"ref": r.ref, "title": r.title, "failure_mode": r.failure_mode} for r in riskiest_first(charter.risks)],
+        duration_minutes=round(
+            ((session.ended_at - session.started_at).total_seconds() - (session.total_paused_seconds or 0)) / 60),
+        notes=[note_line(n, session.started_at) for n in notes],
+        bugs=[bug_line(b) for b in bugs],
+        time_breakdown=time_breakdown,
+        browser=browser_context(recorded, session.started_at, used=bool(recorded)),
+    )
     debrief = models.Debrief(session_id=session_id, drafting=True, time_breakdown=time_breakdown)
     db.add(debrief)
     db.commit()
-
-    try:
-        provider = provider_for(project, "debrief")
-        draft = await tasks.draft_debrief(
-            provider,
-            charter_mission=charter.mission_statement,
-            risks=[{"ref": r.ref, "title": r.title, "failure_mode": r.failure_mode} for r in riskiest_first(charter.risks)],
-            duration_minutes=duration_minutes,
-            notes=[note_line(n, session.started_at) for n in notes],
-            bugs=[bug_line(b) for b in bugs],
-            time_breakdown=time_breakdown,
-            browser=browser,
-        )
-        debrief.ai_draft = draft.past
-        debrief.coverage_summary = draft.past
-        debrief.open_questions = draft.open_questions
-        debrief.charter_status = draft.charter_status
-        debrief.charter_status_rationale = draft.charter_status_rationale
-        debrief.results = draft.results
-        debrief.obstacles = draft.obstacles
-        debrief.outlook = [{**o.model_dump(), "charter_id": None} for o in draft.outlook]
-        debrief.risks_observed = [{"text": r, "risk_id": None} for r in draft.risks_observed]
-        debrief.ai_provider = provider.name
-        debrief.ai_model = provider.model
-        debrief.prompt_version = tasks.PROMPT_VERSIONS["debrief"]
-    except ProviderError as err:
-        # No API key, model down, or an invalid reply: the session still ends
-        # and the debrief still saves; the tester writes it manually instead of
-        # editing an AI draft. The reason is logged.
-        logger.warning("Session %s ended without an AI debrief: %s", session_id, err)
-        debrief.coverage_summary = None
-    finally:
-        debrief.drafting = False  # even if something unexpected failed: the tester can still write it
-        db.commit()
     db.refresh(debrief)
+    background.add_task(write_debrief, debrief.id, charter.project_id, draft_input)
     return debrief
+
+
+async def write_debrief(debrief_id: str, project_id: str, draft_input: dict) -> None:
+    """The AI's draft of a debrief, after the session has ended. Uses its own database
+    session and holds no write while the AI thinks."""
+    with SessionLocal() as db:
+        project = db.get(models.Project, project_id)
+        fields: dict = {}
+        try:
+            provider = provider_for(project, "debrief")
+            db.commit()  # only reads so far: end that transaction before the AI call
+            draft = await tasks.draft_debrief(provider, **draft_input)
+            fields = dict(
+                ai_draft=draft.past, coverage_summary=draft.past, open_questions=draft.open_questions,
+                charter_status=draft.charter_status, charter_status_rationale=draft.charter_status_rationale,
+                results=draft.results, obstacles=draft.obstacles,
+                outlook=[{**o.model_dump(), "charter_id": None} for o in draft.outlook],
+                risks_observed=[{"text": r, "risk_id": None} for r in draft.risks_observed],
+                ai_provider=provider.name, ai_model=provider.model, prompt_version=tasks.PROMPT_VERSIONS["debrief"],
+            )
+        except ProviderError as err:
+            # No API key, model down, or an invalid reply: the debrief stays empty and
+            # the tester writes it instead of editing an AI draft. The reason is logged.
+            logger.warning("Debrief %s has no AI draft: %s", debrief_id, err)
+        except Exception:
+            logger.exception("Debrief %s: the AI draft failed", debrief_id)
+        finally:
+            debrief = db.get(models.Debrief, debrief_id)
+            if debrief:  # the session may have been deleted meanwhile
+                for k, v in fields.items():
+                    setattr(debrief, k, v)
+                debrief.drafting = False  # whatever happened, the tester can now write or edit it
+                db.commit()
 
 
 @router.delete("/{session_id}", response_model=schemas.Deleted)

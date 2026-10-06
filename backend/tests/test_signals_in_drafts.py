@@ -13,6 +13,7 @@ from app.ai.base import LLMProvider
 from app.database import SessionLocal
 from app.evidence_text import NOT_USED, browser_context
 from app.timeutil import utcnow
+from tests.conftest import end_and_draft
 
 SITE = "https://staging.addisverify.et"
 
@@ -161,7 +162,7 @@ def test_debrief_draft_gets_the_whole_session_recording(client, session, monkeyp
     add_evidence(sid, "trace", "Playwright trace of the session", start)
     provider = Scripted(PROOF)
     monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
-    d = client.post(f"/sessions/{sid}/end").json()
+    d = end_and_draft(client, sid)
 
     browser = provider.users[0].split("<browser>\n", 1)[1]
     assert browser.startswith("Recorded: 4 console errors; 1 page visited.")
@@ -183,6 +184,6 @@ def test_mock_debrief_reports_signals_and_an_unreachable_app(client, session):
     sid = session["id"]
     add_evidence(sid, "failed_request", "Could not open https://staging.example: net::ERR_NAME_NOT_RESOLVED", start)
     add_evidence(sid, "console_error", "Upload widget failed", start, count=2)
-    d = client.post(f"/sessions/{sid}/end").json()
+    d = end_and_draft(client, sid)
     assert "(mock) Browser recorded: 2 console errors, 1 failed request; 0 pages visited." in d["results"]
     assert d["obstacles"] == ["Could not open https://staging.example: net::ERR_NAME_NOT_RESOLVED"]
