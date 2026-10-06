@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, BookOpen, CalendarRange, Bug, ChevronRight, Compass, FileText, FlaskConical, FolderKanban, LayoutDashboard, Lightbulb, Map as MapIcon,
-  CircleUser, MessageSquareText, ScanSearch, ScrollText, Settings, ShieldAlert, Signpost, StickyNote, TrendingUp, type LucideIcon,
+  Bot, CircleUser, Loader2, MessageSquareText, ScanSearch, ScrollText, Settings, ShieldAlert, Signpost, StickyNote, TrendingUp, type LucideIcon,
 } from 'lucide-react'
 import { api, ProjectSummary } from '../api/client'
 import { useAuth } from '../auth'
+import { useAgentActivity } from './AgentProgress'
 
 type Item = { label: string; to: string; icon: LucideIcon }
 type Group = { label: string; icon: LucideIcon; items: Item[] }
@@ -141,6 +142,26 @@ function ProjectSwitcher({ projectId }: { projectId: string }) {
   )
 }
 
+/** Shown while Mirmera works in this workspace; always a way to its activity page. */
+function AgentIndicator({ workspaceId }: { workspaceId: string }) {
+  const location = useLocation()
+  const data = useAgentActivity(() => api.workspaceActivity(workspaceId), workspaceId, 5000)  // notices work started from Jira
+  const running = data?.running ?? 0
+  const here = location.pathname === `/workspaces/${workspaceId}/activity`
+  if (!data || (!running && data.items.length === 0)) return null
+  return (
+    <Link to={`/workspaces/${workspaceId}/activity`} aria-label={running ? `Mirmera is working on ${running}` : 'Mirmera activity'}
+      aria-current={here ? 'page' : undefined} style={{
+        marginBottom: 10, display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5, padding: '8px 10px', borderRadius: 7,
+        color: running ? 'var(--info)' : here ? 'var(--accent)' : 'var(--text-secondary)',
+        background: running ? 'var(--panel)' : 'transparent', border: running ? '1px solid var(--border)' : '1px solid transparent',
+      }}>
+      {running ? <Loader2 size={14} aria-hidden className="mm-spin" /> : <Bot size={14} aria-hidden />}
+      <span>{running ? `Mirmera is working${running > 1 ? ` (${running})` : ''}` : 'Mirmera activity'}</span>
+    </Link>
+  )
+}
+
 export default function Sidebar() {
   const location = useLocation()
   const { projectId } = useParams()
@@ -179,9 +200,11 @@ export default function Sidebar() {
           <NavLink to="/projects" label="Projects" icon={FolderKanban} active={location.pathname === '/projects'} />
         </nav>
       )}
+      <div style={{ marginTop: 'auto' }}>
+      {workspace && <AgentIndicator workspaceId={workspace.id} />}
       {me && (
         <Link to="/account" aria-label="Account" aria-current={location.pathname === '/account' ? 'page' : undefined} style={{
-          marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--border)', display: 'flex', gap: 10, alignItems: 'center',
+          paddingTop: 16, borderTop: '1px solid var(--border)', display: 'flex', gap: 10, alignItems: 'center',
           color: location.pathname === '/account' ? 'var(--accent)' : 'var(--text-secondary)',
         }}>
           <CircleUser size={18} strokeWidth={1.8} aria-hidden style={{ flexShrink: 0 }} />
@@ -191,6 +214,7 @@ export default function Sidebar() {
           </div>
         </Link>
       )}
+      </div>
     </div>
   )
 }
