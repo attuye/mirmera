@@ -315,6 +315,33 @@ regression test from these steps** turns them into a Playwright test that
 checks the symptom is gone. Useful for bugs logged without the recorded
 browser, and for flaky ones.
 
+### Exploration agent
+
+On a story's charter, **Let Mirmera explore** sends an AI through the charter in a headless
+browser on the project's app URL. It works the way a tester runs a session:
+- it follows the mission and test ideas, and varies the data;
+- it writes notes on what it tried;
+- each time something looks wrong, it reports a problem.
+
+Mirmera checks each problem's symptom itself before believing it: the failed request
+really happened, or the text really is on the page. Each checked problem becomes a **bug
+draft** with the steps, expected, actual and a screenshot. A tester reviews it like any
+other bug; nothing goes to a tracker on its own.
+
+The agent's work is an ordinary session by "Mirmera agent", left paused. Review its notes,
+then **End Session** to draft the debrief.
+
+The guard rails are the reproduction agent's:
+- it stays inside the app's address;
+- it only types passwords through `MIRMERA_SECRET_*` names, and never sees the values;
+- it has a step budget, a 15-minute limit and a **Stop** button.
+
+It uses the project's AI setting for "Reproduction and exploration agents".
+
+From Jira, planning a work item (the panel button, or assigning it to Mirmera) also
+explores its first charter when the project has an app URL. Jira gets the result: what
+was covered, and the bug drafts.
+
 ### Filing bugs to GitHub and Jira
 
 Reviewed bugs and questions can be filed from the Bugs page. Put the

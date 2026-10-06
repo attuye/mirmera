@@ -1190,6 +1190,78 @@ class LLMAgentStep(BaseModel):
     action: AgentAction
 
 
+class ExploreProblem(BaseModel):
+    """Something the exploration agent thinks is a problem. Mirmera checks the symptom
+    itself; the rest becomes a bug draft for a tester to review."""
+    title: str = Field(min_length=3, max_length=200)
+    expected: str = Field(min_length=3, max_length=600)
+    actual: str = Field(min_length=3, max_length=600)
+    severity: Literal["high", "medium", "low"] = "medium"
+    symptom: Symptom
+
+
+class ExploreAction(BaseModel):
+    kind: Literal["goto", "click", "fill", "fill_secret", "select", "check", "uncheck", "press", "wait",
+                  "note", "problem", "done"]
+    locator: Optional[PlanLocator] = None
+    url: Optional[str] = Field(default=None, max_length=2000)
+    value: Optional[str] = Field(default=None, max_length=500)
+    secret: Optional[str] = None
+    key: Optional[str] = None
+    note: Optional[str] = Field(default=None, max_length=600)  # note: what was tried or noticed
+    problem: Optional[ExploreProblem] = None
+    summary: Optional[str] = Field(default=None, max_length=1200)  # done: what was covered, what wasn't
+
+    @model_validator(mode="after")
+    def complete(self):
+        k = self.kind
+        if k == "note" and not (self.note or "").strip():
+            raise ValueError("note needs the note text")
+        if k == "problem" and not self.problem:
+            raise ValueError("problem needs title, expected, actual and the symptom")
+        if k == "done" and not (self.summary or "").strip():
+            raise ValueError("done needs a summary of what was covered")
+        if k not in ("note", "problem", "done"):
+            self.as_browser_action()  # the same checks as the reproduction agent's actions
+        return self
+
+    def as_browser_action(self) -> "AgentAction":
+        return AgentAction(kind=self.kind, locator=self.locator, url=self.url, value=self.value,
+                           secret=self.secret, key=self.key)
+
+
+class LLMExploreStep(BaseModel):
+    """AI contract for the exploration agent: one step at a time."""
+    thought: str = Field(min_length=1, max_length=600)
+    action: ExploreAction
+
+
+class ExploreRequest(BaseModel):
+    base_url: Optional[str] = Field(default=None, pattern=r"^https?://")  # default: the project's app URL
+    provider: Optional[str] = None
+    max_steps: int = Field(default=25, ge=3, le=60)
+
+
+class ExplorationRunOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    project_id: str
+    charter_id: str
+    session_id: Optional[str] = None
+    status: str
+    start_url: str
+    max_steps: int
+    steps: list[dict] = []
+    bug_ids: list[str] = []
+    summary: Optional[str] = None
+    detail: Optional[str] = None
+    started_by: Optional[str] = None
+    ai_provider: Optional[str] = None
+    ai_model: Optional[str] = None
+    created_at: datetime
+    finished_at: Optional[datetime] = None
+
+
 class ReproduceRequest(BaseModel):
     replay_known_steps: bool = True  # replay Steps to the bug first (no AI); the AI explores only if needed
     base_url: Optional[str] = Field(default=None, pattern=r"^https?://")

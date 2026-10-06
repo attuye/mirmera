@@ -18,7 +18,7 @@ AI_TASKS: list[dict] = [
     {"key": "risk_update", "label": "Suggest risk re-scores", "hint": "Must quote evidence"},
     {"key": "duplicate_check", "label": "Check tracker duplicates", "hint": "Compares titles and steps"},
     {"key": "regression", "label": "Write regression tests", "hint": "Checks that assert the oracle"},
-    {"key": "agent", "label": "Reproduction agent", "hint": "Many quick steps: speed matters"},
+    {"key": "agent", "label": "Reproduction and exploration agents", "hint": "Many quick steps: speed matters"},
     {"key": "report_summary", "label": "Summarise the test report", "hint": "Short; must not invent numbers"},
     {"key": "test_strategy", "label": "Write the test strategy", "hint": "Prose from the project's facts; must not invent numbers"},
 ]

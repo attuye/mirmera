@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, ExternalLink, RefreshCw } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
+import ExploreButton from '../components/ExploreButton'
 import RiskForm from '../components/RiskForm'
 import { utcDate } from '../components/Evidence'
 import { ConfirmDelete, ErrorLine, errorText, input, quietButton } from '../components/ui'
@@ -213,6 +214,7 @@ export default function StoryPage() {
                     <span>{c.sessions ? `${c.sessions} session${c.sessions === 1 ? '' : 's'}, ${timeText(c.minutes)}` : 'not explored yet'}</span>
                     {c.bugs > 0 && <span>{c.bugs} bug{c.bugs === 1 ? '' : 's'}</span>}
                   </div>
+                  <ExploreButton charterId={c.id} onFinished={() => api.getStory(story.id).then(setStory).catch(() => {})} />
                 </div>
                 <button disabled={!!busy} onClick={() => act('charter', () => api.setStoryCharters(story.id, charterIds.filter((x) => x !== c.id)))} style={small}
                   aria-label={`Unlink ${c.mission_statement}`}>Unlink</button>
@@ -232,7 +234,7 @@ export default function StoryPage() {
                   <span style={{ color: 'var(--text-tertiary)' }}>{timeText(s.minutes)}{s.bugs ? `, ${s.bugs} bug${s.bugs === 1 ? '' : 's'}` : ''}</span>
                   {s.ended_at
                     ? <Link to={path(`/sessions/${s.id}/debrief`)}>{s.debrief ? 'Debrief' : 'Write debrief'}</Link>
-                    : <Link to={path(`/sessions/${s.id}`)}>Running</Link>}
+                    : <Link to={path(`/sessions/${s.id}`)}>{s.paused ? 'Paused' : 'Running'}</Link>}
                 </li>
               ))}
             </ul>

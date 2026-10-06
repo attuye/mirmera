@@ -80,7 +80,10 @@ def _left(story: models.Story, sessions: list[models.Session], bugs: list[models
     latest = {s.charter_id: s for s in sessions if s.debrief}  # sessions are oldest first; a later one may fulfil the charter
     for s in sessions:
         d = s.debrief
-        if s.ended_at and not d:
+        if not s.ended_at and s.paused_at and s.tester_id == "Mirmera agent":
+            left.append({"text": f"Mirmera explored it: {s.charter.mission_statement}. Review its notes and end the session for the debrief.",
+                         "to": f"/sessions/{s.id}", "action": "Review session"})
+        elif s.ended_at and not d:
             left.append({"text": f"No debrief yet: {s.charter.mission_statement} ({s.tester_id})",
                          "to": f"/sessions/{s.id}/debrief", "action": "Write debrief"})
         elif d and d.charter_status in UNFULFILLED and latest[s.charter_id] is s:
@@ -134,6 +137,7 @@ def detail(db: DBSession, story: models.Story) -> dict:
         "id": s.id, "charter_id": s.charter_id, "mission_statement": s.charter.mission_statement, "tester": s.tester_id,
         "started_at": s.started_at, "ended_at": s.ended_at, "minutes": round(tested_seconds(s, now) / 60),
         "bugs": len([b for b in s.bugs if b.kind != "question"]), "debrief": s.debrief is not None,
+        "paused": bool(s.paused_at and not s.ended_at),
     } for s in sessions]
     bug_rows = [{
         "id": b.id, "title": b.title, "kind": b.kind, "severity": b.severity, "session_id": b.session_id,
