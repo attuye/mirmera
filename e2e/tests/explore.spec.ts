@@ -22,6 +22,8 @@ test('exploration agent: Mirmera explores a charter and leaves a session and a b
     await expect(work.getByRole('list', { name: 'Stages' })).toContainText('Explore in the app')
     await expect(work.getByRole('progressbar', { name: 'Steps used' })).toBeVisible()
     await expect(work.getByRole('list', { name: 'Latest steps' })).toContainText('problem: GET /api/documents fails with 500')
+    // What the app answered each try, so a tester (and the AI) can compare tries.
+    await expect(work.getByRole('list', { name: 'Latest steps' })).toContainText('click button "Search" → the page now says "No documents match')
     await expect(work).toContainText('1 bug draft')
   })
 

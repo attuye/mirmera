@@ -36,7 +36,7 @@ from app.timeutil import utcnow
 logger = logging.getLogger(__name__)
 
 PROMPT = (Path(__file__).resolve().parents[1] / "ai" / "prompts" / "explore_step.md").read_text(encoding="utf-8")
-PROMPT_VERSION = "explore-step-v1"
+PROMPT_VERSION = "explore-step-v2"
 TESTER = "Mirmera agent"
 HISTORY_LIMIT = 20
 RUN_TIMEOUT_S = 900
@@ -91,6 +91,85 @@ def recorded_action(a: schemas.ExploreAction) -> dict | None:
     if a.key:
         out["key"] = a.key
     return out
+
+
+# ---------- what the form holds now ----------
+
+FORM_JS = """() => {
+  const visible = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length)
+  const labelOf = (el) => {
+    const byFor = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)
+    const text = (byFor && byFor.innerText) || (el.closest('label') && el.closest('label').innerText)
+      || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.name || el.id || el.type
+    return text.replace(/\\s+/g, ' ').trim()
+  }
+  const fields = []
+  for (const el of document.querySelectorAll('input, select, textarea')) {
+    const type = (el.type || el.tagName).toLowerCase()
+    if (['hidden', 'submit', 'button', 'reset', 'image'].includes(type) || !visible(el)) continue
+    let value
+    if (type === 'checkbox' || type === 'radio') value = el.checked ? 'checked' : 'not checked'
+    else if (type === 'password') value = el.value ? '(filled)' : ''
+    else if (el.tagName === 'SELECT') value = el.selectedOptions[0] ? el.selectedOptions[0].text : ''
+    else value = el.value
+    fields.push({ label: labelOf(el), type, value, required: el.required })
+  }
+  const messages = [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')]
+    .filter(visible).map((el) => el.innerText.replace(/\\s+/g, ' ').trim()).filter(Boolean)
+  return { fields, messages }
+}"""
+
+
+@dataclass
+class FormState:
+    fields: list[dict] = field(default_factory=list)  # label, type, value, required
+    messages: list[str] = field(default_factory=list)  # what the page says in its status and alert areas
+
+    def text(self) -> str:
+        """For the AI: every field with what it holds now (empty ones marked), and the page's messages.
+        Small models lose track of which fields are filled; this is how a submit's result can be read."""
+        if not self.fields and not self.messages:
+            return ""
+        lines = ["Form fields now:"] if self.fields else []
+        for f in self.fields[:30]:
+            v = f["value"]
+            shown = v if f["type"] in ("checkbox", "radio") or v == "(filled)" else (f'"{v[:120]}"' if v else "(empty)")
+            lines.append(f'- "{f["label"][:80]}" ({f["type"]}{", required" if f["required"] else ""}): {shown}')
+        lines.append("Messages on the page: " + ("; ".join(f'"{m[:200]}"' for m in self.messages[:5]) or "(none)"))
+        return "\n".join(lines)
+
+    def values(self) -> str:
+        """The fields and their values only: the same form submitted twice has the same values."""
+        return "|".join(f'{f["label"]}={f["value"]}' for f in self.fields)
+
+    def value_of(self, name: str | None) -> str | None:
+        name = (name or "").strip().lower()
+        hits = [f["value"] for f in self.fields if name and f["label"].lower() == name]
+        return hits[0] if len(hits) == 1 else None
+
+
+async def form_state(page) -> FormState:
+    try:
+        data = await page.evaluate(FORM_JS)
+        return FormState(fields=data.get("fields") or [], messages=data.get("messages") or [])
+    except Exception:  # navigating, or a page without a DOM to read
+        return FormState()
+
+
+def pointless(a: schemas.ExploreAction, url: str, before: FormState, tried: dict[tuple[str, str, str], int]) -> str | None:
+    """Why a step would learn nothing, or None. A small model loops: it submits the same form
+    again and again, or fills a field with the value it already holds. Such a step isn't run."""
+    if a.kind == "fill" and a.locator:
+        current = before.value_of(a.locator.value or a.locator.name)
+        if current is not None and current == a.value:
+            return (f'that field already holds "{a.value}". Change a different field, or change this one to a '
+                    "different value, then submit")
+    if a.kind in ("click", "press"):
+        key = (describe(a), url, before.values())
+        if key in tried:
+            return (f"you did exactly this at step {tried[key]} on this page with the same field values, and it can't show "
+                    "anything new. Change one field first (keep the others valid), or try another idea")
+    return None
 
 
 def _user_message(ctx: CharterContext, history: list[dict], observation: str, steps_left: int) -> str:
@@ -178,6 +257,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                 signals.attach(page)
                 seen_signals: dict[str, int] = {}
                 seen: dict[str, int] = {}
+                tried: dict[tuple[str, str, str], int] = {}  # (click, page, field values before it) -> step
                 await page.goto(start_url, wait_until="domcontentloaded", timeout=30_000)
                 await signals.settle()
                 _record(session_id, [Signal("navigation", f"Opened {start_url}", start_url, now())])
@@ -201,6 +281,9 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         final = {"status": "finished", "detail": f"Stopped: the run took longer than {RUN_TIMEOUT_S // 60} minutes."}
                         break
                     observation = await observe(page, signals, seen)
+                    before = await form_state(page)
+                    if before.text():
+                        observation += "\n" + defang(before.text())
                     drain_signals()
                     try:
                         step = await complete_json(provider, PROMPT, _user_message(ctx, history, observation, max_steps - n + 1),
@@ -250,6 +333,13 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         _save(run_id, steps=list(history), bug_ids=list(bug_ids))
                         continue
 
+                    if why := pointless(a, page.url, before, tried):
+                        entry["status"], entry["detail"] = "refused", f"not run: {why}"
+                        history.append(entry)
+                        _save(run_id, steps=list(history))
+                        continue
+                    if a.kind in ("click", "press"):
+                        tried[(describe(a), page.url, before.values())] = entry["n"]
                     browser_action = a.as_browser_action()
                     try:
                         entry["status"], entry["detail"] = await act(page, browser_action, origins)
@@ -261,6 +351,11 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         await _back_into_app(page, entry["url"], signals)
                         entry["detail"] = (entry["detail"] + "; " if entry["detail"] else "") + \
                             f"that left the app ({origin(left)}), so the browser went back"
+                    if entry["status"] == "ok" and not page.is_closed():
+                        after = await form_state(page)
+                        said = [m for m in after.messages if m not in before.messages]
+                        if said:  # what the app answered: kept in the history, so the AI can compare tries
+                            entry["detail"] = "the page now says " + "; ".join(f'"{m[:160]}"' for m in said[:3])
                     if entry["status"] == "ok":
                         if a.kind == "goto":
                             steps.append({"type": "goto", "url": a.url})

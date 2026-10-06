@@ -109,6 +109,7 @@ export default function AgentProgress({ item, showTitle = true }: { item: AgentA
                   <span style={{ minWidth: 0 }}>
                     <span>{s.action}</span>
                     {s.status !== 'ok' && <span style={{ color: STEP_COLOR[s.status] ?? 'var(--text-tertiary)' }}> ({s.status})</span>}
+                    {s.detail && <span style={{ color: 'var(--text-secondary)' }}> → {s.detail.length > 160 ? s.detail.slice(0, 157) + '…' : s.detail}</span>}
                     {s.thought && <span style={{ color: 'var(--text-tertiary)' }}> · {s.thought}</span>}
                   </span>
                 </li>

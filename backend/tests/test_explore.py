@@ -108,3 +108,54 @@ def test_the_mock_explorer_runs_end_to_end(client, kyc, chromium_available):  # 
     assert [s["kind"] for s in run["steps"]][:3] == ["note", "fill", "click"]
     assert client.get(f"/charters/{charter['id']}/exploration").json()["id"] == run["id"]
     assert client.post(f"/exploration-runs/{run['id']}/cancel").status_code == 409  # already finished
+
+
+EXPIRY = {"method": "label", "value": "Expiry date"}
+
+
+def test_it_sees_what_the_form_holds_and_what_the_app_answers(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """Small models lose track of which fields are filled: each step shows every field's value
+    (empty ones marked, passwords never), the page's messages, and what a submit answered."""
+    project, charter = kyc
+    monkeypatch.setenv("MIRMERA_SECRET_KYC_PASSWORD", "hunter2-not-shown")
+    provider = scripted(monkeypatch, [
+        step("A valid name first", kind="fill", locator={"method": "label", "value": "Full name"}, value="John Smith"),
+        step("The password", kind="fill_secret", locator={"method": "label", "value": "Password"}, secret="MIRMERA_SECRET_KYC_PASSWORD"),
+        step("Submit", kind="click", locator=VERIFY),
+        step("Covered", kind="done", summary="A valid submit is verified."),
+    ])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 6}).json())
+    first, after_fill, after_secret, after_submit = provider.users
+    assert '"Full name" (text): (empty)' in first and "Messages on the page: (none)" in first
+    assert '"Full name" (text): "John Smith"' in after_fill
+    assert '"Expiry date" (date): (empty)' in after_fill
+    assert '"I accept the terms" (checkbox): not checked' in after_fill
+    assert '"Document type" (select-one): "National ID"' in after_fill
+    assert '(password): (filled)' in after_secret
+    assert all("hunter2-not-shown" not in u for u in provider.users)
+    submit = run["steps"][2]
+    assert submit["status"] == "ok" and submit["detail"] == 'the page now says "Verified"'
+    assert 'Messages on the page: "Verified"' in after_submit
+    assert '3. click button "Verify" -> ok: the page now says "Verified"' in after_submit  # in the history
+
+
+def test_it_does_not_repeat_steps_that_teach_nothing(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """Seen with qwen3:8b: it submitted the same form four times, then filled the date it already had."""
+    project, charter = kyc
+    scripted(monkeypatch, [
+        step("An expired date", kind="fill", locator=EXPIRY, value="2020-01-01"),
+        step("Submit", kind="click", locator=VERIFY),
+        step("Submit again", kind="click", locator=VERIFY),
+        step("Set the same date", kind="fill", locator=EXPIRY, value="2020-01-01"),
+        step("A future date instead", kind="fill", locator=EXPIRY, value="2030-01-01"),
+        step("Submit with the new date", kind="click", locator=VERIFY),
+        step("Covered", kind="done", summary="Both dates are verified."),
+    ])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 10}).json())
+    assert [s["status"] for s in run["steps"]] == ["ok", "ok", "refused", "refused", "ok", "ok", "ok"]
+    again, same_value = run["steps"][2], run["steps"][3]
+    assert "you did exactly this at step 2" in again["detail"]
+    assert 'already holds "2020-01-01"' in same_value["detail"]
+    with SessionLocal() as db:  # refused steps are not part of the session's recording
+        actions = [e for e in db.query(models.Evidence).filter_by(session_id=run["session_id"]).all() if e.kind == "action"]
+        assert len(actions) == 4

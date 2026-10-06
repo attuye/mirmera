@@ -108,12 +108,28 @@ def plan_step(a: schemas.AgentAction) -> dict | None:
 
 # ---------- seeing ----------
 
+async def _masked(page, text: str) -> str:
+    """The accessibility tree shows what a password field holds. The AI never sees a secret:
+    password values and the MIRMERA_SECRET_* values are masked wherever they appear."""
+    try:
+        values = await page.evaluate(
+            "() => [...document.querySelectorAll('input[type=password]')].map((el) => el.value).filter(Boolean)")
+    except Exception:
+        values = []
+    values += [v for k, v in os.environ.items() if k.startswith("MIRMERA_SECRET_") and v]
+    for v in sorted(set(values), key=len, reverse=True):
+        if len(v) >= 3:
+            text = text.replace(v, "••••••")
+    return text
+
+
 async def observe(page, signals: Signals, seen: dict[str, int]) -> str:
     """URL, title, new errors since the last look, and the accessibility tree."""
     try:
         tree = await page.locator("body").aria_snapshot(timeout=5_000)
     except Exception:
         tree = "(the page structure could not be read)"
+    tree = await _masked(page, tree)
     if len(tree) > SNAPSHOT_LIMIT:
         tree = tree[:SNAPSHOT_LIMIT] + "\n… (cut)"
     new = []
