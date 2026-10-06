@@ -183,7 +183,7 @@ export default function ActiveSession() {
             background: ending ? 'var(--border)' : 'var(--danger)', color: '#0C0D0F', fontSize: 12.5, fontWeight: 600,
             padding: '10px 16px', borderRadius: 8, cursor: ending ? 'default' : 'pointer',
           }}>
-            {ending ? 'Ending session… (generating debrief)' : 'End Session'}
+            {ending ? 'Ending session…' : 'End Session'}
           </button>
         </div>
         {endError && <div role="alert" style={{ padding: '8px 36px', color: 'var(--danger)', fontSize: 12.5 }}>{endError}</div>}

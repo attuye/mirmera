@@ -234,7 +234,7 @@ export default function DebriefPage() {
     if (!sessionId || !drafting) return
     const id = window.setInterval(() => {
       api.getDebrief(sessionId).then((d) => { if (!d.drafting) fill(d) }).catch(() => {})
-    }, 3000)
+    }, 2000)
     return () => window.clearInterval(id)
   }, [sessionId, drafting])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -282,7 +282,7 @@ export default function DebriefPage() {
           {charter && <div style={{ fontSize: 13.5, color: 'var(--text-secondary)', marginTop: 8 }}>{charter.mission_statement}</div>}
           <div role="status" style={{ ...panel, marginTop: 18, display: 'flex', gap: 10, alignItems: 'center', fontSize: 13.5 }}>
             <Loader2 size={15} aria-hidden className="mm-spin" style={{ color: 'var(--info)', flexShrink: 0 }} />
-            <span>The session has ended. Mirmera is writing the debrief; with a local model this can take a few minutes. This page fills in by itself.</span>
+            <span>The session has ended. Mirmera is writing the debrief; with a local model this can take a few minutes. This page fills in by itself; you can leave and come back.</span>
           </div>
         </main>
       </div>

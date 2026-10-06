@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from app.ai.base import LLMProvider, ProviderError
 from app.routers.sessions import _compute_time_breakdown
+from tests.conftest import end_and_draft
 
 T0 = datetime(2026, 10, 1, 9, 0, 0)
 
@@ -39,10 +40,8 @@ def test_pause_and_resume(client, session):
 def test_ending_a_session_drafts_a_debrief_and_closes_the_charter(client, charter, session):
     sid = session["id"]
     note(client, session, "test", "Applied SAVE10, then switched to EUR")
-    r = client.post(f"/sessions/{sid}/end")
-    assert r.status_code == 200
-    debrief = r.json()
-    assert "Mock debrief" in debrief["coverage_summary"]
+    debrief = end_and_draft(client, sid)
+    assert "Mock debrief" in debrief["coverage_summary"] and debrief["drafting"] is False
     assert debrief["ai_draft"] == debrief["coverage_summary"]
     assert client.get(f"/charters/{charter['id']}").json()["status"] == "done"
     assert client.get(f"/charters/{charter['id']}/active-session").status_code == 404
@@ -61,9 +60,8 @@ def test_debrief_is_still_saved_when_the_ai_fails(client, session, monkeypatch):
             raise ProviderError("provider down")
 
     monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: Broken())
-    r = client.post(f"/sessions/{session['id']}/end")
-    assert r.status_code == 200
-    assert r.json()["coverage_summary"] is None
+    d = end_and_draft(client, session["id"])
+    assert d["coverage_summary"] is None and d["drafting"] is False  # the tester writes it
 
 
 # ---------- notes ----------
@@ -142,10 +140,10 @@ def test_no_notes_means_no_breakdown():
 
 # ---------- ending while the AI writes the debrief ----------
 
-def test_the_session_is_ended_before_the_ai_writes_the_debrief(client, charter, session, monkeypatch):
-    """A local model takes minutes. Meanwhile a refresh sees the session ended and the debrief
-    being written, a second click is refused, the debrief can't be edited yet, and other
-    requests can still write."""
+def test_ending_answers_at_once_and_the_ai_writes_the_debrief_after(client, charter, session, monkeypatch):
+    """A local model takes minutes. End Session answers straight away with the debrief still
+    being written; meanwhile the session reads as ended, a second click is refused, the
+    debrief can't be edited yet, and other requests can still write."""
     import asyncio
     import sqlite3
 
@@ -156,7 +154,7 @@ def test_the_session_is_ended_before_the_ai_writes_the_debrief(client, charter, 
 
     class Slow(MockProvider):
         async def complete(self, system, user, **kwargs):
-            def meanwhile():  # other requests, while this one waits for the AI
+            def meanwhile():  # other requests, while the AI is writing
                 seen["session"] = client.get(f"/sessions/{sid}").json()
                 seen["debrief"] = client.get(f"/sessions/{sid}/debrief").json()
                 seen["again"] = client.post(f"/sessions/{sid}/end").status_code
@@ -170,12 +168,23 @@ def test_the_session_is_ended_before_the_ai_writes_the_debrief(client, charter, 
 
     monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: Slow())
     note(client, session, "test", "Expired ID was verified")
-    done = client.post(f"/sessions/{sid}/end").json()
+    answer = client.post(f"/sessions/{sid}/end").json()
+    assert answer["drafting"] is True and answer["coverage_summary"] is None  # answered before the draft
     assert seen["session"]["ended_at"] is not None
     assert seen["debrief"]["drafting"] is True and seen["debrief"]["coverage_summary"] is None
     assert seen["again"] == 400 and seen["edit"] == 409
+    done = client.get(f"/sessions/{sid}/debrief").json()
     assert done["drafting"] is False and "Mock debrief" in done["coverage_summary"]
-    assert client.get(f"/sessions/{sid}/debrief").json()["drafting"] is False
+
+
+def test_an_unexpected_failure_still_releases_the_debrief(client, session, monkeypatch):
+    class Crashing(LLMProvider):
+        async def complete(self, system, user, **kwargs):
+            raise RuntimeError("bug in a provider")
+
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: Crashing())
+    d = end_and_draft(client, session["id"])
+    assert d["drafting"] is False and d["coverage_summary"] is None
 
 
 def test_a_debrief_cut_off_by_a_restart_can_be_written_by_hand(client, session, monkeypatch):

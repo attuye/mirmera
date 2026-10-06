@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 
 from app.ai.base import LLMProvider
 from app.database import Base, add_missing_columns
+from tests.conftest import end_and_draft
 
 
 class Scripted(LLMProvider):
@@ -50,7 +51,7 @@ def ended(client, session, monkeypatch):
     client.post(f"/sessions/{session['id']}/bugs", json={"title": "Discount lost on currency switch"})
     provider = Scripted(PROOF)
     monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
-    debrief = client.post(f"/sessions/{session['id']}/end").json()
+    debrief = end_and_draft(client, session['id'])
     return debrief, provider
 
 
@@ -98,7 +99,7 @@ def test_mock_provider_drafts_proof_from_tags(client, session):
     note(client, session, "test", "Tried SAVE10")
     note(client, session, "issue", "Staging was slow")
     note(client, session, "question", "Is GBP supported?")
-    d = client.post(f"/sessions/{session['id']}/end").json()
+    d = end_and_draft(client, session['id'])
     assert d["obstacles"] == ["Staging was slow"]
     assert d["open_questions"] == ["Is GBP supported?"]
     assert len(d["outlook"]) == 1
