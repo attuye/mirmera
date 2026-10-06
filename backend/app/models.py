@@ -707,3 +707,26 @@ class JiraInstallation(Base):
 
     workspace = relationship("Workspace")
     linker = relationship("User")
+
+
+class JiraAgentTask(Base):
+    """One piece of work Jira gave the Mirmera agent: an issue assigned to it, or a mention.
+    Jira polls it (A2A GetTask) until it is completed, failed, rejected or canceled."""
+    __tablename__ = "jira_agent_tasks"
+    id = Column(String, primary_key=True, default=gen_id)  # the A2A task id
+    context_id = Column(String, nullable=False, index=True)  # the A2A conversation; follow-ups reuse it
+    installation_id = Column(String, nullable=False, index=True)  # Forge installation that sent it
+    workspace_id = Column(String, ForeignKey("workspaces.id"), nullable=True)
+    invocation = Column(String, nullable=True)  # ISSUE_ASSIGNMENT | ISSUE_COMMENT_MENTION | ...
+    issue_key = Column(String, nullable=True)
+    issue_title = Column(String, nullable=True)
+    issue_text = Column(Text, nullable=True)  # the issue's description, as Jira sent it
+    request = Column(Text, nullable=True)  # a mention's comment or a chat message
+    jira_account = Column(String, nullable=True)  # who assigned or mentioned
+    action = Column(String, nullable=True)  # plan | status
+    state = Column(String, nullable=False, default="TASK_STATE_SUBMITTED")
+    message = Column(Text, nullable=True)  # what Jira shows; the user can draft a comment from it
+    project_id = Column(String, ForeignKey("projects.id"), nullable=True)
+    story_id = Column(String, ForeignKey("stories.id"), nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)

@@ -359,6 +359,10 @@ code that a Jira admin pastes into the app. Calls from the app carry a token sig
 Atlassian, and Mirmera checks it against `JIRA_APP_ID`. Setup steps (Forge CLI, a tunnel,
 deploy, install) are in [`jira-app/README.md`](jira-app/README.md).
 
+The app also adds **Mirmera as a Rovo agent**. Assign a work item to it, and Mirmera turns
+the item into a story with proposed risks and charters for a tester to accept. Mention it in
+a comment to hear what's left to test. Its work is listed on the workspace's Jira page.
+
 ### Test-idea nudges
 
 While a session runs, **Test ideas** under the note box suggests what to try next, from what this session has

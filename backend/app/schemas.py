@@ -1957,9 +1957,24 @@ class JiraInstallationOut(BaseModel):
     last_seen_at: Optional[datetime] = None
 
 
+class JiraAgentTaskOut(BaseModel):
+    id: str
+    issue_key: Optional[str] = None
+    issue_title: Optional[str] = None
+    invocation: Optional[str] = None
+    action: Optional[str] = None  # plan | status
+    state: str
+    message: Optional[str] = None
+    project_id: Optional[str] = None
+    story_id: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
 class JiraAppOverview(BaseModel):
     configured: bool  # JIRA_APP_ID is set on this server
     installations: list[JiraInstallationOut]
+    agent_tasks: list[JiraAgentTaskOut] = []  # the latest work Jira gave the Mirmera agent
 
 
 class JiraLinkCodeOut(BaseModel):

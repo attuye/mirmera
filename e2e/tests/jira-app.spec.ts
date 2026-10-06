@@ -56,6 +56,35 @@ test('jira app: link a Jira site with a one-time code, see the panel for a story
     expect(other.projects.map((p: { name: string }) => p.name)).toEqual(['AddisVerify Jira app'])
   })
 
+  await test.step('assign a work item to the Mirmera agent: it proposes risks and charters for a tester', async () => {
+    const send = await request.post(`${API_URL}/jira-app/a2a`, {
+      headers: await fromJira('e2e-site'),
+      data: {
+        jsonrpc: '2.0', id: 'r1', method: 'SendMessage',
+        params: { message: { role: 'ROLE_USER', messageId: 'm1', parts: [
+          { text: 'You have been assigned to a work item.' },
+          { data: { invocationType: 'ISSUE_ASSIGNMENT', userAccountId: 'acc-attu', agentAccountId: 'acc-mirmera',
+            issue: { id: '1', fields: { key: 'JAPP-9', summary: 'Upload a passport photo', description: 'JPG or PNG up to 10 MB.' } } } },
+        ] } },
+      },
+    })
+    const task = (await send.json()).result.task
+    const done = await (await request.post(`${API_URL}/jira-app/a2a`, {
+      headers: await fromJira('e2e-site'), data: { jsonrpc: '2.0', id: 'r2', method: 'GetTask', params: { taskId: task.id, contextId: task.contextId } },
+    })).json()
+    expect(done.result.task.status.state).toBe('TASK_STATE_COMPLETED')
+    expect(done.result.task.status.message.parts[0].text).toContain('Everything below is a proposal')
+
+    await page.reload()
+    const agent = page.getByRole('region', { name: 'Mirmera agent' })
+    await expect(agent).toContainText('JAPP-9')
+    await expect(agent).toContainText('Done')
+    await agent.getByRole('link', { name: 'Open story' }).click()
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Upload a passport photo')
+    await expect(page.getByText('proposed').first()).toBeVisible()
+    await page.goto(`/workspaces/${wid}/jira`)
+  })
+
   await test.step('unlink the site in Mirmera: its issues stop showing Mirmera', async () => {
     await page.getByRole('button', { name: 'Unlink' }).click()
     await page.getByRole('button', { name: 'Yes, delete' }).click()

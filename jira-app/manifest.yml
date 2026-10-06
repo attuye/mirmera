@@ -18,6 +18,25 @@ modules:
         function: admin-resolver
       render: native
       title: Mirmera
+  # Mirmera as a Rovo agent: assign a work item to it, or mention it in a comment. Jira calls
+  # Mirmera's /jira-app/a2a directly (Agent2Agent JSON-RPC), signed like the calls above.
+  rovo:agentConnector:
+    - key: mirmera-agent
+      name: Mirmera
+      description: Plans exploratory testing for a work item in Mirmera (risks and charters to review), and says what's left to test.
+      icon: resource:icons;mirmera.svg
+      productContexts:
+        - jira
+      protocols:
+        agent2Agent:
+          version: '1.0'
+          jsonRpcTransport:
+            endpoint: mirmera-a2a
+  endpoint:
+    - key: mirmera-a2a
+      remote: mirmera
+      route:
+        path: /jira-app/a2a
   function:
     - key: panel-resolver
       handler: index.panelHandler
@@ -35,7 +54,11 @@ remotes:
     baseUrl: https://mirmera-api.example.com
     operations:
       - compute
+      - fetch
+      - other
 permissions:
+  scopes:
+    - read:jira-work
   external:
     fetch:
       backend:
