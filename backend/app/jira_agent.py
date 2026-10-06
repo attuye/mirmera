@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 ACTIVE = ("TASK_STATE_SUBMITTED", "TASK_STATE_WORKING")
 TERMINAL = ("TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_REJECTED", "TASK_STATE_CANCELED")
 PLAN_INVOCATIONS = ("ISSUE_ASSIGNMENT", "ISSUE_WORKFLOW_ASSIGNMENT", "ISSUE_MANUAL_TRIGGER", "AUTOMATION")
-PLAN_WORDS = re.compile(r"\b(plan|risks?|charters?|start|analy[sz]e)\b", re.I)
+PLAN_WORDS = re.compile(r"\b(plan|risks?|charters?|start|analy[sz]e|explore|test it)\b", re.I)
 MAX_RISKS = 5
 MAX_CHARTERS = 3
 MAX_TEXT = 12_000
@@ -226,7 +226,7 @@ async def plan(db: DBSession, t: models.JiraAgentTask) -> str:
     link = jira_app.app_link(project.id, f"/stories/{story.id}")
     if any(r.status != "retired" for r in story.risks) or story.charters:
         return (f"{t.issue_key} is already planned in Mirmera: {len(story.risks)} risks and {len(story.charters)} charters. "
-                f"I left them as they are.\n\n" + (status_text(db, inst, t.issue_key) if inst else ""))
+                f"I left them as they are.")
 
     # A product model of the story alone. Not saved: the project's own model stays as it is.
     model, _ = await ai_tasks.build_product_model(
@@ -289,6 +289,71 @@ async def plan(db: DBSession, t: models.JiraAgentTask) -> str:
     return "\n".join(lines)
 
 
+PRIORITY = {"high": 0, "medium": 1, "low": 2}
+EXPLORE_WAIT_S = 1000  # a little over the exploration agent's own time limit
+
+
+def _next_charter(db: DBSession, t: models.JiraAgentTask) -> models.Charter | None:
+    """The story's most important charter nobody has explored yet."""
+    story = db.get(models.Story, t.story_id) if t.story_id else None
+    open_ = [c for c in (story.charters if story else []) if not c.sessions and c.status != "done"]
+    return min(open_, key=lambda c: (PRIORITY.get(c.priority, 1), c.created_at), default=None)
+
+
+async def explore_next(db: DBSession, t: models.JiraAgentTask, planned: str) -> str:
+    """After planning: the agent explores the first charter in the app and drafts bugs for
+    a tester. Needs the project's app URL; otherwise says how to turn it on."""
+    import asyncio
+    from app.routers.explore import ExploreProblem, start_exploration
+    project = db.get(models.Project, t.project_id)
+    charter = _next_charter(db, t)
+    if not charter:
+        return planned
+    if not (project.app_url or "").startswith(("http://", "https://")):
+        return planned + ("\n\nSet the app URL in the project's Settings in Mirmera and I'll also explore the first "
+                          "charter in the app and draft the bugs I find.")
+    _set(t, "TASK_STATE_WORKING", planned + f"\n\nNow exploring in the app: {charter.mission_statement}")
+    db.commit()
+    try:
+        run = start_exploration(db, charter, started_by=f"Jira {t.issue_key}")
+    except ExploreProblem as err:
+        return planned + f"\n\nI couldn't explore: {err}"
+    run_id = run.id
+    waited = 0
+    while waited < EXPLORE_WAIT_S:
+        await asyncio.sleep(2)
+        waited += 2
+        db.expire_all()
+        run = db.get(models.ExplorationRun, run_id)
+        if db.get(models.JiraAgentTask, t.id).state == "TASK_STATE_CANCELED" and run.status == "running":
+            run.cancel_requested = True
+            db.commit()
+        if run.status != "running":
+            break
+    return planned + "\n\n" + exploration_text(db, run)
+
+
+def exploration_text(db: DBSession, run: models.ExplorationRun) -> str:
+    actions = sum(1 for s in run.steps or [] if s.get("kind") not in ("note", "problem", "done", "invalid"))
+    lines = [f"I explored \"{run.charter.mission_statement}\" in the app ({actions} actions)."]
+    if run.status == "running":
+        lines.append("It is still running; the results will be in Mirmera.")
+    elif run.summary:
+        lines.append(run.summary)
+    elif run.detail:
+        lines.append(run.detail)
+    bugs = [db.get(models.Bug, b) for b in run.bug_ids or []]
+    bugs = [b for b in bugs if b]
+    if bugs:
+        lines.append(f"\nBug drafts to review ({len(bugs)}), nothing is filed until a tester reviews them:")
+        lines += [f"- {b.title} ({b.severity})" for b in bugs]
+    else:
+        lines.append("I found nothing I could show to be a bug. That doesn't mean there is none: a tester's session still matters.")
+    if link := jira_app.app_link(run.project_id, f"/sessions/{run.session_id}"):
+        lines.append(f"The session (notes, steps, evidence): {link}")
+    return "\n".join(lines)
+
+
 async def run_plan(task_id: str) -> None:
     """Background job: its own database session, and every outcome ends in a terminal state."""
     with SessionLocal() as db:
@@ -297,9 +362,13 @@ async def run_plan(task_id: str) -> None:
             return
         try:
             message = await plan(db, t)
+            db.commit()
             db.refresh(t)
             if t.state == "TASK_STATE_CANCELED":  # canceled while it ran: keep the proposals, say nothing more
-                db.commit()
+                return
+            message = await explore_next(db, t, message)
+            db.refresh(t)
+            if t.state == "TASK_STATE_CANCELED":
                 return
             _set(t, "TASK_STATE_COMPLETED", message)
             db.commit()

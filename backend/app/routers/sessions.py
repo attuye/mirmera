@@ -203,6 +203,9 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
     await runner_api.stop_runner_async(db, session_id)
 
     session.ended_at = utcnow()
+    if session.paused_at:  # ended while paused: the pause doesn't count as testing time
+        session.total_paused_seconds = (session.total_paused_seconds or 0) + (session.ended_at - session.paused_at).total_seconds()
+        session.paused_at = None
     charter = db.get(models.Charter, session.charter_id)
     charter.status = "done"
     project = db.get(models.Project, charter.project_id)

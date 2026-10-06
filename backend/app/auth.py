@@ -177,6 +177,8 @@ RESOLVE = {
 def _run_project(db, run_id, path):
     if path.startswith("/suite-runs/"):
         return _project(db, models.RegressionSuiteRun, run_id)
+    if path.startswith("/exploration-runs/"):
+        return _project(db, models.ExplorationRun, run_id)
     model = RUN_MODELS.get(path.strip("/").split("/")[0])
     run = db.get(model, run_id) if model else None
     return _via_bug(db, run.bug_id) if run else None

@@ -731,6 +731,13 @@ export interface WorkspaceKey {
   set: boolean; shown: string | null; unreadable: boolean; updated_at: string | null; updated_by: string | null; server_fallback: boolean
 }
 export interface WorkspaceKeys { keys: WorkspaceKey[]; server_keys_for_all: boolean }
+export interface ExplorationRun {
+  id: string; project_id: string; charter_id: string; session_id: string | null
+  status: 'running' | 'finished' | 'cancelled' | 'error'; start_url: string; max_steps: number
+  steps: { n: number; thought: string; action: string; kind: string; status: string; detail: string; url: string }[]
+  bug_ids: string[]; summary: string | null; detail: string | null; started_by: string | null
+  ai_provider: string | null; ai_model: string | null; created_at: string; finished_at: string | null
+}
 export interface JiraInstallation {
   id: string; site_url: string | null; cloud_id: string | null; environment: string | null
   linked_by: string | null; linked_at: string; last_seen_at: string | null
@@ -800,7 +807,7 @@ export interface StoryDetail extends StorySummary {
   artifact_id: string | null
   risk_list: { id: string; ref: string; title: string; failure_mode: string; score: number; status: Risk['status']; quality_criterion: string; charters: number; other_stories: StoryRef[] }[]
   charter_list: { id: string; mission_statement: string; status: Charter['status']; priority: Charter['priority']; risk_refs: string[]; sessions: number; minutes: number; bugs: number }[]
-  session_list: { id: string; charter_id: string; mission_statement: string; tester: string; started_at: string; ended_at: string | null; minutes: number; bugs: number; debrief: boolean }[]
+  session_list: { id: string; charter_id: string; mission_statement: string; tester: string; started_at: string; ended_at: string | null; minutes: number; bugs: number; debrief: boolean; paused?: boolean }[]
   bug_list: { id: string; title: string; kind: 'bug' | 'question' | null; severity: 'high' | 'medium' | 'low'; session_id: string; issue_key: string | null; issue_url: string | null }[]
   pages: { page: string; sessions: number; actions: number }[]
   more_pages: number
@@ -987,6 +994,11 @@ export const api = {
   workspaceKeys: (workspaceId: string) => request<WorkspaceKeys>(`/workspaces/${workspaceId}/keys`),
   saveWorkspaceKeys: (workspaceId: string, values: Record<string, string>) =>
     request<WorkspaceKeys>(`/workspaces/${workspaceId}/keys`, { method: 'PUT', body: JSON.stringify({ values }) }),
+  exploreCharter: (charterId: string, body: { max_steps?: number; base_url?: string } = {}) =>
+    request<ExplorationRun>(`/charters/${charterId}/explore`, { method: 'POST', body: JSON.stringify(body) }),
+  charterExploration: (charterId: string) => request<ExplorationRun | null>(`/charters/${charterId}/exploration`),
+  explorationRun: (runId: string) => request<ExplorationRun>(`/exploration-runs/${runId}`),
+  cancelExploration: (runId: string) => request<ExplorationRun>(`/exploration-runs/${runId}/cancel`, { method: 'POST' }),
   jiraApp: (workspaceId: string) => request<JiraAppOverview>(`/workspaces/${workspaceId}/jira-app`),
   jiraLinkCode: (workspaceId: string) => request<JiraLinkCode>(`/workspaces/${workspaceId}/jira-app/codes`, { method: 'POST' }),
   unlinkJiraSite: (workspaceId: string, installationId: string) =>

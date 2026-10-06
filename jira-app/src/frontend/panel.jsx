@@ -90,7 +90,7 @@ function Nothing({ panel, onPlan }) {
 }
 
 const POLL_MS = 3000;
-const POLL_LIMIT = 60; // about 3 minutes
+const POLL_LIMIT = 320; // about 16 minutes: exploring the first charter can take a while
 
 function App() {
   const [result, setResult] = useState(null);
@@ -106,7 +106,7 @@ function App() {
     if (started.error) { setPlanning(null); setPlanError(started.error); return; }
     let task = started.data;
     for (let i = 0; !task.done && i < POLL_LIMIT; i += 1) {
-      setPlanning({ message: task.message || 'Mirmera is planning…' });
+      setPlanning({ message: (task.message || 'Mirmera is planning…').split('\n\n').pop() });
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
       const next = await invoke('planStatus', { id: task.id }).catch(() => ({ error: 'lost' }));
       if (next.error) break;

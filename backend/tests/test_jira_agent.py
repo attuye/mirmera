@@ -3,6 +3,8 @@ Mirmera; mentioned, it says what's left. Only signed calls from a linked site ge
 from app import models
 from app.database import SessionLocal
 from tests.test_jira_app import forge, link_site  # noqa: F401  (forge is a fixture)
+from tests.test_regression import app_url, bug_present  # noqa: F401  (fixtures)
+from tests.test_runner import chromium_available, headless_runner  # noqa: F401
 
 DESCRIPTION = {  # Jira can send the description as Atlassian Document Format
     "type": "doc", "version": 1, "content": [
@@ -140,3 +142,23 @@ def test_the_panel_button_plans_without_rovo(client, anon, forge):
     assert anon.get(f"/jira-app/tasks/{started['id']}", headers=forge("another-site")).status_code == 404
     failed = anon.post("/jira-app/plan", headers=forge(), json={"issue_key": "PAY-1", "summary": "x"}).json()
     assert failed["done"] and not failed["ok"] and "PAY" in failed["message"]
+
+
+def test_with_an_app_url_it_plans_then_explores_the_first_charter(client, anon, forge, app_url, chromium_available):  # noqa: F811
+    project = kyc_project(client)
+    client.patch(f"/projects/{project['id']}", json={"app_url": app_url})
+    link_site(client, forge, anon)
+    t = rpc(anon, forge, "SendMessage", message())["result"]["task"]
+    done = rpc(anon, forge, "GetTask", {"taskId": t["id"]})["result"]["task"]
+    text = done["status"]["message"]["parts"][0]["text"]
+    assert done["status"]["state"] == "TASK_STATE_COMPLETED", text
+    assert "Everything below is a proposal" in text and "I explored" in text
+    assert "/sessions/" in text
+    [story] = client.get(f"/projects/{project['id']}/stories").json()
+    assert story["sessions"] == 1  # the agent's session, on the first charter
+
+    # Assigned again: already planned, so it explores the next charter nobody has explored.
+    again = rpc(anon, forge, "GetTask", {"taskId": rpc(anon, forge, "SendMessage", message())["result"]["task"]["id"]})
+    text = again["result"]["task"]["status"]["message"]["parts"][0]["text"]
+    assert "already planned" in text and "I explored" in text
+    assert client.get(f"/projects/{project['id']}/stories").json()[0]["sessions"] == 2

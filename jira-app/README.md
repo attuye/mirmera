@@ -97,7 +97,9 @@ item were assigned to the agent:
 
 - the work item becomes a story;
 - the AI proposes risks for it, and charters for those risks;
-- the panel shows the result when planning finishes, usually within a few seconds.
+- when the Mirmera project has an app URL, the exploration agent then explores the first
+  charter in the app and drafts the bugs it finds, for a tester to review;
+- the panel shows progress while it works, then the result. Exploring can take a few minutes.
 
 For a story that's already in Mirmera with no risks or charters yet, the button reads
 **Propose risks and charters**.

@@ -9,7 +9,7 @@ from app.ai.base import ProviderError, ProviderNotConfigured, UnknownProvider
 from app.auth import guard
 from app.config import settings
 from app.database import Base, add_missing_columns, apply_renames, engine
-from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension, isolate, suite, retests, report, coverage, nudges, notifications, stories, sprints, ai, members, workspace_keys, jira_app, api_explore, openapi, strategy, auth as auth_routes
+from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension, isolate, suite, retests, report, coverage, nudges, notifications, stories, sprints, ai, members, workspace_keys, jira_app, api_explore, openapi, strategy, explore, auth as auth_routes
 from app.runner import RunnerConflict, RunnerUnavailable, manager as runner_manager
 from app.trackers import TrackerError, TrackerNotConfigured, UnknownTracker
 
@@ -106,6 +106,7 @@ app.include_router(risk_feedback.router, dependencies=GUARDED)
 app.include_router(trackers.router, dependencies=GUARDED)
 app.include_router(regression.router, dependencies=GUARDED)
 app.include_router(reproduce.router, dependencies=GUARDED)
+app.include_router(explore.router, dependencies=GUARDED)
 app.include_router(isolate.router, dependencies=GUARDED)
 app.include_router(suite.router, dependencies=GUARDED)
 app.include_router(retests.router, dependencies=GUARDED)

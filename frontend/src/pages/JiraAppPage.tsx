@@ -116,9 +116,10 @@ export default function JiraAppPage() {
           <section aria-label="Mirmera agent" style={{ borderTop: '1px solid var(--border-soft)', marginTop: 20, paddingTop: 14 }}>
             <h2 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 6px' }}>Mirmera agent</h2>
             <p style={{ ...step, margin: '0 0 10px', maxWidth: 720 }}>
-              In Jira, assign a work item to <strong>Mirmera</strong>: it becomes a story in the project with that Jira key,
-              with proposed risks and charters for a tester to accept. Mention <strong>@Mirmera</strong> in a comment to hear
-              what's left to test. Needs Rovo on the Jira site.
+              In Jira, click <strong>Plan testing with Mirmera</strong> on the Mirmera panel, or assign the work item to
+              Mirmera (needs Rovo). It becomes a story with proposed risks and charters; when the project has an app URL,
+              Mirmera then explores the first charter in the app and drafts the bugs it finds for a tester to review.
+              Mention <strong>@Mirmera</strong> in a comment to hear what's left to test.
             </p>
             {data.agent_tasks.length === 0 && <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>Nothing assigned to Mirmera yet.</div>}
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>

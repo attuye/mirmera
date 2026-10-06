@@ -730,3 +730,31 @@ class JiraAgentTask(Base):
     story_id = Column(String, ForeignKey("stories.id"), nullable=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class ExplorationRun(Base):
+    """The exploration agent working through one charter: an AI drives a headless browser
+    on the app, records a session (notes, actions, signals) and drafts bugs for a tester to
+    review. Nothing it finds is filed anywhere until a tester reviews it."""
+    __tablename__ = "exploration_runs"
+    id = Column(String, primary_key=True, default=gen_id)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    charter_id = Column(String, ForeignKey("charters.id"), nullable=False, index=True)
+    session_id = Column(String, ForeignKey("sessions.id"), nullable=True)
+    status = Column(String, default="running")  # running | finished | cancelled | error
+    start_url = Column(String, nullable=False)
+    max_steps = Column(Integer, default=25)
+    steps = Column(JSON, default=list)  # [{"n", "thought", "action", "kind", "status", "detail", "url"}]
+    bug_ids = Column(JSON, default=list)
+    summary = Column(Text, nullable=True)  # the agent's own wrap-up
+    detail = Column(Text, nullable=True)  # why it stopped
+    started_by = Column(String, nullable=True)  # a user's name, or "Jira KYC-12"
+    cancel_requested = Column(Boolean, default=False)
+    ai_provider = Column(String, nullable=True)
+    ai_model = Column(String, nullable=True)
+    prompt_version = Column(String, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    finished_at = Column(DateTime, nullable=True)
+
+    charter = relationship("Charter")
+    session = relationship("Session")

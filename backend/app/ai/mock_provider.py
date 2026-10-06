@@ -57,6 +57,8 @@ class MockProvider(LLMProvider):
                 "assumptions": ["(mock) The steps were fixed before the AI was asked; check the assertion matches the oracle."]})
         if task == "reproduce_step":
             return json.dumps(self._reproduce_step(user))
+        if task == "explore_step":
+            return json.dumps(self._explore_step(user))
         if task == "report_summary":
             return json.dumps(self._report_summary(user))
         if task == "test_strategy":
@@ -247,6 +249,40 @@ class MockProvider(LLMProvider):
         return {"charters": charters}
 
     # ---- bug reports ----
+
+    @staticmethod
+    def _explore_step(user: str) -> dict:
+        """A small, predictable explorer: notes what it sees, reports a failed request it is
+        shown (once), fills the first text field, clicks the first button, then finishes."""
+        page = _between(user, "page")
+        history = [l for l in _between(user, "history").splitlines() if re.match(r"\d+\. ", l)]
+        done_before = " ".join(history)
+        if "Steps left: 1." in user:
+            return {"thought": "(mock) Out of steps.", "action": {"kind": "done", "summary": "(mock) Ran out of steps."}}
+        failed = re.search(r"\[failed request\] (\w+) (\S+) -[>›] (\S+)", page)  # the page text is defanged
+        if failed and "problem:" not in done_before:
+            path = re.sub(r"^https?://[^/]+", "", failed.group(2)).split("?")[0] or "/"
+            return {"thought": "(mock) A request failed while I explored.", "action": {"kind": "problem", "problem": {
+                "title": f"{failed.group(1)} {path} fails with {failed.group(3)}",
+                "expected": "The app's requests succeed while a customer uses this page.",
+                "actual": f"{failed.group(1)} {path} answered {failed.group(3)}.",
+                "severity": "high" if failed.group(3).startswith("5") else "medium",
+                "symptom": {"kind": "failed_request", "value": path,
+                            "explanation": "The failing request is listed under what the page reported."}}}}
+        if not history:
+            title = next((l[7:] for l in page.splitlines() if l.startswith("Title: ")), "the page")
+            return {"thought": "(mock) Starting the charter.", "action": {"kind": "note", "note": f"(mock) Opened {title}."}}
+        field = re.search(r'- textbox "([^"]+)"', page)
+        if field and "fill " not in done_before:
+            return {"thought": "(mock) Try a long, non-Latin name.", "action": {
+                "kind": "fill", "locator": {"method": "role", "role": "textbox", "name": field.group(1)}, "value": "አበበ ከበደ"}}
+        button = re.search(r'- button "([^"]+)"', page)
+        if button and "click " not in done_before:
+            return {"thought": "(mock) Submit and watch what comes back.", "action": {
+                "kind": "click", "locator": {"method": "role", "role": "button", "name": button.group(1)}}}
+        return {"thought": "(mock) Nothing more to try.", "action": {
+            "kind": "done", "summary": "(mock) Filled the first field with an Amharic name and submitted it. "
+                                       "Not covered: other fields, boundaries, repeats."}}
 
     @staticmethod
     def _reproduce_step(user: str) -> dict:
