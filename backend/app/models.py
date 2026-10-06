@@ -728,6 +728,9 @@ class JiraAgentTask(Base):
     message = Column(Text, nullable=True)  # what Jira shows; the user can draft a comment from it
     project_id = Column(String, ForeignKey("projects.id"), nullable=True)
     story_id = Column(String, ForeignKey("stories.id"), nullable=True)
+    # Where the work is, for the progress shown in Mirmera: read | model | risks | charters | explore | done
+    stage = Column(String, nullable=True)
+    exploration_run_id = Column(String, ForeignKey("exploration_runs.id"), nullable=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 

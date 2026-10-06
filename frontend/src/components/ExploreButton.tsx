@@ -10,7 +10,7 @@ import { errorText, quietButton } from './ui'
 
 const small: React.CSSProperties = { ...quietButton, fontSize: 12, padding: '4px 10px' }
 
-export default function ExploreButton({ charterId, onFinished }: { charterId: string; onFinished?: () => void }) {
+export default function ExploreButton({ charterId, onStarted, onFinished }: { charterId: string; onStarted?: () => void; onFinished?: () => void }) {
   const path = useProjectPath()
   const [run, setRun] = useState<ExplorationRun | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -34,7 +34,7 @@ export default function ExploreButton({ charterId, onFinished }: { charterId: st
 
   async function start() {
     setBusy(true); setError(null)
-    try { setRun(await api.exploreCharter(charterId)) } catch (e) { setError(errorText(e)) } finally { setBusy(false) }
+    try { setRun(await api.exploreCharter(charterId)); onStarted?.() } catch (e) { setError(errorText(e)) } finally { setBusy(false) }
   }
 
   const actions = run ? run.steps.filter((s) => !['note', 'problem', 'done', 'invalid'].includes(s.kind)).length : 0

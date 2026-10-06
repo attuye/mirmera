@@ -342,6 +342,17 @@ From Jira, planning a work item (the panel button, or assigning it to Mirmera) a
 explores its first charter when the project has an app URL. Jira gets the result: what
 was covered, and the bug drafts.
 
+While Mirmera works, the portal shows its progress:
+- **"Mirmera is working"** in the sidebar, leading to **Mirmera activity** (work running now, then the latest finished);
+- the same card at the top of the story it works on.
+
+Each card shows:
+- the stages (read the work item → model it → propose risks → draft charters → explore → done);
+- while exploring, a bar of steps used, and its last steps with what it was thinking;
+- the bug drafts so far.
+
+Work cut off by a backend restart shows as interrupted.
+
 ### Filing bugs to GitHub and Jira
 
 Reviewed bugs and questions can be filed from the Bugs page. Put the

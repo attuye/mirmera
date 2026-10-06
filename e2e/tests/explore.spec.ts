@@ -15,6 +15,21 @@ test('exploration agent: Mirmera explores a charter and leaves a session and a b
     await explore.getByRole('button', { name: 'Let Mirmera explore' }).click()
     await expect(explore.getByRole('status')).toContainText('Explored', { timeout: 60_000 })
     await expect(explore.getByRole('status')).toContainText('1 bug draft to review')
+
+    // The progress at the top of the story: stages, steps used, what it did last.
+    const work = page.getByRole('region', { name: 'Mirmera at work' }).getByRole('article').first()
+    await expect(work.getByRole('status')).toContainText('Done')
+    await expect(work.getByRole('list', { name: 'Stages' })).toContainText('Explore in the app')
+    await expect(work.getByRole('progressbar', { name: 'Steps used' })).toBeVisible()
+    await expect(work.getByRole('list', { name: 'Latest steps' })).toContainText('problem: GET /api/documents fails with 500')
+    await expect(work).toContainText('1 bug draft')
+  })
+
+  await test.step('the sidebar leads to Mirmera activity for the workspace', async () => {
+    await page.getByRole('link', { name: 'Mirmera activity' }).click()
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Mirmera activity')
+    await expect(page.getByRole('region', { name: 'Recently' })).toContainText('Explore document search with odd names')
+    await page.goBack()
   })
 
   await test.step('the bug draft waits for review; nothing was filed', async () => {

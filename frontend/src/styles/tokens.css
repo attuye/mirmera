@@ -47,3 +47,10 @@ button {
 
 /* Visible keyboard focus everywhere (buttons have no border by default). */
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Something Mirmera is working on right now. Still for people who asked for less motion. */
+@keyframes mm-spin { to { transform: rotate(360deg); } }
+@keyframes mm-pulse { 50% { opacity: 0.45; } }
+.mm-spin { animation: mm-spin 1s linear infinite; }
+.mm-pulse { animation: mm-pulse 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .mm-spin, .mm-pulse { animation: none; } }

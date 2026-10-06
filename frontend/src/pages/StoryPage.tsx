@@ -1,10 +1,11 @@
 /** One user story: what it claims, the risks and charters linked to it, the sessions and
  *  bugs under those charters, the pages explored, and what is still left to look at. */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, ExternalLink, RefreshCw } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
 import ExploreButton from '../components/ExploreButton'
+import AgentProgress, { useAgentActivity } from '../components/AgentProgress'
 import RiskForm from '../components/RiskForm'
 import { utcDate } from '../components/Evidence'
 import { ConfirmDelete, ErrorLine, errorText, input, quietButton } from '../components/ui'
@@ -80,6 +81,15 @@ export default function StoryPage() {
   const [addingRisk, setAddingRisk] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [watch, setWatch] = useState(0)  // bumped when an exploration starts here: look again at once
+  const activity = useAgentActivity(() => api.storyActivity(storyId), `${storyId}-${watch}`)
+  const wasRunning = useRef(0)
+
+  useEffect(() => {  // Mirmera just finished something here: show what it made
+    if (!activity) return
+    if (wasRunning.current > activity.running) api.getStory(storyId).then(setStory).catch(() => {})
+    wasRunning.current = activity.running
+  }, [activity, storyId])
 
   useEffect(() => {
     api.getStory(storyId).then(setStory).catch((e) => setError(errorText(e)))
@@ -146,6 +156,11 @@ export default function StoryPage() {
           )}
         </div>
         <ErrorLine message={error} />
+        {activity && activity.items.length > 0 && (
+          <section aria-label="Mirmera at work" style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 820 }}>
+            {activity.items.map((i) => <AgentProgress key={i.id} item={i} />)}
+          </section>
+        )}
 
         <Section title="What it claims">
           <Claims text={story.description} />
@@ -214,7 +229,7 @@ export default function StoryPage() {
                     <span>{c.sessions ? `${c.sessions} session${c.sessions === 1 ? '' : 's'}, ${timeText(c.minutes)}` : 'not explored yet'}</span>
                     {c.bugs > 0 && <span>{c.bugs} bug{c.bugs === 1 ? '' : 's'}</span>}
                   </div>
-                  <ExploreButton charterId={c.id} onFinished={() => api.getStory(story.id).then(setStory).catch(() => {})} />
+                  <ExploreButton charterId={c.id} onStarted={() => setWatch((w) => w + 1)} onFinished={() => api.getStory(story.id).then(setStory).catch(() => {})} />
                 </div>
                 <button disabled={!!busy} onClick={() => act('charter', () => api.setStoryCharters(story.id, charterIds.filter((x) => x !== c.id)))} style={small}
                   aria-label={`Unlink ${c.mission_statement}`}>Unlink</button>

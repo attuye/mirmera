@@ -101,6 +101,12 @@ def task_json(t: models.JiraAgentTask) -> dict:
     }
 
 
+def _stage(db: DBSession, t: models.JiraAgentTask, stage: str) -> None:
+    """Saved at once, so the progress shown in Mirmera moves as the work does."""
+    t.stage = stage
+    db.commit()
+
+
 def _set(t: models.JiraAgentTask, state: str, message: str) -> models.JiraAgentTask:
     t.state, t.message, t.updated_at = state, message, utcnow()
     return t
@@ -221,6 +227,7 @@ async def plan(db: DBSession, t: models.JiraAgentTask) -> str:
     project = db.get(models.Project, t.project_id)
     inst = (db.query(models.JiraInstallation)
             .filter(models.JiraInstallation.installation_id == t.installation_id).first())
+    t.stage = "read"
     story = _story(db, project, t, inst.site_url if inst else None)
     t.story_id = story.id
     db.commit()  # no transaction stays open while the AI thinks: other writes would have to wait
@@ -231,13 +238,13 @@ async def plan(db: DBSession, t: models.JiraAgentTask) -> str:
 
     # A product model of the story alone. Not saved: the project's own model stays as it is.
     story_input = ("story", f"{story.key}: {story.title}", stories.artifact_text(story))
-    db.commit()
+    _stage(db, t, "model")
     model, _ = await ai_tasks.build_product_model(
         provider_for(project, "product_model"), project_name=project.name, testing_mission=project.testing_mission,
         artifacts=[story_input])
     existing = db.query(models.Risk).filter(models.Risk.project_id == project.id, models.Risk.status != "retired").all()
     existing_titles = [r.title for r in existing]
-    db.commit()
+    _stage(db, t, "risks")
     risk_provider = provider_for(project, "risk_analysis")
     proposed = await ai_tasks.analyze_risks(
         risk_provider, project_name=project.name, testing_mission=project.testing_mission,
@@ -258,6 +265,7 @@ async def plan(db: DBSession, t: models.JiraAgentTask) -> str:
 
     charters = []
     if risks:
+        _stage(db, t, "charters")
         charter_provider = provider_for(project, "risk_charters")
         drafts = await ai_tasks.charters_from_risks(
             charter_provider, project_name=project.name, testing_mission=project.testing_mission,
@@ -318,12 +326,15 @@ async def explore_next(db: DBSession, t: models.JiraAgentTask, planned: str) -> 
         return planned + ("\n\nSet the app URL in the project's Settings in Mirmera and I'll also explore the first "
                           "charter in the app and draft the bugs I find.")
     _set(t, "TASK_STATE_WORKING", planned + f"\n\nNow exploring in the app: {charter.mission_statement}")
+    t.stage = "explore"
     db.commit()
     try:
         run = start_exploration(db, charter, started_by=f"Jira {t.issue_key}")
     except ExploreProblem as err:
         return planned + f"\n\nI couldn't explore: {err}"
     run_id = run.id
+    t.exploration_run_id = run_id
+    db.commit()
     waited = 0
     while waited < EXPLORE_WAIT_S:
         await asyncio.sleep(2)
@@ -377,6 +388,7 @@ async def run_plan(task_id: str) -> None:
             if t.state == "TASK_STATE_CANCELED":
                 return
             _set(t, "TASK_STATE_COMPLETED", message)
+            t.stage = "done"
             db.commit()
         except ProviderError as err:
             db.rollback()
