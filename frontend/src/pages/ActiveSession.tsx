@@ -61,6 +61,7 @@ export default function ActiveSession() {
   const [logError, setLogError] = useState<string | null>(null)
   const [tool, setTool] = useState<'browser' | 'api'>('browser')
   const [paused, setPaused] = useState(false)
+  const [endError, setEndError] = useState<string | null>(null)
   const [pausedAt, setPausedAt] = useState<string | null>(null)
   const [totalPausedSeconds, setTotalPausedSeconds] = useState(0)
   const elapsed = useElapsed(startedAt, !ending, paused, pausedAt, totalPausedSeconds)
@@ -81,6 +82,8 @@ export default function ActiveSession() {
     if (!sessionId) return
     api.listNotes(sessionId).then(setNotes).catch(console.error)
     api.getSession(sessionId).then((session) => {
+      // Already ended (e.g. ended in another tab, or the page was refreshed while ending): show its debrief.
+      if (session.ended_at) { navigate(path(`/sessions/${sessionId}/debrief`), { replace: true }); return }
       setStartedAt(session.started_at)
       setPaused(!!session.paused_at)
       setPausedAt(session.paused_at)
@@ -118,7 +121,14 @@ export default function ActiveSession() {
   async function endSession() {
     if (!sessionId) return
     setEnding(true)
-    await api.endSession(sessionId)
+    setEndError(null)
+    try {
+      await api.endSession(sessionId)
+    } catch (e) {
+      // "Already ended" (a second click, another tab) or a dropped connection: if it did end, go on.
+      const now = await api.getSession(sessionId).catch(() => null)
+      if (!now?.ended_at) { setEnding(false); setEndError(`Not ended: ${errorText(e)}`); return }
+    }
     navigate(path(`/sessions/${sessionId}/debrief`))
   }
 
@@ -176,6 +186,7 @@ export default function ActiveSession() {
             {ending ? 'Ending session… (generating debrief)' : 'End Session'}
           </button>
         </div>
+        {endError && <div role="alert" style={{ padding: '8px 36px', color: 'var(--danger)', fontSize: 12.5 }}>{endError}</div>}
 
         <div style={{ flex: 1, display: 'flex', padding: '22px 32px', gap: 24 }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>

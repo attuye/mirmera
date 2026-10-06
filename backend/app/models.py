@@ -434,6 +434,7 @@ class Debrief(Base):
     ai_provider = Column(String, nullable=True)
     ai_model = Column(String, nullable=True)
     prompt_version = Column(String, nullable=True)
+    drafting = Column(Boolean, default=False)  # the AI is still writing it; the session has already ended
 
     session = relationship("Session", back_populates="debrief")
 

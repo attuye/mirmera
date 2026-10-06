@@ -423,6 +423,8 @@ export interface Debrief {
   ai_provider: string | null
   ai_model: string | null
   prompt_version: string | null
+  /** The session has ended and the AI is still writing this; it fills in when done. */
+  drafting: boolean
 }
 
 export type DebriefUpdate = Partial<Pick<Debrief, 'final_text' | 'tester_feelings' | 'results' | 'obstacles' | 'open_questions'>>

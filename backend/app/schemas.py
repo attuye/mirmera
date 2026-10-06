@@ -402,6 +402,7 @@ class DebriefOut(BaseModel):
     ai_provider: Optional[str] = None
     ai_model: Optional[str] = None
     prompt_version: Optional[str] = None
+    drafting: bool = False  # the AI is still writing it: show that, and fill in when it's done
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -415,6 +416,11 @@ class DebriefOut(BaseModel):
     @classmethod
     def none_is_empty_dict(cls, value):
         return value or {}
+
+    @field_validator("drafting", mode="before")
+    @classmethod
+    def none_is_not_drafting(cls, value):
+        return bool(value)  # debriefs saved before this column existed
 
 class DebriefListItem(BaseModel):
     id: str

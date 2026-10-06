@@ -4,6 +4,7 @@ import { useProjectPath, useSessionProject } from '../project'
 import {
   api, Charter, CharterStatus, Debrief, ObservedRisk, OutlookItem, QUALITY_CRITERIA, SessionRecord,
 } from '../api/client'
+import { Loader2 } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton, ConfirmDelete } from '../components/ui'
 import { RecordingFiles, SIGNAL_KINDS, countLine } from '../components/Evidence'
@@ -208,22 +209,34 @@ export default function DebriefPage() {
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
+  function fill(d: Debrief) {
+    setDebrief(d)
+    setPast(d.final_text ?? d.coverage_summary ?? '')
+    setResults(d.results.join('\n'))
+    setObstacles(d.obstacles.join('\n'))
+    setQuestions(d.open_questions.join('\n'))
+    setFeelings(d.tester_feelings ?? '')
+  }
+
   useEffect(() => {
     if (!sessionId) return
-    api.getDebrief(sessionId).then((d) => {
-      setDebrief(d)
-      setPast(d.final_text ?? d.coverage_summary ?? '')
-      setResults(d.results.join('\n'))
-      setObstacles(d.obstacles.join('\n'))
-      setQuestions(d.open_questions.join('\n'))
-      setFeelings(d.tester_feelings ?? '')
-    }).catch((e) => setLoadError(errorText(e)))
+    api.getDebrief(sessionId).then(fill).catch((e) => setLoadError(errorText(e)))
     api.getSession(sessionId).then((s) => {
       setSession(s)
       return api.getCharter(s.charter_id).then(setCharter)
     }).catch((e) => setLoadError(errorText(e)))
     api.listEvidence(sessionId).then(setEvidence).catch(console.error)
   }, [sessionId])
+
+  // The session has ended but the AI is still writing: check again until the draft is there.
+  const drafting = !!debrief?.drafting
+  useEffect(() => {
+    if (!sessionId || !drafting) return
+    const id = window.setInterval(() => {
+      api.getDebrief(sessionId).then((d) => { if (!d.drafting) fill(d) }).catch(() => {})
+    }, 3000)
+    return () => window.clearInterval(id)
+  }, [sessionId, drafting])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const edit = (set: (v: string) => void) => (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     set(e.target.value); setDirty(true); setSaved(false)
@@ -256,6 +269,22 @@ export default function DebriefPage() {
         <div style={{ padding: 40, color: 'var(--text-secondary)' }}>
           {loadError ? <ErrorLine message={loadError} /> : 'Loading debrief…'}
         </div>
+      </div>
+    )
+  }
+
+  if (debrief.drafting) {
+    return (
+      <div style={{ display: 'flex', minHeight: '100vh' }}>
+        <Sidebar />
+        <main style={{ padding: '32px 40px 60px', maxWidth: 860, flex: 1 }}>
+          <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Session debrief</h1>
+          {charter && <div style={{ fontSize: 13.5, color: 'var(--text-secondary)', marginTop: 8 }}>{charter.mission_statement}</div>}
+          <div role="status" style={{ ...panel, marginTop: 18, display: 'flex', gap: 10, alignItems: 'center', fontSize: 13.5 }}>
+            <Loader2 size={15} aria-hidden className="mm-spin" style={{ color: 'var(--info)', flexShrink: 0 }} />
+            <span>The session has ended. Mirmera is writing the debrief; with a local model this can take a few minutes. This page fills in by itself.</span>
+          </div>
+        </main>
       </div>
     )
   }

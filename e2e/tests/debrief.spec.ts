@@ -1,4 +1,4 @@
-import { expect, test } from './fixtures'
+import { API_URL, expect, test } from './fixtures'
 
 test('PROOF debrief: review the draft, add feelings, turn outlook and risks into real work', async ({ page, api }) => {
   // Its own project: promoting a risk here must not take R1 from the risks spec.
@@ -143,5 +143,67 @@ test('PROOF debrief: review the draft, add feelings, turn outlook and risks into
     const short = await page.request.get((await page.getByRole('link', { name: 'Download Markdown' }).getAttribute('href'))!)
     expect(short.headers()['content-disposition']).toContain('test-report-summary.md')
     expect(await short.text()).not.toContain('Confident on photos')
+  })
+})
+
+test('two sessions on one charter: ending is safe, and a debrief still being written fills in', async ({ page, api, request, appErrors }) => {
+  const project = await api.newProject('TumaTuma Two Sessions')
+  const story = await (await request.post(`${API_URL}/projects/${project.id}/stories`, {
+    data: { key: 'TT-1', title: 'Sender verifies identity with a national ID' } })).json()
+  const mission = 'Explore expiry dates with valid names and numbers'
+  const charter = await (await request.post(`${API_URL}/projects/${project.id}/charters`, {
+    data: { mission_statement: mission, story_ids: [story.id] } })).json()
+  const agent = await (await request.post(`${API_URL}/sessions`, { data: { charter_id: charter.id, tester_id: 'Mirmera agent' } })).json()
+  const mine = await api.session(charter.id)
+
+  await test.step('ending one session keeps the charter active while the other is open', async () => {
+    expect((await request.post(`${API_URL}/sessions/${agent.id}/end`)).ok()).toBeTruthy()
+    expect((await (await request.get(`${API_URL}/charters/${charter.id}`)).json()).status).toBe('active')
+  })
+
+  await test.step('a whole session row on the story opens it', async () => {
+    await page.goto(`/projects/${project.id}/stories/${story.id}`)
+    const sessions = page.getByRole('region', { name: 'Sessions' })
+    await sessions.getByRole('listitem', { name: 'Session by Mirmera agent' }).getByText(mission).click()
+    await expect(page).toHaveURL(new RegExp(`/sessions/${agent.id}/debrief$`))
+    await page.goBack()
+    await sessions.getByRole('listitem', { name: /^Session by (?!Mirmera)/ }).getByText(mission).click()
+    await expect(page).toHaveURL(new RegExp(`/sessions/${mine.id}$`))
+  })
+
+  await test.step('while the AI writes the debrief, the page says so and fills in by itself', async () => {
+    let writingUntil = Infinity  // the AI "writes" for 2.5 s after the session ends
+    await page.route(`**/sessions/${mine.id}/debrief`, async (route) => {
+      if (writingUntil === Infinity) writingUntil = Date.now() + 2500
+      if (route.request().resourceType() !== 'fetch' || Date.now() > writingUntil) return route.continue()
+      const real = await (await route.fetch()).json()
+      await route.fulfill({ json: { ...real, drafting: true, coverage_summary: null, ai_provider: null } })
+    })
+    await page.getByRole('button', { name: 'End Session' }).click()
+    await expect(page).toHaveURL(new RegExp(`/sessions/${mine.id}/debrief$`))
+    await expect(page.getByText(/Mirmera is writing the debrief/)).toBeVisible()
+    await expect(page.getByText('AI draft — review before saving')).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByRole('textbox', { name: 'Past', exact: true })).toHaveValue(/Mock debrief for charter/)
+    expect((await (await request.get(`${API_URL}/charters/${charter.id}`)).json()).status).toBe('done')
+  })
+
+  await test.step('an ended session page (a refresh, another tab) opens its debrief', async () => {
+    await page.goto(`/projects/${project.id}/sessions/${mine.id}`)
+    await expect(page).toHaveURL(new RegExp(`/sessions/${mine.id}/debrief$`))
+  })
+
+  await test.step('End Session on a session already ended elsewhere goes to its debrief', async () => {
+    const third = await api.session(charter.id)
+    await page.goto(`/projects/${project.id}/sessions/${third.id}`)
+    await expect(page.getByText(mission, { exact: true })).toBeVisible()  // the page has loaded the session
+    await page.waitForLoadState('networkidle')
+    expect((await request.post(`${API_URL}/sessions/${third.id}/end`)).ok()).toBeTruthy()
+    await page.getByRole('button', { name: 'End Session' }).click()
+    await expect(page).toHaveURL(new RegExp(`/sessions/${third.id}/debrief$`))
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    // The "already ended" answer to that click is expected here, not a failure.
+    const refused = appErrors.findIndex((e) => e === `POST ${API_URL}/sessions/${third.id}/end -> 400`)
+    expect(refused).toBeGreaterThanOrEqual(0)
+    appErrors.splice(refused, 1)
   })
 })
