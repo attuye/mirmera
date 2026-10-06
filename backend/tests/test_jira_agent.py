@@ -162,3 +162,41 @@ def test_with_an_app_url_it_plans_then_explores_the_first_charter(client, anon, 
     text = again["result"]["task"]["status"]["message"]["parts"][0]["text"]
     assert "already planned" in text and "I explored" in text
     assert client.get(f"/projects/{project['id']}/stories").json()[0]["sessions"] == 2
+
+
+def test_planning_never_holds_the_database_while_the_ai_thinks(client, anon, forge, monkeypatch):
+    """With a slow AI (a real model takes seconds), other requests must still be able to write:
+    each AI call checks that a separate connection can write at that moment."""
+    import asyncio
+    import sqlite3
+
+    from app.ai.mock_provider import MockProvider
+    from app.database import engine
+    kyc_project(client)
+    link_site(client, forge, anon)
+    db_file = engine.url.database
+    writes = []
+
+    class Slow(MockProvider):
+        async def complete(self, system, user, **kwargs):
+            con = sqlite3.connect(db_file, timeout=0.5)  # another request, waiting half a second at most
+            con.execute("UPDATE jira_installations SET environment = environment")
+            con.commit()
+            con.close()
+            writes.append(kwargs.get("task"))
+            await asyncio.sleep(0.01)
+            return await super().complete(system, user, **kwargs)
+
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: Slow())
+    t = rpc(anon, forge, "SendMessage", message())["result"]["task"]
+    done = rpc(anon, forge, "GetTask", {"taskId": t["id"]})["result"]["task"]
+    assert done["status"]["state"] == "TASK_STATE_COMPLETED", done["status"]["message"]
+    assert writes == ["product_model", "risk_analysis", "risk_charters"]
+
+
+def test_sqlite_runs_in_wal_mode():
+    from sqlalchemy import text
+
+    from app.database import engine
+    with engine.connect() as con:
+        assert con.execute(text("PRAGMA journal_mode")).scalar() == "wal"

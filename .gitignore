@@ -11,6 +11,8 @@ secret.key
 
 # Local data (may contain test data and captured page content)
 *.db
+*.db-wal
+*.db-shm
 sessions/
 # Runner screenshots, traces and HAR files (can contain what the tested app shows)
 evidence/

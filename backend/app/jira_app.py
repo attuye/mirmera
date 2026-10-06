@@ -143,7 +143,9 @@ def new_code(db: DBSession, workspace_id: str, user: models.User) -> tuple[str, 
 def installation(db: DBSession, inv: Invocation) -> models.JiraInstallation | None:
     row = db.query(models.JiraInstallation).filter(models.JiraInstallation.installation_id == inv.installation_id).first()
     if row:
-        row.last_seen_at = utcnow()
+        # At most one write a minute: every panel view comes through here.
+        if not row.last_seen_at or utcnow() - row.last_seen_at > timedelta(minutes=1):
+            row.last_seen_at = utcnow()
         if inv.cloud_id and not row.cloud_id:
             row.cloud_id = inv.cloud_id
     return row

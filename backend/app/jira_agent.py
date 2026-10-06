@@ -223,21 +223,26 @@ async def plan(db: DBSession, t: models.JiraAgentTask) -> str:
             .filter(models.JiraInstallation.installation_id == t.installation_id).first())
     story = _story(db, project, t, inst.site_url if inst else None)
     t.story_id = story.id
+    db.commit()  # no transaction stays open while the AI thinks: other writes would have to wait
     link = jira_app.app_link(project.id, f"/stories/{story.id}")
     if any(r.status != "retired" for r in story.risks) or story.charters:
         return (f"{t.issue_key} is already planned in Mirmera: {len(story.risks)} risks and {len(story.charters)} charters. "
                 f"I left them as they are.")
 
     # A product model of the story alone. Not saved: the project's own model stays as it is.
+    story_input = ("story", f"{story.key}: {story.title}", stories.artifact_text(story))
+    db.commit()
     model, _ = await ai_tasks.build_product_model(
         provider_for(project, "product_model"), project_name=project.name, testing_mission=project.testing_mission,
-        artifacts=[("story", f"{story.key}: {story.title}", stories.artifact_text(story))])
+        artifacts=[story_input])
     existing = db.query(models.Risk).filter(models.Risk.project_id == project.id, models.Risk.status != "retired").all()
+    existing_titles = [r.title for r in existing]
+    db.commit()
     risk_provider = provider_for(project, "risk_analysis")
     proposed = await ai_tasks.analyze_risks(
         risk_provider, project_name=project.name, testing_mission=project.testing_mission,
         product_model={"summary": model.summary, "elements": [e.model_dump() for e in model.elements], "unknowns": model.unknowns},
-        max_risks=MAX_RISKS, existing_titles=[r.title for r in existing])
+        max_risks=MAX_RISKS, existing_titles=existing_titles)
     proposed = sorted(proposed, key=lambda r: r.impact * r.likelihood, reverse=True)
     number = _next_ref_number(db, project.id)
     risks = []
@@ -249,7 +254,7 @@ async def plan(db: DBSession, t: models.JiraAgentTask) -> str:
         db.add(risk)
         story.risks.append(risk)
         risks.append(risk)
-    db.flush()
+    db.commit()
 
     charters = []
     if risks:
@@ -328,6 +333,7 @@ async def explore_next(db: DBSession, t: models.JiraAgentTask, planned: str) -> 
         if db.get(models.JiraAgentTask, t.id).state == "TASK_STATE_CANCELED" and run.status == "running":
             run.cancel_requested = True
             db.commit()
+        db.commit()  # ends this look: a read left open would hold up the agent's own writes
         if run.status != "running":
             break
     return planned + "\n\n" + exploration_text(db, run)

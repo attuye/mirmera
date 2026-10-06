@@ -1,10 +1,24 @@
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 from app.config import settings
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+SQLITE = settings.database_url.startswith("sqlite")
+BUSY_SECONDS = 30  # how long a write waits for another one to finish before "database is locked"
+connect_args = {"check_same_thread": False, "timeout": BUSY_SECONDS} if SQLITE else {}
 engine = create_engine(settings.database_url, connect_args=connect_args)
+
+if SQLITE and ":memory:" not in settings.database_url:
+    @event.listens_for(engine, "connect")
+    def _sqlite_pragmas(dbapi_connection, _record):
+        """Write-ahead logging: readers never block the writer and the writer never blocks
+        readers. Without it, any open read (a page polling, an agent waiting) makes every
+        write wait, and the Jira app's calls fail with "database is locked"."""
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute(f"PRAGMA busy_timeout={BUSY_SECONDS * 1000}")
+        cursor.execute("PRAGMA synchronous=NORMAL")  # safe with WAL, and much faster
+        cursor.close()
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
