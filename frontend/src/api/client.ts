@@ -738,6 +738,19 @@ export interface ExplorationRun {
   bug_ids: string[]; summary: string | null; detail: string | null; started_by: string | null
   ai_provider: string | null; ai_model: string | null; created_at: string; finished_at: string | null
 }
+export interface AgentStage { key: string; label: string; status: 'done' | 'active' | 'todo' | 'skipped' | 'failed' | 'cancelled' }
+export interface AgentStep { n: number; thought: string; action: string; kind: string; status: string; detail: string }
+export interface AgentActivity {
+  id: string; kind: 'jira' | 'explore'; state: 'running' | 'done' | 'failed' | 'cancelled'; stage: string; title: string
+  issue_key: string | null; project_id: string | null; story_id: string | null; started_by: string | null
+  stages: AgentStage[]; message: string | null; started_at: string; finished_at: string | null
+  exploration: {
+    run_id: string; status: string; charter_id: string; mission: string; session_id: string | null
+    steps_used: number; max_steps: number; actions: number; recent: AgentStep[]
+    bugs: { id: string; title: string; severity: string }[]; summary: string | null; detail: string | null
+  } | null
+}
+export interface AgentActivityList { items: AgentActivity[]; running: number }
 export interface JiraInstallation {
   id: string; site_url: string | null; cloud_id: string | null; environment: string | null
   linked_by: string | null; linked_at: string; last_seen_at: string | null
@@ -994,6 +1007,8 @@ export const api = {
   workspaceKeys: (workspaceId: string) => request<WorkspaceKeys>(`/workspaces/${workspaceId}/keys`),
   saveWorkspaceKeys: (workspaceId: string, values: Record<string, string>) =>
     request<WorkspaceKeys>(`/workspaces/${workspaceId}/keys`, { method: 'PUT', body: JSON.stringify({ values }) }),
+  workspaceActivity: (workspaceId: string) => request<AgentActivityList>(`/workspaces/${workspaceId}/agent-activity`),
+  storyActivity: (storyId: string) => request<AgentActivityList>(`/stories/${storyId}/agent-activity`),
   exploreCharter: (charterId: string, body: { max_steps?: number; base_url?: string } = {}) =>
     request<ExplorationRun>(`/charters/${charterId}/explore`, { method: 'POST', body: JSON.stringify(body) }),
   charterExploration: (charterId: string) => request<ExplorationRun | null>(`/charters/${charterId}/exploration`),

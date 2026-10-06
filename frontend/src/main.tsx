@@ -28,6 +28,7 @@ import Account from './pages/Account'
 import MembersPage from './pages/MembersPage'
 import KeysPage from './pages/KeysPage'
 import JiraAppPage from './pages/JiraAppPage'
+import ActivityPage from './pages/ActivityPage'
 import InvitePage from './pages/InvitePage'
 import { ForgotPassword, ResetPassword } from './pages/PasswordPages'
 
@@ -52,6 +53,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <Route path="/workspaces/:workspaceId/members" element={<MembersPage />} />
         <Route path="/workspaces/:workspaceId/keys" element={<KeysPage />} />
         <Route path="/workspaces/:workspaceId/jira" element={<JiraAppPage />} />
+        <Route path="/workspaces/:workspaceId/activity" element={<ActivityPage />} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/projects/:projectId" element={<ProjectLayout />}>
           <Route index element={<Navigate to="dashboard" replace />} />

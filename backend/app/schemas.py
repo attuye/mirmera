@@ -2129,3 +2129,48 @@ class JiraPlanOut(BaseModel):
     ok: bool
     message: Optional[str] = None
     story_url: Optional[str] = None
+
+
+# ---------- what Mirmera's agents are doing ----------
+
+class AgentStage(BaseModel):
+    key: str
+    label: str
+    status: str  # done | active | todo | skipped | failed | cancelled
+
+
+class AgentExploration(BaseModel):
+    run_id: str
+    status: str
+    charter_id: str
+    mission: str
+    session_id: Optional[str] = None
+    steps_used: int
+    max_steps: int
+    actions: int
+    recent: list[dict]  # the last few steps: n, thought, action, kind, status, detail
+    bugs: list[dict]  # bug drafts: id, title, severity
+    summary: Optional[str] = None
+    detail: Optional[str] = None
+
+
+class AgentActivity(BaseModel):
+    id: str
+    kind: Literal["jira", "explore"]
+    state: str  # running | done | failed | cancelled
+    stage: str
+    title: str
+    issue_key: Optional[str] = None
+    project_id: Optional[str] = None
+    story_id: Optional[str] = None
+    started_by: Optional[str] = None
+    stages: list[AgentStage]
+    exploration: Optional[AgentExploration] = None
+    message: Optional[str] = None
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+
+
+class AgentActivityList(BaseModel):
+    items: list[AgentActivity]
+    running: int
