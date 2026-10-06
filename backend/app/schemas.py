@@ -2042,3 +2042,18 @@ class JiraIssuePanel(BaseModel):
     bugs: list[JiraPanelBug]
     projects: list[JiraPanelProject]
     app_url: Optional[str] = None
+
+
+class JiraPlanIn(BaseModel):
+    issue_key: str = Field(min_length=3, max_length=50, pattern=r"^[A-Za-z][A-Za-z0-9_]+-\d+$")
+    summary: Optional[str] = Field(default=None, max_length=1000)
+    description: Optional[object] = None  # plain text, or Jira's document format (ADF)
+
+
+class JiraPlanOut(BaseModel):
+    id: str
+    state: str
+    done: bool
+    ok: bool
+    message: Optional[str] = None
+    story_url: Optional[str] = None

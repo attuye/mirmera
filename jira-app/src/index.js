@@ -6,7 +6,7 @@
 // should (linking and unlinking the site). The issue key comes from the context Jira gives
 // the resolver, not from the panel's payload: the panel can only ask about its own issue.
 import Resolver from '@forge/resolver';
-import { invokeRemote } from '@forge/api';
+import api, { invokeRemote, route } from '@forge/api';
 
 async function mirmera(path, method = 'GET', body) {
   let res;
@@ -39,6 +39,30 @@ panel.define('issuePanel', async ({ context }) => {
   const project = context.extension && context.extension.project;
   if (!issue || !issue.key) return { error: 'Open an issue to see what Mirmera knows about it.' };
   return mirmera('/jira-app/issue-panel', 'POST', { issue_key: issue.key, project_key: project ? project.key : null });
+});
+
+// "Plan testing with Mirmera": the same planning as assigning the work item to the Mirmera
+// agent, without needing Rovo. The app reads the summary and description itself (as the app,
+// on the issue Jira shows the panel on) and sends them to Mirmera.
+panel.define('planTesting', async ({ context }) => {
+  const issue = context.extension && context.extension.issue;
+  if (!issue || !issue.key) return { error: 'Open an issue to plan testing for it.' };
+  let fields = {};
+  try {
+    const res = await api.asApp().requestJira(route`/rest/api/3/issue/${issue.key}?fields=summary,description`);
+    if (res.ok) fields = (await res.json()).fields || {};
+  } catch (err) {
+    fields = {};
+  }
+  return mirmera('/jira-app/plan', 'POST', {
+    issue_key: issue.key, summary: fields.summary || null, description: fields.description || null,
+  });
+});
+
+panel.define('planStatus', async ({ payload }) => {
+  const id = String((payload && payload.id) || '');
+  if (!/^[A-Za-z0-9-]+$/.test(id)) return { error: 'No such planning.' };
+  return mirmera(`/jira-app/tasks/${id}`);
 });
 
 // The admin page is shown to Jira admins only.
