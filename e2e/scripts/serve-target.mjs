@@ -9,7 +9,11 @@ const home = `<!doctype html><html lang="en"><title>KYC upload</title>
 <style>body{font-family:sans-serif;padding:40px;background:#f6f7f9}</style>
 <h1>Upload your ID</h1><p>Drop a photo of your national ID here.</p><div id="widget">Loading upload widget…</div>
 <form action="/" method="get"><label for="q">Search documents</label> <input id="q" name="q"> <button>Search</button></form>
+<p role="status" id="found"></p>
 <script>
+  const q = new URLSearchParams(location.search).get('q')
+  if (q) document.getElementById('found').textContent = 'No documents match "' + q + '"'
+
   console.error('Upload widget failed to init')
   console.error('Upload widget failed to init')
   fetch('/api/documents')
