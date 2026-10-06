@@ -89,6 +89,19 @@ screens. CI runs the same check. `forge lint` and `forge deploy` check more, but
 | `src/frontend/admin.jsx` | The admin page: link with a code, or unlink |
 | `scripts/check.mjs` | `npm run check` |
 
+## Plan testing from the panel (no Rovo needed)
+
+When Mirmera has no testing on a work item, the panel shows **Plan testing with Mirmera**.
+The app reads the work item's summary and description, and Mirmera plans exactly as if the
+item were assigned to the agent:
+
+- the work item becomes a story;
+- the AI proposes risks for it, and charters for those risks;
+- the panel shows the result when planning finishes, usually within a few seconds.
+
+For a story that's already in Mirmera with no risks or charters yet, the button reads
+**Propose risks and charters**.
+
 ## The Mirmera agent (Rovo)
 
 The app also adds **Mirmera** as a Rovo agent (`rovo:agentConnector`). It needs Rovo on the

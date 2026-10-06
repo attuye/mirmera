@@ -151,3 +151,38 @@ async def agent(request: Request, background: BackgroundTasks, inv: jira_app.Inv
         db.rollback()
         return _rpc_error(rpc_id, err.code, err.message)
     return {"jsonrpc": "2.0", "id": rpc_id, "result": {"task": jira_agent.task_json(task)}}
+
+
+# ---------- "Plan testing with Mirmera" on the panel (no Rovo needed) ----------
+
+@router.post("/jira-app/plan", response_model=schemas.JiraPlanOut)
+def plan_from_panel(payload: schemas.JiraPlanIn, background: BackgroundTasks,
+                    inv: jira_app.Invocation = Depends(invocation), db: DBSession = Depends(get_db)):
+    """The panel's button: the same planning as assigning the work item to the Mirmera agent.
+    The app reads the summary and description from Jira and sends them along."""
+    if not jira_app.installation(db, inv):
+        raise HTTPException(409, NOT_LINKED)
+    params = {"message": {"role": "ROLE_USER", "messageId": "panel", "parts": [{"data": {
+        "invocationType": "ISSUE_MANUAL_TRIGGER", "userAccountId": inv.account_id,
+        "issue": {"fields": {"key": payload.issue_key, "summary": payload.summary, "description": payload.description}},
+    }}]}}
+    task, run = jira_agent.send_message(db, inv, params)
+    db.commit()
+    if run:
+        background.add_task(jira_agent.run_plan, task.id)
+    return _plan_out(task)
+
+
+@router.get("/jira-app/tasks/{task_id}", response_model=schemas.JiraPlanOut)
+def plan_status(task_id: str, inv: jira_app.Invocation = Depends(invocation), db: DBSession = Depends(get_db)):
+    try:
+        task = jira_agent.get_task(db, inv, {"taskId": task_id})
+    except jira_agent.RpcError:
+        raise HTTPException(404, "Task not found")
+    return _plan_out(task)
+
+
+def _plan_out(t: models.JiraAgentTask) -> dict:
+    done = t.state not in jira_agent.ACTIVE
+    return {"id": t.id, "state": t.state, "done": done, "ok": t.state == "TASK_STATE_COMPLETED", "message": t.message,
+            "story_url": jira_app.app_link(t.project_id, f"/stories/{t.story_id}") if t.project_id and t.story_id else None}

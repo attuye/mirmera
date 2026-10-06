@@ -121,3 +121,22 @@ def test_cancel_keeps_the_task_terminal(client, anon, forge, monkeypatch):
     c = rpc(anon, forge, "CancelTask", {"taskId": t["id"], "contextId": t["contextId"]})["result"]["task"]
     assert c["status"]["state"] == "TASK_STATE_CANCELED"
     assert rpc(anon, forge, "CancelTask", {"taskId": t["id"]})["result"]["task"]["status"]["state"] == "TASK_STATE_CANCELED"
+
+
+def test_the_panel_button_plans_without_rovo(client, anon, forge):
+    project = kyc_project(client)
+    assert anon.post("/jira-app/plan", json={"issue_key": "KYC-30"}, headers=forge()).status_code == 409  # not linked
+    link_site(client, forge, anon)
+
+    started = anon.post("/jira-app/plan", headers=forge(), json={
+        "issue_key": "KYC-30", "summary": "Verify identity with a national ID", "description": DESCRIPTION}).json()
+    assert started["state"] == "TASK_STATE_WORKING" and started["done"] is False
+    status = anon.get(f"/jira-app/tasks/{started['id']}", headers=forge()).json()
+    assert status["done"] and status["ok"] and "Everything below is a proposal" in status["message"]
+    assert status["story_url"].startswith(f"https://mirmera.addisverify.et/projects/{project['id']}/stories/")
+    [story] = client.get(f"/projects/{project['id']}/stories").json()
+    assert story["key"] == "KYC-30" and story["risks"] > 0
+
+    assert anon.get(f"/jira-app/tasks/{started['id']}", headers=forge("another-site")).status_code == 404
+    failed = anon.post("/jira-app/plan", headers=forge(), json={"issue_key": "PAY-1", "summary": "x"}).json()
+    assert failed["done"] and not failed["ok"] and "PAY" in failed["message"]
