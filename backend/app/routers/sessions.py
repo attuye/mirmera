@@ -207,7 +207,10 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
         session.total_paused_seconds = (session.total_paused_seconds or 0) + (session.ended_at - session.paused_at).total_seconds()
         session.paused_at = None
     charter = db.get(models.Charter, session.charter_id)
-    charter.status = "done"
+    still_open = (db.query(models.Session)
+                  .filter(models.Session.charter_id == charter.id, models.Session.id != session_id, models.Session.ended_at.is_(None))
+                  .count())
+    charter.status = "active" if still_open else "done"  # done when its last open session ends
     project = db.get(models.Project, charter.project_id)
 
     notes = db.query(models.Note).filter(models.Note.session_id == session_id).order_by(models.Note.timestamp).all()
@@ -217,12 +220,16 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
     duration_minutes = round(
         ((session.ended_at - session.started_at).total_seconds() - (session.total_paused_seconds or 0)) / 60
     )
-    debrief = models.Debrief(session_id=session_id, time_breakdown=time_breakdown)
     recorded = (
         db.query(models.Evidence).filter(models.Evidence.session_id == session_id)
         .order_by(models.Evidence.captured_at).all()
     )
     browser = browser_context(recorded, session.started_at, used=bool(recorded))
+    # The session is ended now, before the AI writes the debrief (a local model takes minutes):
+    # a refresh or a second click sees it ended, and no write is held open while the AI thinks.
+    debrief = models.Debrief(session_id=session_id, drafting=True, time_breakdown=time_breakdown)
+    db.add(debrief)
+    db.commit()
 
     try:
         provider = provider_for(project, "debrief")
@@ -254,9 +261,9 @@ async def end_session(session_id: str, db: DBSession = Depends(get_db)):
         # editing an AI draft. The reason is logged.
         logger.warning("Session %s ended without an AI debrief: %s", session_id, err)
         debrief.coverage_summary = None
-
-    db.add(debrief)
-    db.commit()
+    finally:
+        debrief.drafting = False  # even if something unexpected failed: the tester can still write it
+        db.commit()
     db.refresh(debrief)
     return debrief
 

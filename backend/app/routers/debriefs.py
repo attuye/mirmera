@@ -1,9 +1,14 @@
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DBSession
 
 from app import models, schemas
 from app.database import get_db
 from app.routers.risks import _next_ref_number
+from app.timeutil import utcnow
+
+DRAFTING_CUT_OFF = timedelta(minutes=15)  # no AI debrief takes this long: the backend was stopped
 
 router = APIRouter(prefix="/sessions/{session_id}/debrief", tags=["debriefs"])
 
@@ -13,6 +18,9 @@ def get_debrief(session_id: str, db: DBSession = Depends(get_db)):
     debrief = db.query(models.Debrief).filter(models.Debrief.session_id == session_id).first()
     if not debrief:
         raise HTTPException(404, "Debrief not found — has this session ended?")
+    if debrief.drafting and utcnow() - debrief.created_at > DRAFTING_CUT_OFF:
+        debrief.drafting = False  # the backend stopped while the AI was writing: the tester writes it
+        db.commit()
     return debrief
 
 
@@ -26,6 +34,8 @@ def _debrief_or_404(db: DBSession, session_id: str) -> models.Debrief:
 @router.patch("", response_model=schemas.DebriefOut)
 def update_debrief(session_id: str, payload: schemas.DebriefUpdate, db: DBSession = Depends(get_db)):
     debrief = _debrief_or_404(db, session_id)
+    if debrief.drafting:
+        raise HTTPException(409, "Mirmera is still writing this debrief. Edit it when the draft appears.")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(debrief, field, value)
     db.commit()

@@ -242,7 +242,9 @@ export default function StoryPage() {
           {story.session_list.length === 0 ? <p style={quiet}>None yet. Start one from a charter on the Charters page.</p> : (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
               {story.session_list.map((s) => (
-                <li key={s.id} style={{ display: 'flex', gap: 12, alignItems: 'baseline', fontSize: 12.5, padding: '7px 0', borderTop: '1px solid var(--border-soft)' }}>
+                <li key={s.id} aria-label={`Session by ${s.tester}`} title={s.ended_at ? 'Open the debrief' : 'Open the session'}
+                  onClick={(e) => { if (!(e.target as HTMLElement).closest('a')) navigate(path(s.ended_at ? `/sessions/${s.id}/debrief` : `/sessions/${s.id}`)) }}
+                  style={{ display: 'flex', gap: 12, alignItems: 'baseline', fontSize: 12.5, padding: '7px 0', borderTop: '1px solid var(--border-soft)', cursor: 'pointer' }}>
                   <span className="mono" style={{ fontSize: 11, color: 'var(--text-quiet)', minWidth: 90 }}>{utcDate(s.started_at).toLocaleDateString()}</span>
                   <span style={{ minWidth: 70 }}>{s.tester}</span>
                   <span style={{ flex: 1, color: 'var(--text-secondary)' }}>{s.mission_statement}</span>

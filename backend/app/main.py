@@ -19,13 +19,25 @@ Base.metadata.create_all(bind=engine)  # creates new tables
 for column in add_missing_columns():  # adds new columns to existing tables
     logging.getLogger(__name__).warning("Database upgraded: added column %s", column)
 
+def quiet_connection_resets(loop, context):
+    """On Windows, asyncio logs a full traceback (WinError 10054) whenever a browser or
+    Chromium drops a connection, e.g. a page refreshed while a request was running.
+    It is harmless, so it isn't logged; anything else goes to the default handler."""
+    if isinstance(context.get("exception"), ConnectionResetError):
+        return
+    loop.default_exception_handler(context)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    import asyncio
+    import sys
+    if sys.platform == "win32":
+        asyncio.get_running_loop().set_exception_handler(quiet_connection_resets)
     from app.keys import ensure_server_key
     ensure_server_key()  # the key that encrypts workspace keys exists from the start, at a known place
     poller = None
     if settings.retest_poll_minutes > 0:  # check closed issues on a timer
-        import asyncio
         poller = asyncio.create_task(retests.poll_forever(settings.retest_poll_minutes))
     yield
     if poller:

@@ -139,3 +139,77 @@ def test_time_is_split_by_note_tag():
 
 def test_no_notes_means_no_breakdown():
     assert _compute_time_breakdown([], T0) == {}
+
+# ---------- ending while the AI writes the debrief ----------
+
+def test_the_session_is_ended_before_the_ai_writes_the_debrief(client, charter, session, monkeypatch):
+    """A local model takes minutes. Meanwhile a refresh sees the session ended and the debrief
+    being written, a second click is refused, the debrief can't be edited yet, and other
+    requests can still write."""
+    import asyncio
+    import sqlite3
+
+    from app.ai.mock_provider import MockProvider
+    from app.database import engine
+    sid = session["id"]
+    seen = {}
+
+    class Slow(MockProvider):
+        async def complete(self, system, user, **kwargs):
+            def meanwhile():  # other requests, while this one waits for the AI
+                seen["session"] = client.get(f"/sessions/{sid}").json()
+                seen["debrief"] = client.get(f"/sessions/{sid}/debrief").json()
+                seen["again"] = client.post(f"/sessions/{sid}/end").status_code
+                seen["edit"] = client.patch(f"/sessions/{sid}/debrief", json={"final_text": "mine"}).status_code
+            await asyncio.to_thread(meanwhile)
+            con = sqlite3.connect(engine.url.database, timeout=0.5)  # another request, waiting half a second at most
+            con.execute("UPDATE charters SET priority = priority")
+            con.commit()
+            con.close()
+            return await super().complete(system, user, **kwargs)
+
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: Slow())
+    note(client, session, "test", "Expired ID was verified")
+    done = client.post(f"/sessions/{sid}/end").json()
+    assert seen["session"]["ended_at"] is not None
+    assert seen["debrief"]["drafting"] is True and seen["debrief"]["coverage_summary"] is None
+    assert seen["again"] == 400 and seen["edit"] == 409
+    assert done["drafting"] is False and "Mock debrief" in done["coverage_summary"]
+    assert client.get(f"/sessions/{sid}/debrief").json()["drafting"] is False
+
+
+def test_a_debrief_cut_off_by_a_restart_can_be_written_by_hand(client, session, monkeypatch):
+    from app import models
+    from app.database import SessionLocal
+    from app.timeutil import utcnow
+    sid = session["id"]
+    client.post(f"/sessions/{sid}/end")
+    with SessionLocal() as db:  # as if the backend stopped while the AI was writing
+        db.query(models.Debrief).update({"drafting": True, "created_at": utcnow() - timedelta(minutes=20)})
+        db.commit()
+    assert client.get(f"/sessions/{sid}/debrief").json()["drafting"] is False
+    assert client.patch(f"/sessions/{sid}/debrief", json={"final_text": "mine"}).json()["final_text"] == "mine"
+
+
+def test_the_charter_stays_active_until_its_last_session_ends(client, charter, session):
+    """Mirmera's agent and a tester can each have a session on the same charter."""
+    mine = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "Attu"}).json()
+    client.post(f"/sessions/{session['id']}/end")
+    assert client.get(f"/charters/{charter['id']}").json()["status"] == "active"
+    assert client.get(f"/charters/{charter['id']}/active-session").json()["id"] == mine["id"]
+    client.post(f"/sessions/{mine['id']}/end")
+    assert client.get(f"/charters/{charter['id']}").json()["status"] == "done"
+
+
+def test_dropped_connections_on_windows_are_not_logged():
+    from app.main import quiet_connection_resets
+    passed = []
+
+    class Loop:
+        def default_exception_handler(self, context):
+            passed.append(context["message"])
+
+    quiet_connection_resets(Loop(), {"message": "reset", "exception": ConnectionResetError(10054, "forcibly closed")})
+    quiet_connection_resets(Loop(), {"message": "real", "exception": RuntimeError("boom")})
+    quiet_connection_resets(Loop(), {"message": "no exception"})
+    assert passed == ["real", "no exception"]
