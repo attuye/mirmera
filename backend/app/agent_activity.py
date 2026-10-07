@@ -106,6 +106,22 @@ def from_run(db: DBSession, r: models.ExplorationRun) -> dict:
     }
 
 
+def from_job(db: DBSession, j: models.AiJob) -> dict:
+    """An AI step a tester started (e.g. drafting charters from risks): one stage, then done."""
+    from app import ai_jobs
+    state = {"done": "done", "failed": "failed"}.get(j.status, "running")
+    first = "done" if state == "done" else ("active" if state == "running" else "failed")
+    return {
+        "id": j.id, "kind": "ai", "state": state, "stage": j.kind if state == "running" else "done",
+        "title": ai_jobs.label(j.kind), "issue_key": None, "project_id": j.project_id, "story_id": None,
+        "started_by": j.started_by,
+        "stages": [{"key": j.kind, "label": ai_jobs.label(j.kind), "status": first},
+                   {"key": "done", "label": "Done", "status": "done" if state == "done" else "todo"}],
+        "exploration": None, "message": j.error if state == "failed" else None,
+        "started_at": j.created_at, "finished_at": j.finished_at,
+    }
+
+
 def activity(db: DBSession, project_ids: list[str], *, story_id: str | None = None, recent_minutes: int | None = None,
              limit: int = 20) -> list[dict]:
     """Running work first, then the latest finished. Explorations that belong to a Jira
@@ -119,6 +135,9 @@ def activity(db: DBSession, project_ids: list[str], *, story_id: str | None = No
     runs = (db.query(models.ExplorationRun).filter(models.ExplorationRun.project_id.in_(project_ids))
             .order_by(models.ExplorationRun.created_at.desc()).limit(limit).all())
     items = [from_task(db, t) for t in tasks] + [from_run(db, r) for r in runs if r.id not in inside]
+    if not story_id:  # AI steps belong to the project, not to one story
+        from app import ai_jobs
+        items += [from_job(db, j) for j in ai_jobs.running_in(db, project_ids)]
     if story_id:
         story = db.get(models.Story, story_id)
         charters = {c.id for c in story.charters} if story else set()

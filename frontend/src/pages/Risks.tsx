@@ -7,6 +7,7 @@ import ArtifactImport from '../components/ArtifactImport'
 import { RiskHistory } from '../components/RiskUpdates'
 import RiskForm, { ScoreSelect } from '../components/RiskForm'
 import StoryChips from '../components/StoryChips'
+import { elapsed, useAiJob } from '../components/useAiJob'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
 import {
   AI_PROVIDERS, api, Artifact, ChartersFromRisks, ModelElement, Project, ProjectChanges, ProductModel,
@@ -23,6 +24,15 @@ const EVIDENCE_STYLE: Record<Risk['evidence'], { label: string; color: string; h
 const CATEGORY_LABEL: Record<ModelElement['category'], string> = {
   structure: 'Structure', function: 'Function', data: 'Data', interfaces: 'Interfaces',
   platform: 'Platform', operations: 'Operations', time: 'Time',
+}
+
+/** Under a button while its AI step runs as a job. */
+function StillWorking() {
+  return (
+    <p role="status" style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '8px 0 0', maxWidth: 420, lineHeight: 1.5 }}>
+      Mirmera is working on it. You can refresh or leave this page; the result will be here when it's done.
+    </p>
+  )
 }
 
 function Section({ step, title, intro, children }: { step: number; title: string; intro: string; children: React.ReactNode }) {
@@ -240,16 +250,11 @@ function ArtifactsAndModel({ project, artifacts, model, onArtifactAdded, onModel
     setDraft({ type, label: draft.label || file.name, raw_content: text })
   }
 
-  async function build() {
-    setBusy('build')
+  // Runs as a job: a refresh while the AI builds the model shows it still building, then the model.
+  const modelJob = useAiJob<ProductModel>(project.id, 'product_model', (j) => { if (j.result) onModelBuilt(j.result) })
+  function build() {
     setError(null)
-    try {
-      onModelBuilt(await api.buildProductModel(project.id, [...selected]))
-    } catch (e) {
-      setError(errorText(e))
-    } finally {
-      setBusy(null)
-    }
+    modelJob.start({ artifact_ids: [...selected] })
   }
 
   const canAdd = draft.label.trim().length > 0 && draft.raw_content.trim().length > 0
@@ -345,12 +350,13 @@ function ArtifactsAndModel({ project, artifacts, model, onArtifactAdded, onModel
 
         {artifacts.length > 0 && (
           <div style={{ marginTop: 16 }}>
-            <button onClick={build} disabled={selected.size === 0 || busy !== null} style={primaryButton(selected.size === 0 || busy !== null)}>
-              {busy === 'build' ? 'Building model…' : model ? 'Rebuild product model' : 'Build product model'}
+            <button onClick={build} disabled={selected.size === 0 || busy !== null || modelJob.running} style={primaryButton(selected.size === 0 || busy !== null || modelJob.running)}>
+              {modelJob.running ? `Building model… ${modelJob.since}` : model ? 'Rebuild product model' : 'Build product model'}
             </button>
+            {modelJob.running && <StillWorking />}
           </div>
         )}
-        <ErrorLine message={error} />
+        <ErrorLine message={error ?? modelJob.error} />
       </div>
 
       <div style={{ minWidth: 0 }}>
@@ -409,24 +415,17 @@ function RiskReview({ project, model, risks, retired, onAnalyzed, onChanged, onA
   onChanged: (r: Risk) => void
   onAdded: () => Promise<void>
 }) {
-  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showRetired, setShowRetired] = useState(false)
   const [addingRisk, setAddingRisk] = useState(false)
   const cards = useRef<Record<string, HTMLElement | null>>({})
 
-  async function analyze() {
-    setBusy(true)
+  const riskJob = useAiJob(project.id, 'risk_analysis', () => { onAnalyzed() })
+  const busy = riskJob.running
+  function analyze() {
     setError(null)
-    try {
-      await api.analyzeRisks(project.id)
-      await onAnalyzed()
-    } catch (e) {
-      setError(errorText(e))
-    } finally {
-      setBusy(false)
-    }
+    riskJob.start({})
   }
 
   function select(r: Risk) {
@@ -441,12 +440,13 @@ function RiskReview({ project, model, risks, retired, onAnalyzed, onChanged, onA
     <div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 18 }}>
         <button onClick={analyze} disabled={!model || busy} style={primaryButton(!model || busy)}>
-          {busy ? 'Analysing…' : risks.length ? 'Find more risks' : 'Analyse risks'}
+          {busy ? `Analysing… ${riskJob.since}` : risks.length ? 'Find more risks' : 'Analyse risks'}
         </button>
         <button onClick={() => setAddingRisk((v) => !v)} style={quietButton}>{addingRisk ? 'Close' : 'Add a risk yourself'}</button>
         {!model && <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Build a product model first.</span>}
       </div>
-      <ErrorLine message={error} />
+      {busy && <StillWorking />}
+      <ErrorLine message={error ?? riskJob.error} />
       {addingRisk && (
         <RiskForm save={async (r) => { await api.createRisk(project.id, r); await onAdded(); setAddingRisk(false) }} />
       )}
@@ -601,9 +601,15 @@ function RiskCard({ risk, selected, onChanged, refCallback }: {
 function CharterPlanner({ project, accepted }: { project: Project; accepted: Risk[] }) {
   const charterPath = useProjectPath()('/charters/suggest')
   const [excluded, setExcluded] = useState<Set<string>>(new Set())
-  const [result, setResult] = useState<ChartersFromRisks | null>(null)
+  // Drafting runs as a job: after a refresh (or later) the drafts are still here, or still coming.
+  const draftJob = useAiJob<ChartersFromRisks>(project.id, 'charters_from_risks', () => setSaved(new Set()))
+  const result = draftJob.job?.status === 'done' ? draftJob.job.result : null
+  const busy = draftJob.running
   const [saved, setSaved] = useState<Set<number>>(new Set())
-  const [busy, setBusy] = useState(false)
+  const [existing, setExisting] = useState<Set<string>>(new Set())  // missions already saved as charters
+  useEffect(() => {
+    if (result) api.listCharters(project.id).then((cs) => setExisting(new Set(cs.map((c) => c.mission_statement)))).catch(() => {})
+  }, [result, project.id])
   const [error, setError] = useState<string | null>(null)
   const chosen = accepted.filter((r) => !excluded.has(r.id))
 
@@ -616,17 +622,9 @@ function CharterPlanner({ project, accepted }: { project: Project; accepted: Ris
     })
   }
 
-  async function draft() {
-    setBusy(true)
+  function draft() {
     setError(null)
-    try {
-      setResult(await api.chartersFromRisks(project.id, chosen.map((r) => r.id)))
-      setSaved(new Set())
-    } catch (e) {
-      setError(errorText(e))
-    } finally {
-      setBusy(false)
-    }
+    draftJob.start({ risk_ids: chosen.map((r) => r.id) })
   }
 
   async function save(d: RiskCharterDraft, index: number) {
@@ -664,10 +662,16 @@ function CharterPlanner({ project, accepted }: { project: Project; accepted: Ris
         </div>
       </fieldset>
       <button onClick={draft} disabled={chosen.length === 0 || busy} style={primaryButton(chosen.length === 0 || busy)}>
-        {busy ? 'Drafting…' : 'Draft charters'}
+        {busy ? `Drafting… ${draftJob.since}` : 'Draft charters'}
       </button>
-      <ErrorLine message={error} />
+      {busy && <StillWorking />}
+      <ErrorLine message={error ?? draftJob.error} />
 
+      {result && draftJob.job && (
+        <div style={{ marginTop: 14, fontSize: 12, color: 'var(--text-tertiary)' }}>
+          Drafted {elapsed(draftJob.job.finished_at ?? draftJob.job.created_at)} ago{draftJob.job.started_by ? ` for ${draftJob.job.started_by}` : ''}.
+        </div>
+      )}
       {result && (
         <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 820 }}>
           {result.warnings.map((w) => (
@@ -682,7 +686,7 @@ function CharterPlanner({ project, accepted }: { project: Project; accepted: Ris
             <article key={i} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '15px 17px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.45 }}>{d.mission_statement}</div>
-                {saved.has(i) ? (
+                {saved.has(i) || existing.has(d.mission_statement) ? (
                   <Link to={charterPath} style={{ fontSize: 12.5, whiteSpace: 'nowrap' }}>Saved. Start it from Charters</Link>
                 ) : (
                   <button onClick={() => save(d, i)} style={{ ...primaryButton(), padding: '6px 13px', whiteSpace: 'nowrap', height: 'fit-content' }}>

@@ -743,7 +743,7 @@ export interface ExplorationRun {
 export interface AgentStage { key: string; label: string; status: 'done' | 'active' | 'todo' | 'skipped' | 'failed' | 'cancelled' }
 export interface AgentStep { n: number; thought: string; action: string; kind: string; status: string; detail: string }
 export interface AgentActivity {
-  id: string; kind: 'jira' | 'explore'; state: 'running' | 'done' | 'failed' | 'cancelled'; stage: string; title: string
+  id: string; kind: 'jira' | 'explore' | 'ai'; state: 'running' | 'done' | 'failed' | 'cancelled'; stage: string; title: string
   issue_key: string | null; project_id: string | null; story_id: string | null; started_by: string | null
   stages: AgentStage[]; message: string | null; started_at: string; finished_at: string | null
   exploration: {
@@ -751,6 +751,12 @@ export interface AgentActivity {
     steps_used: number; max_steps: number; actions: number; recent: AgentStep[]
     bugs: { id: string; title: string; severity: string }[]; summary: string | null; detail: string | null
   } | null
+}
+export type AiJobKind = 'product_model' | 'risk_analysis' | 'charters_from_risks'
+export interface AiJob<T = unknown> {
+  id: string; project_id: string; kind: AiJobKind; label: string; status: 'running' | 'done' | 'failed'
+  request: Record<string, unknown>; result: T | null; error: string | null; started_by: string | null
+  created_at: string; finished_at: string | null
 }
 export interface AgentActivityList { items: AgentActivity[]; running: number }
 export interface JiraInstallation {
@@ -1170,6 +1176,11 @@ export const api = {
       if (e.message.startsWith('No product model yet')) return null
       throw e
     }),
+  startAiJob: (projectId: string, kind: AiJobKind, input: Record<string, unknown> = {}) =>
+    request<AiJob>(`/projects/${projectId}/ai-jobs`, { method: 'POST', body: JSON.stringify({ kind, request: input }) }),
+  latestAiJob: (projectId: string, kind: AiJobKind) =>
+    request<AiJob | null>(`/projects/${projectId}/ai-jobs/latest?kind=${kind}`),
+  aiJob: (jobId: string) => request<AiJob>(`/ai-jobs/${jobId}`),
   buildProductModel: (projectId: string, artifactIds: string[]) =>
     request<ProductModel>(`/projects/${projectId}/product-model`, {
       method: 'POST', body: JSON.stringify({ artifact_ids: artifactIds }),
