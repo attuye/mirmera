@@ -361,6 +361,48 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
 
 
+def _words(text: str) -> set[str]:
+    return {w for w in re.findall(r"\w+", text.lower()) if len(w) > 2}
+
+
+def quoted(quote: str, said: list[str]) -> bool:
+    """Is the AI's quote the app's words? Word for word, or nearly: a small model trims
+    punctuation or a word or two, but a made-up sentence shares few words with the answer."""
+    if not quote.strip():
+        return False
+    answer = " ".join(said)
+    if _norm(quote) in _norm(answer):
+        return True
+    q = _words(quote)
+    return bool(q) and len(q & _words(answer)) / len(q) >= 0.75
+
+
+def crashes(failed: list[str], page_errors: list[str]) -> list[schemas.ExploreProblem]:
+    """Bug drafts for what broke during a step: a server error (5xx) or an uncaught error in
+    the page. Wrong whatever the rules say, so no AI is asked."""
+    from urllib.parse import urlsplit
+    out = []
+    for f in failed:
+        m = re.match(r"(\w+) (\S+) -> (5\d\d)$", f)
+        if m:
+            method, url, status = m.groups()
+            path = urlsplit(url).path or "/"
+            out.append(schemas.ExploreProblem(
+                title=f"{method} {path} fails with {status}", severity="high",
+                expected="The app handles the request and answers it (accepted or refused with a reason); a server error is never the answer.",
+                actual=f"{method} {path} answered {status}.",
+                symptom=schemas.Symptom(kind="failed_request", value=path,
+                                        explanation="A server error, seen by Mirmera in the browser's network log.")))
+    for e in page_errors:
+        first = e.strip().splitlines()[0][:150] if e.strip() else "error"
+        out.append(schemas.ExploreProblem(
+            title=f"Page error: {first}"[:200], severity="medium",
+            expected="The page runs without uncaught errors.", actual=f"The page threw: {first}.",
+            symptom=schemas.Symptom(kind="page_error", value=first[:120],
+                                    explanation="An uncaught error in the page, seen by Mirmera.")))
+    return out
+
+
 def incomplete(before: FormState) -> bool:
     """A field left empty or a box left unticked: a refusal may be about that, not the rule."""
     return any((f["value"] in ("", "not checked")) for f in before.fields if f["type"] != "radio")
@@ -369,14 +411,16 @@ def incomplete(before: FormState) -> bool:
 def decide(j: schemas.LLMExploreJudgement, rules: dict[str, str], before: FormState, said: list[str]) -> tuple[str, str]:
     """breaks | consistent | unclear, and why. The AI only reports facts (what the app did,
     what the rule expects); the verdict is made here, so a small model can't talk itself into a bug."""
-    if not j.answer_quote.strip() or _norm(j.answer_quote) not in _norm(" ".join(said)):
+    if not quoted(j.answer_quote, said):
         return "unclear", "the words it quoted aren't in the app's answer"
     if not j.rule or j.rule.strip().upper() not in {k.upper() for k in rules} or j.rule_expects == "none":
         return "unclear", "no rule says what should happen here"
     expects, did = j.rule_expects, j.answer_means
     if did == "accepted" and expects == "refuse":
         return "breaks", "accepted, but the rule says it must be refused"
-    if did in ("refused", "error") and expects == "accept":
+    if did == "error" and expects == "accept":
+        return "breaks", "it broke, but the rule says it must be accepted"
+    if did == "refused" and expects == "accept":
         if incomplete(before):
             return "unclear", "refused, but a field was empty or unticked, so it may be about that"
         return "breaks", "refused, but the rule says it must be accepted"
@@ -466,6 +510,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                 seen_signals: dict[str, int] = {}
                 seen: dict[str, int] = {}
                 tried: dict[tuple[str, str, str], int] = {}  # (click, page, field values before it) -> step
+                noted: set[str] = set()  # notes already written, so one isn't written again
                 await page.goto(start_url, wait_until="domcontentloaded", timeout=30_000)
                 await signals.settle()
                 _record(session_id, [Signal("navigation", f"Opened {start_url}", start_url, now())])
@@ -518,6 +563,12 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         final = {"status": "finished", "summary": a.summary, "detail": "The agent finished the charter."}
                         break
                     if a.kind == "note":
+                        if _norm(a.note) in noted:
+                            entry["status"], entry["detail"] = "refused", "you already noted this: try the next idea"
+                            history.append(entry)
+                            _save(run_id, steps=list(history))
+                            continue
+                        noted.add(_norm(a.note))
                         _note(session_id, "test", a.note)
                         history.append(entry)
                         _save(run_id, steps=list(history))
@@ -551,6 +602,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         continue
                     if a.kind in ("click", "press"):
                         tried[(describe(a), page.url, before.values())] = entry["n"]
+                    failed_before, page_errors_before = len(signals.failed), len(signals.page_errors)
                     browser_action = a.as_browser_action()
                     try:
                         entry["status"], entry["detail"] = await act(page, browser_action, origins)
@@ -562,6 +614,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         await _back_into_app(page, entry["url"], signals)
                         entry["detail"] = (entry["detail"] + "; " if entry["detail"] else "") + \
                             f"that left the app ({origin(left)}), so the browser went back"
+                    broke = crashes(signals.failed[failed_before:], signals.page_errors[page_errors_before:])
                     said: list[str] = []  # what the app answered this step
                     after = FormState()
                     if entry["status"] == "ok" and not page.is_closed():
@@ -589,7 +642,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             if verdict == "breaks":
                                 note += f" Breaks {rule_id} (\"{rule_text[:160]}\"): {why}. {j.because}".rstrip()
                                 key = ("rule", rule_id)
-                                if key not in reported:
+                                if key not in reported and not broke:  # a crash is drafted below, once
                                     must = "refused" if j.rule_expects == "refuse" else "accepted"
                                     problem = schemas.ExploreProblem(
                                         title=(j.title or f"{j.answer_means.capitalize()} although {rule_id} says it must be {must}")[:200],
@@ -615,6 +668,26 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             else:
                                 note += f" Not judged: {why}."
                             _note(session_id, "test", note)
+                    # Crashes need no rule: a server error or an uncaught page error after this step
+                    # is a bug draft whatever the story says (Mirmera saw it itself; no AI involved).
+                    for crash in broke:
+                        key = (crash.symptom.kind, crash.symptom.value)
+                        if key in reported:
+                            continue
+                        ok, evidence = await verify(page, crash.symptom, signals)
+                        if not ok:
+                            continue
+                        crash.actual = (f"After {entry['action']}" + (f" (sent: {sent_text(before)[:300]})" if before.fields else "")
+                                        + f": {crash.actual}" + (f' The page said: "{said[0][:160]}".' if said else ""))[:600]
+                        shot = folder / f"explore-{run_id[:8]}-{len(bug_ids) + 1}.png"
+                        try:
+                            await page.screenshot(path=str(shot))
+                        except Exception:
+                            shot = None
+                        bug_ids.append(_draft_bug(session_id, charter_id, crash, evidence, steps, page.url, shot, provider))
+                        reported.add(key)
+                        entry["status"] = "drafted"
+                        entry["detail"] = (entry["detail"] + "; " if entry["detail"] else "") + crash.title
                     history.append(entry)
                     _save(run_id, steps=list(history), bug_ids=list(bug_ids))
                 else:

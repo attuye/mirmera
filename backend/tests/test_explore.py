@@ -69,13 +69,14 @@ def test_it_explores_and_drafts_a_checked_bug(client, kyc, monkeypatch, chromium
     assert run["status"] == "finished", run["detail"]
     assert run["summary"] == "Passport fails; national ID not tried yet."
     statuses = [s["status"] for s in run["steps"]]
-    assert statuses == ["ok", "ok", "ok", "not verified", "drafted", "refused", "refused", "ok"]
+    # The 500 after the submit is drafted by Mirmera itself; the agent's own report of it is then a repeat.
+    assert statuses == ["ok", "ok", "drafted", "not verified", "refused", "refused", "refused", "ok"]
     assert "<charter>" in provider.users[0] and "Try a passport" in provider.users[0]
 
     [bug_id] = run["bug_ids"]
     bug = client.get(f"/sessions/{run['session_id']}/bugs").json()[0]
     assert bug["id"] == bug_id and bug["kind"] is None  # a draft: the tester reviews it
-    assert bug["severity"] == "high" and bug["title"] == "Passport verification fails"
+    assert bug["severity"] == "high" and bug["title"] == "POST /api/verify fails with 500"
     steps = client.get(f"/bugs/{bug_id}/steps").json()
     assert steps["source"] == "edited"
     assert [s["type"] for s in steps["steps"]] == ["goto", "action", "action"]
@@ -439,3 +440,38 @@ def test_locators_that_still_cant_be_read_are_refused():
         schemas.PlanLocator.model_validate({"method": "label"})
     with _pytest.raises(ValidationError):
         schemas.PlanLocator.model_validate({"method": "role", "role": "marquee", "name": "x"})
+
+
+def test_a_server_error_after_a_step_is_a_bug_without_asking_the_ai(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """Seen with qwen3:8b on SCRUM-11: Passport → "Something went wrong" and POST /api/verify 500.
+    It noted the 500 three times and drafted nothing, and the check couldn't match its quote.
+    A crash needs no rule and no AI: Mirmera drafts it, once, and refuses a repeated note."""
+    project, charter = kyc
+    story_for(client, project, charter, ["Verifying with a passport must work first time"])
+    passport = step("Passport", kind="select", locator={"method": "label", "value": "Document type"}, value="Passport")
+    provider = Reading([
+        passport,
+        step("Submit", kind="click", locator=VERIFY),
+        step("Note it", kind="note", note="Passport gives a 500."),
+        step("Note it again", kind="note", note="Passport gives a 500. "),
+        step("Covered", kind="done", summary="Passport fails."),
+    ], facts=[{"answer_means": "error", "answer_quote": "Something went wrong", "rule": "AC1", "rule_expects": "accept"}])
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 8}).json())
+    submit = run["steps"][1]
+    assert submit["status"] == "drafted" and "POST /api/verify fails with 500" in submit["detail"]
+    assert submit["judged"] == "breaks"  # the check agrees, but the crash is the one draft
+    assert [s["status"] for s in run["steps"][2:4]] == ["ok", "refused"]
+    [bug] = client.get(f"/sessions/{run['session_id']}/bugs").json()
+    assert bug["title"] == "POST /api/verify fails with 500" and bug["severity"] == "high"
+    assert bug["actual"].startswith('After click button "Verify" (sent: ') and "Document type = Passport" in bug["actual"]
+    assert 'The page said: "Something went wrong"' in bug["actual"]
+
+
+def test_a_nearly_word_for_word_quote_counts():
+    from app.agent.explore import quoted
+    said = ["Document number and expiry date are required."]
+    assert quoted("Document number and expiry date are required", said)  # no full stop
+    assert quoted("document number and expiry date required", said)  # a word dropped
+    assert not quoted("The document was verified", said)  # made up
+    assert not quoted("", said)
