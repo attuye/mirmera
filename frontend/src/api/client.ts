@@ -355,6 +355,10 @@ export const reproductionScreenshotUrl = (runId: string) => `${BASE_URL}/reprodu
 export const regressionDownloadUrl = (testId: string) => `${BASE_URL}/regression-tests/${testId}/download`
 
 export const evidenceFileUrl = (evidenceId: string) => `${BASE_URL}/evidence/${evidenceId}/file`
+/** The exploration agent's browser right now (204 while nothing is newer than ?after=). */
+export const explorationLiveUrl = (runId: string, after: number) => `${BASE_URL}/exploration-runs/${runId}/frame?after=${after}`
+/** The page as the agent saw it when it chose step n. */
+export const explorationStepFrameUrl = (runId: string, n: number) => `${BASE_URL}/exploration-runs/${runId}/steps/${n}/frame`
 
 export type Reproducibility = 'always' | 'intermittent' | 'once' | 'unknown'
 
@@ -736,7 +740,8 @@ export interface WorkspaceKeys { keys: WorkspaceKey[]; server_keys_for_all: bool
 export interface ExplorationRun {
   id: string; project_id: string; charter_id: string; session_id: string | null
   status: 'running' | 'finished' | 'cancelled' | 'error'; start_url: string; max_steps: number
-  steps: { n: number; thought: string; action: string; kind: string; status: string; detail: string; url: string }[]
+  steps: { n: number; thought: string; action: string; kind: string; status: string; detail: string; url: string
+    frame?: string; box?: [number, number, number, number] }[]
   bug_ids: string[]; summary: string | null; detail: string | null; started_by: string | null
   ai_provider: string | null; ai_model: string | null; created_at: string; finished_at: string | null
 }

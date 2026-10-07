@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom'
 import { Bot, Check, CircleDashed, Loader2, X } from 'lucide-react'
 import { AgentActivity, AgentActivityList, AgentStage } from '../api/client'
 import { utcDate } from './Evidence'
+import AgentBrowser from './AgentBrowser'
 
 const FAST_MS = 2000
 const SLOW_MS = 15000
@@ -100,6 +101,16 @@ export default function AgentProgress({ item, showTitle = true }: { item: AgentA
             {ex.steps_used} of {ex.max_steps} steps · {ex.actions} action{ex.actions === 1 ? '' : 's'} in the app ·{' '}
             <span style={{ color: ex.bugs.length ? 'var(--danger)' : undefined }}>{ex.bugs.length} bug draft{ex.bugs.length === 1 ? '' : 's'}</span>
           </div>
+          {running && ex.status === 'running' && (
+            <Link to={base && ex.session_id ? `${base}/sessions/${ex.session_id}` : '#'} title="Watch Mirmera in its session"
+              style={{ display: 'block', marginTop: 10, maxWidth: 360 }}>
+              <AgentBrowser compact run={{
+                id: ex.run_id, project_id: item.project_id ?? '', charter_id: ex.charter_id, session_id: ex.session_id,
+                status: 'running', start_url: '', max_steps: ex.max_steps, steps: [], bug_ids: [], summary: null, detail: null,
+                started_by: item.started_by, ai_provider: null, ai_model: null, created_at: item.started_at, finished_at: null,
+              }} />
+            </Link>
+          )}
           {ex.recent.length > 0 && (
             <ol aria-label="Latest steps" style={{ listStyle: 'none', margin: '8px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
               {ex.recent.map((s) => (
