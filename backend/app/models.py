@@ -771,6 +771,7 @@ class ExplorationRun(Base):
     detail = Column(Text, nullable=True)  # why it stopped
     started_by = Column(String, nullable=True)  # a user's name, or "Jira KYC-12"
     cancel_requested = Column(Boolean, default=False)
+    video = Column(String, nullable=True)  # its browser's recording (WebM), in the session's folder
     ai_provider = Column(String, nullable=True)
     ai_model = Column(String, nullable=True)
     prompt_version = Column(String, nullable=True)

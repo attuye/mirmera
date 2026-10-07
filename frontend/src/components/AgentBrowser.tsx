@@ -1,9 +1,18 @@
-/** Mirmera's browser: watch the exploration agent use the app, live while it works, then
- *  step through what it did. Each step shows the page as the agent saw it when it chose the
- *  step, with a box on the element it was about to use. */
+/** Mirmera's browser: watch the exploration agent use the app.
+ *  - Live while it works (a fresh picture every 400 ms).
+ *  - Afterwards, its recording plays like a video: play, pause, speed, jump step to step;
+ *    the caption follows the step on screen, with a box on the element it was about to use.
+ *  - Runs without a recording (older ones), and looking back while it works, play the
+ *    step pictures one after another instead. */
 import { useEffect, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { ExplorationRun, explorationLiveUrl, explorationStepFrameUrl } from '../api/client'
+import { Bot, ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react'
+import { ExplorationRun, explorationLiveUrl, explorationStepFrameUrl, explorationVideoUrl } from '../api/client'
+
+type Step = ExplorationRun['steps'][number]
+const BOX_SECONDS = 1.5  // in the recording, the box shows this long after the step starts
+const STILL_MS = 1500  // playing the pictures: each one this long at 1×
+const SPEEDS = [1, 2, 4]
+const clockText = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`
 
 const W = 1280, H = 800  // the agent's fixed viewport (backend/app/agent/explore.py)
 
@@ -41,80 +50,160 @@ export default function AgentBrowser({ run, compact = false }: { run: Exploratio
   const running = run.status === 'running'
   const live = useLiveFrame(run.id, running)
   const framed = run.steps.filter((s) => s.frame)
-  const [picked, setPicked] = useState<number | null>(null)  // index into framed; null = the latest
-  const showLive = running && picked === null && live.src
-  const at = picked ?? framed.length - 1
-  const step = framed[at]
-  const lastStep = run.steps[run.steps.length - 1]
-  const caption = showLive ? lastStep : step
-  const url = showLive ? live.url : step?.url ?? run.start_url
+  const timed = run.steps.filter((s) => typeof s.t === 'number')
+  const [picked, setPicked] = useState<number | null>(null)  // while running: an earlier picture; null = live
+  const mode: 'live' | 'video' | 'steps' = running ? (picked === null ? 'live' : 'steps') : run.video ? 'video' : 'steps'
+
+  // The recording.
+  const video = useRef<HTMLVideoElement>(null)
+  const [time, setTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [playing, setPlaying] = useState(false)
+  const [speed, setSpeed] = useState(1)
+  const lastT = timed.length ? timed[timed.length - 1].t! : 0
+  const length = duration && Number.isFinite(duration) ? duration : lastT + 2
+  const onScreen = [...timed].reverse().find((s) => s.t! <= time + 0.05) ?? timed[0]
+
+  // The pictures, one after another.
+  const [still, setStill] = useState(framed.length - 1)
+  const at = picked ?? still
+  useEffect(() => { if (!running && picked === null) setStill(framed.length - 1) }, [framed.length, running])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (mode !== 'steps' || !playing) return
+    const id = window.setInterval(() => {
+      const next = Math.min(framed.length - 1, at + 1)
+      if (running) setPicked(next); else setStill(next)
+      if (next >= framed.length - 1) setPlaying(false)
+    }, STILL_MS / speed)
+    return () => window.clearInterval(id)
+  }, [mode, playing, at, speed, framed.length, running])
+
+  useEffect(() => { if (video.current) video.current.playbackRate = speed }, [speed, mode])
+  useEffect(() => { setPlaying(false) }, [mode])
+
+  const step: Step | undefined = mode === 'video' ? onScreen : mode === 'steps' ? framed[at] : run.steps[run.steps.length - 1]
+  const showBox = step?.box && (mode === 'steps' || (mode === 'video' && time - step.t! < BOX_SECONDS && time >= step.t! - 0.05))
+  const url = mode === 'live' ? live.url || run.start_url : step?.url ?? run.start_url
+
+  function togglePlay() {
+    if (mode === 'video' && video.current) {
+      if (video.current.paused) {
+        if (video.current.ended || time >= length - 0.1) video.current.currentTime = 0
+        video.current.play().catch(() => {})
+      } else video.current.pause()
+    } else if (mode === 'steps') {
+      if (!playing && at >= framed.length - 1) { if (running) setPicked(0); else setStill(0) }
+      setPlaying(!playing)
+    }
+  }
+  function jump(by: -1 | 1) {
+    if (mode === 'video' && video.current) {
+      const i = onScreen ? timed.indexOf(onScreen) : -1
+      const target = timed[Math.max(0, Math.min(timed.length - 1, i + by))]
+      if (target) { video.current.currentTime = target.t!; setTime(target.t!) }
+    } else {
+      const next = Math.max(0, Math.min(framed.length - 1, at + by))
+      if (running) setPicked(next); else setStill(next)
+    }
+  }
+  const state = mode === 'live' ? null : mode === 'video' ? 'Recording' : running ? 'Earlier step' : 'Steps'
 
   return (
     <section aria-label="Mirmera's browser" style={{
       border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--panel)',
       width: '100%', maxWidth: 360,  // beside the session's Browser/API tools; a progress card's preview
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: compact ? '5px 8px' : '7px 10px', borderBottom: '1px solid var(--border)' }}>
+      {!compact && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px 6px' }}>
+          <Bot size={14} aria-hidden style={{ color: running ? 'var(--info)' : 'var(--text-tertiary)' }} />
+          <h3 style={{ fontSize: 12.5, fontWeight: 600, margin: 0, flex: 1 }}>Mirmera's browser</h3>
+          {mode === 'live' ? (
+            <span role="status" aria-label="Live" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 600, color: 'var(--danger)' }}>
+              <span className="mm-pulse" style={{ width: 7, height: 7, borderRadius: 4, background: 'var(--danger)' }} />LIVE
+            </span>
+          ) : <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>{state}</span>}
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: compact ? '5px 8px' : '0 10px 7px', borderBottom: '1px solid var(--border)' }}>
         {!compact && <span aria-hidden style={{ display: 'flex', gap: 5 }}>
           {['#ff5f57', '#febc2e', '#28c840'].map((c) => <span key={c} style={{ width: 9, height: 9, borderRadius: 5, background: c, opacity: 0.8 }} />)}
         </span>}
-        <span className="mono" title={url} style={{
+        <span className="mono" aria-label="Address" title={url} style={{
           flex: 1, minWidth: 0, fontSize: 11, color: 'var(--text-secondary)', background: 'var(--panel-alt)', borderRadius: 6,
           padding: '3px 8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>{url}</span>
-        {running && picked === null ? (
-          <span role="status" aria-label="Live" style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 600, color: 'var(--danger)' }}>
-            <span className="mm-pulse" style={{ width: 7, height: 7, borderRadius: 4, background: 'var(--danger)' }} />LIVE
-          </span>
-        ) : framed.length > 0 && <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>{running ? 'Earlier step' : 'Replay'}</span>}
+        {compact && mode === 'live' && <span role="status" aria-label="Live" className="mm-pulse" style={{ width: 7, height: 7, borderRadius: 4, background: 'var(--danger)' }} />}
       </div>
 
       <div style={{ position: 'relative', aspectRatio: `${W} / ${H}`, background: '#fff' }}>
-        {showLive ? (
-          <img src={live.src!} alt="Mirmera's browser, live" style={{ width: '100%', height: '100%', display: 'block', objectFit: 'contain' }} />
+        {mode === 'live' ? (live.src
+          ? <img src={live.src} alt="Mirmera's browser, live" style={fill} />
+          : <Blank text="Opening the app…" />
+        ) : mode === 'video' ? (
+          <video ref={video} src={explorationVideoUrl(run.id)} preload="metadata" playsInline muted aria-label="Recording of Mirmera's run"
+            style={{ ...fill, background: '#fff' }}
+            onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)} onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+            onDurationChange={(e) => setDuration(e.currentTarget.duration)}
+            onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />
         ) : step ? (
-          <>
-            <img src={explorationStepFrameUrl(run.id, step.n)} alt={`Step ${step.n}: ${step.action}`}
-              style={{ width: '100%', height: '100%', display: 'block', objectFit: 'contain' }} />
-            {step.box && (
-              <div aria-label="Where it acted" style={{
-                position: 'absolute', left: `${(step.box[0] / W) * 100}%`, top: `${(step.box[1] / H) * 100}%`,
-                width: `${(step.box[2] / W) * 100}%`, height: `${(step.box[3] / H) * 100}%`,
-                border: '2px solid var(--danger)', borderRadius: 4, boxShadow: '0 0 0 3px rgba(255, 80, 80, 0.25)', pointerEvents: 'none',
-              }} />
-            )}
-          </>
-        ) : (
-          <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontSize: 12.5, color: '#666', background: 'var(--panel-alt)' }}>
-            {running ? 'Opening the app…' : 'No pictures were kept for this run.'}
-          </div>
+          <img src={explorationStepFrameUrl(run.id, step.n)} alt={`Step ${step.n}: ${step.action}`} style={fill} />
+        ) : <Blank text={running ? 'Opening the app…' : 'No pictures were kept for this run.'} />}
+        {showBox && step?.box && (
+          <div aria-label="Where it acted" style={{
+            position: 'absolute', left: `${(step.box[0] / W) * 100}%`, top: `${(step.box[1] / H) * 100}%`,
+            width: `${(step.box[2] / W) * 100}%`, height: `${(step.box[3] / H) * 100}%`,
+            border: '2px solid var(--danger)', borderRadius: 4, boxShadow: '0 0 0 3px rgba(255, 80, 80, 0.25)', pointerEvents: 'none',
+          }} />
         )}
       </div>
 
-      {caption && !compact && (
-        <div style={{ padding: '7px 10px', borderTop: '1px solid var(--border)', fontSize: 12 }}>
-          <span className="mono" style={{ fontSize: 11, color: 'var(--text-quiet)', marginRight: 8 }}>Step {caption.n}</span>
-          <span>{caption.action}</span>
-          {caption.status !== 'ok' && <span style={{ color: 'var(--warning)' }}> ({caption.status})</span>}
-          {caption.detail && <span style={{ color: 'var(--text-secondary)' }}> → {caption.detail}</span>}
-          {caption.thought && <div style={{ color: 'var(--text-tertiary)', fontSize: 12, marginTop: 3 }}>{caption.thought}</div>}
+      {step && !compact && (
+        <div aria-label="Step on screen" style={{ padding: '7px 10px', borderTop: '1px solid var(--border)', fontSize: 12 }}>
+          <span className="mono" style={{ fontSize: 11, color: 'var(--text-quiet)', marginRight: 8 }}>Step {step.n}</span>
+          <span>{step.action}</span>
+          {step.status !== 'ok' && <span style={{ color: 'var(--warning)' }}> ({step.status})</span>}
+          {step.detail && <span style={{ color: 'var(--text-secondary)' }}> → {step.detail}</span>}
+          {step.thought && <div style={{ color: 'var(--text-tertiary)', fontSize: 12, marginTop: 3 }}>{step.thought}</div>}
         </div>
       )}
 
-      {!compact && framed.length > 0 && (
-        <div role="group" aria-label="Steps" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px 8px' }}>
-          <button aria-label="Previous step" disabled={at <= 0} onClick={() => setPicked(Math.max(0, at - 1))} style={navButton}><ChevronLeft size={14} /></button>
-          <input type="range" aria-label="Step" min={0} max={framed.length - 1} value={at}
-            onChange={(e) => setPicked(Number(e.target.value))} style={{ flex: 1 }} />
-          <button aria-label="Next step" disabled={at >= framed.length - 1} onClick={() => setPicked(Math.min(framed.length - 1, at + 1))} style={navButton}><ChevronRight size={14} /></button>
+      {!compact && (mode === 'video' || framed.length > 0) && (
+        <div role="group" aria-label="Player" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px 8px', flexWrap: 'wrap' }}>
+          {mode !== 'live' && (
+            <button aria-label={playing ? 'Pause' : 'Play'} onClick={togglePlay} style={{ ...navButton, color: 'var(--accent)' }}>
+              {playing ? <Pause size={13} /> : <Play size={13} />}
+            </button>
+          )}
+          <button aria-label="Previous step" onClick={() => mode === 'live' ? setPicked(Math.max(0, framed.length - 2)) : jump(-1)} style={navButton}><ChevronLeft size={14} /></button>
+          {mode === 'video' ? (
+            <input type="range" aria-label="Position" min={0} max={length} step={0.1} value={Math.min(time, length)}
+              onChange={(e) => { const v = Number(e.target.value); if (video.current) video.current.currentTime = v; setTime(v) }} style={{ flex: 1, minWidth: 80 }} />
+          ) : (
+            <input type="range" aria-label="Step" min={0} max={Math.max(0, framed.length - 1)} value={mode === 'live' ? framed.length - 1 : at}
+              onChange={(e) => { const v = Number(e.target.value); if (running) setPicked(v); else setStill(v) }} style={{ flex: 1, minWidth: 80 }} />
+          )}
+          <button aria-label="Next step" onClick={() => jump(1)} disabled={mode === 'live'} style={navButton}><ChevronRight size={14} /></button>
+          {mode !== 'live' && (
+            <button aria-label="Speed" title="Playback speed" onClick={() => setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length])}
+              style={{ ...navButton, width: 'auto', padding: '0 7px', fontSize: 11 }}>{speed}×</button>
+          )}
+          <span className="mono" style={{ fontSize: 10.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>
+            {mode === 'video' ? `${clockText(time)} / ${clockText(length)}` : mode === 'steps' ? `${at + 1} / ${framed.length}` : ''}
+          </span>
           {running && picked !== null && (
-            <button onClick={() => setPicked(null)} style={{ ...navButton, width: 'auto', padding: '2px 8px', fontSize: 11.5, color: 'var(--danger)' }}>Back to live</button>
+            <button onClick={() => { setPicked(null); setPlaying(false) }} style={{ ...navButton, width: 'auto', padding: '2px 8px', fontSize: 11.5, color: 'var(--danger)' }}>Back to live</button>
           )}
         </div>
       )}
     </section>
   )
 }
+
+function Blank({ text }: { text: string }) {
+  return <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', fontSize: 12.5, color: '#666', background: 'var(--panel-alt)' }}>{text}</div>
+}
+
+const fill: React.CSSProperties = { width: '100%', height: '100%', display: 'block', objectFit: 'contain' }
 
 const navButton: React.CSSProperties = {
   width: 26, height: 24, display: 'grid', placeItems: 'center', borderRadius: 6, border: '1px solid var(--border)',

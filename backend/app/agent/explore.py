@@ -79,6 +79,38 @@ async def _start_screencast(page, live: Live) -> None:
         logger.info("No live view for this run: %s", _first_line(err))
 
 
+async def _recording_context(browser, folder: Path, run_id: str):
+    """A browser context that films itself (a WebM video, written when the context closes)."""
+    try:
+        return await browser.new_context(viewport=VIEWPORT, record_video_dir=str(folder / f"video-{run_id[:8]}"),
+                                         record_video_size=VIEWPORT)
+    except Exception as err:  # e.g. Playwright's ffmpeg isn't installed: explore without a recording
+        logger.info("No recording for this run: %s", _first_line(err))
+        return await browser.new_context(viewport=VIEWPORT)
+
+
+async def _keep_recording(context, folder: Path, run_id: str) -> str | None:
+    """Closes the context so its video is complete, and keeps it in the session's folder."""
+    if context is None:
+        return None
+    try:
+        videos = [p.video for p in context.pages if p.video]
+        await context.close()
+        if not videos:
+            return None
+        source = Path(await videos[0].path())
+        name = f"explore-{run_id[:8]}.webm"
+        source.replace(folder / name)
+        try:
+            source.parent.rmdir()
+        except OSError:
+            pass
+        return name
+    except Exception as err:
+        logger.info("The run's recording could not be kept: %s", _first_line(err))
+        return None
+
+
 async def _step_frame(page, folder: Path, run_id: str, n: int, a: schemas.ExploreAction) -> dict:
     """The page as the agent saw it when it chose step n, and where it is about to act."""
     out: dict = {}
@@ -296,6 +328,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
     steps: list[dict] = [{"type": "goto", "url": start_url}]
     started = time.monotonic()
     final: dict = {}
+    video: str | None = None  # the run's recording, kept in the session's folder
 
     def now() -> datetime:
         return utcnow()
@@ -303,8 +336,11 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
     try:
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=headless, executable_path=executable_path or None)
+            context = None
             try:
-                page = await (await browser.new_context(viewport=VIEWPORT)).new_page()
+                context = await _recording_context(browser, folder, run_id)
+                filmed_from = time.monotonic()  # step times are kept against the recording's start
+                page = await context.new_page()
                 live = LIVE[run_id] = Live()
                 await _start_screencast(page, live)
                 signals = Signals()
@@ -355,6 +391,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     a = step.action
                     entry = {"n": len(history) + 1, "thought": step.thought, "action": describe(a), "kind": a.kind,
                              "status": "ok", "detail": "", "url": page.url}
+                    entry["t"] = round(time.monotonic() - filmed_from, 2)  # where this step is in the recording
                     if a.kind != "done":
                         entry |= await _step_frame(page, folder, run_id, entry["n"], a)
 
@@ -425,6 +462,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     final = {"status": "finished", "detail": f"Used all {max_steps} steps."}
                 drain_signals()
             finally:
+                video = await _keep_recording(context, folder, run_id)
                 await browser.close()
     except ProviderError as err:
         final = {"status": "error", "detail": f"The AI could not continue: {err}"}
@@ -434,7 +472,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
     finally:
         try:
             _wrap_up(session_id, final, history, bug_ids)
-            _save(run_id, steps=list(history), bug_ids=list(bug_ids), finished_at=utcnow(), **final)
+            _save(run_id, steps=list(history), bug_ids=list(bug_ids), finished_at=utcnow(), video=video, **final)
         finally:
             ACTIVE.discard(run_id)
             LIVE.pop(run_id, None)  # from here on, its steps' frames show what it did
