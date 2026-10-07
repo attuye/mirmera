@@ -165,3 +165,13 @@ def video(run_id: str, request: Request, db: DBSession = Depends(get_db)):
         chunk = f.read(end - start + 1)
     return Response(chunk, status_code=206, media_type="video/webm", headers={
         "Content-Range": f"bytes {start}-{end}/{size}", "Accept-Ranges": "bytes", "Content-Length": str(len(chunk))})
+
+
+@router.post("/exploration-runs/{run_id}/hints", response_model=schemas.ExplorationRunOut)
+def hint(run_id: str, payload: schemas.ExploreHint, user: models.User = Depends(current_user), db: DBSession = Depends(get_db)):
+    """Pair with the agent: it reads the hint before its next step and tries it."""
+    run = _run_or_404(db, run_id)
+    if run.status != "running":
+        raise HTTPException(409, f"Mirmera has stopped exploring ({run.status}); start it again to give it hints.")
+    agent.add_hint(db, run, payload.text.strip(), by=user.name)
+    return run

@@ -475,3 +475,23 @@ def test_a_nearly_word_for_word_quote_counts():
     assert quoted("document number and expiry date required", said)  # a word dropped
     assert not quoted("The document was verified", said)  # made up
     assert not quoted("", said)
+
+
+def test_a_tester_sends_hints_while_it_runs_only(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from tests.conftest import sign_up
+    project, charter = kyc
+    scripted(monkeypatch, [step("Look", kind="wait")])
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: Scripted([step("Look", kind="wait")], delay=0.3))
+    run = client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 6}).json()
+    r = client.post(f"/exploration-runs/{run['id']}/hints", json={"text": "Try a Passport"})
+    assert r.status_code == 200 and r.json()["hints"][0] | {"at": None} == {
+        "id": r.json()["hints"][0]["id"], "text": "Try a Passport", "by": "Attu", "at": None, "step": None}
+    with TestClient(app) as sara:
+        sign_up(sara, name="Sara", email="sara@x.et", workspace="Sara's")
+        assert sara.post(f"/exploration-runs/{run['id']}/hints", json={"text": "x" * 5}).status_code == 404
+    done = finished(client, run)
+    assert done["hints"][0]["step"] is not None  # the agent read it
+    assert client.post(f"/exploration-runs/{run['id']}/hints", json={"text": "Too late"}).status_code == 409
+    assert client.post(f"/exploration-runs/{run['id']}/hints", json={"text": ""}).status_code == 422

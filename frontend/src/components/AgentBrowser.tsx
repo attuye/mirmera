@@ -6,7 +6,8 @@
  *    step pictures one after another instead. */
 import { useEffect, useRef, useState } from 'react'
 import { Bot, ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react'
-import { ExplorationRun, explorationLiveUrl, explorationStepFrameUrl, explorationVideoUrl } from '../api/client'
+import { api, ExplorationRun, explorationLiveUrl, explorationStepFrameUrl, explorationVideoUrl } from '../api/client'
+import { errorText } from './ui'
 
 type Step = ExplorationRun['steps'][number]
 const BOX_SECONDS = 1.5  // in the recording, the box shows this long after the step starts
@@ -167,6 +168,8 @@ export default function AgentBrowser({ run, compact = false }: { run: Exploratio
         </div>
       )}
 
+      {!compact && running && <PairBox run={run} />}
+
       {!compact && (mode === 'video' || framed.length > 0) && (
         <div role="group" aria-label="Player" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px 8px', flexWrap: 'wrap' }}>
           {mode !== 'live' && (
@@ -196,6 +199,43 @@ export default function AgentBrowser({ run, compact = false }: { run: Exploratio
         </div>
       )}
     </section>
+  )
+}
+
+/** Pair with the agent: what to try next, read before its next step. */
+function PairBox({ run }: { run: ExplorationRun }) {
+  const [text, setText] = useState('')
+  const [sent, setSent] = useState<NonNullable<ExplorationRun['hints']>>([])
+  const [error, setError] = useState<string | null>(null)
+  const hints = [...(run.hints ?? []), ...sent.filter((s) => !(run.hints ?? []).some((h) => h.id === s.id))]
+  async function send() {
+    const t = text.trim()
+    if (t.length < 2) return
+    setError(null)
+    try {
+      const updated = await api.hintExploration(run.id, t)
+      setSent(updated.hints ?? [])
+      setText('')
+    } catch (e) { setError(errorText(e)) }
+  }
+  return (
+    <div aria-label="Pair with Mirmera" role="group" style={{ padding: '8px 10px', borderTop: '1px solid var(--border)' }}>
+      {hints.slice(-3).map((h) => (
+        <div key={h.id} style={{ fontSize: 11.5, marginBottom: 4, color: h.by === 'Mirmera' ? 'var(--text-tertiary)' : 'var(--text-secondary)' }}>
+          <b style={{ fontWeight: 600 }}>{h.by}:</b> {h.text}{' '}
+          <span style={{ color: 'var(--text-quiet)' }}>{h.step ? `· taken at step ${h.step}` : '· waiting for its next step'}</span>
+        </div>
+      ))}
+      <form onSubmit={(e) => { e.preventDefault(); send() }} style={{ display: 'flex', gap: 6 }}>
+        <input aria-label="Tell Mirmera what to try next" value={text} onChange={(e) => setText(e.target.value)} maxLength={400}
+          placeholder="Tell Mirmera what to try next…" style={{
+            flex: 1, minWidth: 0, fontSize: 12, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)',
+            background: 'var(--panel-alt)', color: 'var(--text)', fontFamily: 'var(--font-ui)',
+          }} />
+        <button type="submit" disabled={text.trim().length < 2} style={{ ...navButton, width: 'auto', padding: '0 10px', fontSize: 11.5, color: 'var(--accent)' }}>Send</button>
+      </form>
+      {error && <div role="alert" style={{ fontSize: 11.5, color: 'var(--danger)', marginTop: 4 }}>{error}</div>}
+    </div>
   )
 }
 
