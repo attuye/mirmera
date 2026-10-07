@@ -31,7 +31,11 @@ GEEZ = "አበበ ከበደ"
 @pytest.fixture(scope="module")
 def practice_app():
     """The practice app (node), on a free port."""
-    if not SERVER.exists() or subprocess.run(["node", "--version"], capture_output=True).returncode:
+    try:
+        subprocess.run(["node", "--version"], capture_output=True, check=True)
+    except (OSError, subprocess.CalledProcessError):
+        if os.environ.get("CI"):
+            raise  # in CI the evals must run, not be skipped
         pytest.skip("Node isn't available to run the practice app")
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
