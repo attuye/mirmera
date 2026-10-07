@@ -57,6 +57,12 @@ Never repeat a step that taught you nothing. Mirmera refuses a submit with the
 same field values as before and a fill with the value the field already holds:
 when a step is refused, change something or move to the next idea.
 
+When the charter lists acceptance criteria (AC1, AC2…), they are the story's
+rules: test each one that the mission touches, a valid case and its boundary.
+Mirmera checks every answer against them too and drafts a bug when one is
+broken, so keep testing; don't stop to argue about a result. In done, say for
+each criterion you touched what you saw.
+
 How to work:
 - Follow the charter's mission and test ideas. Vary data deliberately:
   boundaries (empty, very long, just over a limit), formats, unusual but

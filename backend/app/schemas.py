@@ -1236,6 +1236,23 @@ class ExploreAction(BaseModel):
                            secret=self.secret, key=self.key)
 
 
+class LLMExploreJudgement(BaseModel):
+    """AI contract: does what the app answered break one of the story's rules?"""
+    verdict: Literal["breaks", "consistent", "unclear"]
+    criterion: Optional[str] = Field(default=None, max_length=400)  # the rule it breaks, quoted
+    why: str = Field(default="", max_length=600)
+    title: Optional[str] = Field(default=None, max_length=200)
+    expected: Optional[str] = Field(default=None, max_length=600)
+    actual: Optional[str] = Field(default=None, max_length=600)
+    severity: Literal["high", "medium", "low"] = "medium"
+
+    @model_validator(mode="after")
+    def complete(self):
+        if self.verdict == "breaks" and not (self.criterion and self.title and self.expected and self.actual):
+            raise ValueError("breaks needs the criterion, a title, expected and actual")
+        return self
+
+
 class LLMExploreStep(BaseModel):
     """AI contract for the exploration agent: one step at a time."""
     thought: str = Field(min_length=1, max_length=600)

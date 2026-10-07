@@ -54,6 +54,7 @@ def start_exploration(db: DBSession, charter: models.Charter, *, started_by: str
         mission=charter.mission_statement, test_ideas=list(charter.test_ideas or []), oracles=list(charter.oracles or []),
         risks=[{"ref": r.ref, "title": r.title, "failure_mode": r.failure_mode} for r in charter.risks],
         story=artifact_text(story) if story else None,
+        criteria=agent.criteria_from(story.description) if story else [],
     )
     session = models.Session(charter_id=charter.id, tester_id=agent.TESTER)
     db.add(session)
