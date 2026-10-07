@@ -999,6 +999,26 @@ class PlanLocator(BaseModel):
     name: Optional[str] = None
     value: Optional[str] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def forgiving(cls, data):
+        """Small models mix up the fields: {"method": "label", "name": "Document number"} or
+        {"method": "role", "role": "button", "value": "Verify"} mean what they say, so read them
+        that way instead of failing the whole step."""
+        if not isinstance(data, dict):
+            return data
+        d = {k: (v.strip() if isinstance(v, str) else v) for k, v in data.items()}
+        if isinstance(d.get("method"), str):
+            d["method"] = d["method"].lower()
+        if isinstance(d.get("role"), str):
+            d["role"] = d["role"].lower()
+        if d.get("method") == "role":
+            if not d.get("name") and d.get("value"):
+                d["name"] = d.pop("value")
+        elif d.get("method") in ("label", "placeholder", "text", "testid") and not d.get("value"):
+            d["value"] = d.pop("name", None) or (d.get("role") if d.get("role") not in PLAN_ROLES else None)
+        return d
+
     @model_validator(mode="after")
     def complete(self):
         if self.method == "role":

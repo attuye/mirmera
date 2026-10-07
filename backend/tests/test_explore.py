@@ -413,3 +413,29 @@ def test_how_mirmera_decides_from_the_facts():
     assert decide(r, rules, full, refused)[0] == "breaks"  # a Ge'ez name refused, everything filled
     assert decide(r, rules, gap, refused)[0] == "unclear"  # a field was empty: may be the reason
     assert decide(facts(answer_means="other"), rules, full, said)[0] == "unclear"
+
+
+
+def test_a_mixed_up_locator_is_read_as_meant(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """Seen with qwen3:8b: {"method": "label", "name": "Document number"} three times running, which
+    stopped the run ("unusable reply"). It means the field labelled Document number."""
+    project, charter = kyc
+    scripted(monkeypatch, [
+        step("A name", kind="fill", locator={"method": "label", "name": "Full name"}, value="John Smith"),
+        step("Submit", kind="click", locator={"method": "Role", "role": "Button", "value": "Verify"}),
+        step("Covered", kind="done", summary="Done."),
+    ])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 5}).json())
+    assert run["status"] == "finished", run["detail"]
+    assert [s["status"] for s in run["steps"]] == ["ok", "ok", "ok"]
+    assert run["steps"][0]["action"] == 'fill label "Full name" = "John Smith"'
+    assert run["steps"][1]["action"] == 'click button "Verify"'
+
+
+def test_locators_that_still_cant_be_read_are_refused():
+    import pytest as _pytest
+    from pydantic import ValidationError
+    with _pytest.raises(ValidationError):
+        schemas.PlanLocator.model_validate({"method": "label"})
+    with _pytest.raises(ValidationError):
+        schemas.PlanLocator.model_validate({"method": "role", "role": "marquee", "name": "x"})
