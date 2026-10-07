@@ -7,6 +7,7 @@ import pytest
 
 from app import models
 from app.database import SessionLocal
+from app.routers import runner as runner_api
 from tests.test_regression import App, app_url, bug_present  # noqa: F401  (fixtures)
 from tests.test_reproduce import Scripted, step
 from tests.test_runner import chromium_available, headless_runner  # noqa: F401
@@ -207,3 +208,30 @@ def test_a_tester_can_watch_the_agent_and_replay_each_step(client, kyc, monkeypa
     picture = client.get(f"/exploration-runs/{run['id']}/steps/2/frame")
     assert picture.status_code == 200 and picture.content[:2] == b"\xff\xd8"
     assert client.get(f"/exploration-runs/{run['id']}/steps/3/frame").status_code == 404
+
+
+def test_the_run_is_filmed_and_each_step_knows_where_it_is_in_the_film(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """Watch a run like a video: the recording plays from any step (the player asks for byte ranges)."""
+    project, charter = kyc
+    scripted(monkeypatch, [
+        step("A name", kind="fill", locator={"method": "label", "value": "Full name"}, value="John Smith"),
+        step("Submit", kind="click", locator=VERIFY),
+        step("Covered", kind="done", summary="Filmed."),
+    ])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 5}).json())
+    assert run["video"] and run["video"].endswith(".webm"), run["detail"]
+    times = [s["t"] for s in run["steps"]]
+    assert times == sorted(times) and times[0] >= 0  # in the order they happened
+
+    whole = client.get(f"/exploration-runs/{run['id']}/video")
+    assert whole.status_code == 200 and whole.headers["content-type"] == "video/webm"
+    assert whole.content[:4] == b"\x1a\x45\xdf\xa3"  # a WebM (Matroska) file
+    size = len(whole.content)
+    part = client.get(f"/exploration-runs/{run['id']}/video", headers={"Range": "bytes=10-19"})
+    assert part.status_code == 206 and part.content == whole.content[10:20]
+    assert part.headers["content-range"] == f"bytes 10-19/{size}"
+    tail = client.get(f"/exploration-runs/{run['id']}/video", headers={"Range": "bytes=-5"})
+    assert tail.status_code == 206 and tail.content == whole.content[-5:]
+    assert client.get(f"/exploration-runs/{run['id']}/video", headers={"Range": f"bytes={size}-"}).status_code == 416
+    leftovers = [p.name for p in (runner_api.session_folder(run["session_id"])).iterdir() if p.is_dir()]
+    assert leftovers == []  # the recording's temporary folder is gone

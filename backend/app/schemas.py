@@ -1264,6 +1264,7 @@ class ExplorationRunOut(BaseModel):
     started_by: Optional[str] = None
     ai_provider: Optional[str] = None
     ai_model: Optional[str] = None
+    video: Optional[str] = None  # set when its recording was kept: GET /exploration-runs/{id}/video
     created_at: datetime
     finished_at: Optional[datetime] = None
 

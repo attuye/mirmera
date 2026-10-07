@@ -1,7 +1,8 @@
 """Exploration agent endpoints: let Mirmera explore a charter, follow it, stop it."""
 import asyncio
+import re
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session as DBSession
 
@@ -137,3 +138,27 @@ def step_frame(run_id: str, n: int, db: DBSession = Depends(get_db)):
     if not path or not path.is_relative_to(runner_api.evidence_root()) or not path.is_file():
         raise HTTPException(404, "No picture for this step")
     return FileResponse(path, media_type="image/jpeg")
+
+
+@router.get("/exploration-runs/{run_id}/video")
+def video(run_id: str, request: Request, db: DBSession = Depends(get_db)):
+    """The run's recording (WebM). Answers byte ranges, so the player can jump to any step."""
+    run = _run_or_404(db, run_id)
+    folder = runner_api.session_folder(run.session_id) if run.session_id else None
+    path = (folder / run.video).resolve() if folder and run.video else None
+    if not path or not path.is_relative_to(runner_api.evidence_root()) or not path.is_file():
+        raise HTTPException(404, "No recording for this run")
+    size = path.stat().st_size
+    wanted = re.match(r"bytes=(\d*)-(\d*)$", request.headers.get("range", "").strip())
+    if not wanted or wanted.groups() == ("", ""):
+        return FileResponse(path, media_type="video/webm", headers={"Accept-Ranges": "bytes"})
+    first, last = wanted.groups()
+    start = int(first) if first else max(0, size - int(last))
+    end = min(int(last), size - 1) if first and last else size - 1
+    if start >= size or start > end:
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+    with path.open("rb") as f:
+        f.seek(start)
+        chunk = f.read(end - start + 1)
+    return Response(chunk, status_code=206, media_type="video/webm", headers={
+        "Content-Range": f"bytes {start}-{end}/{size}", "Accept-Ranges": "bytes", "Content-Length": str(len(chunk))})
