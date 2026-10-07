@@ -8,6 +8,7 @@ import BrowserPanel, { useRunner } from '../components/BrowserPanel'
 import ApiPanel from '../components/ApiPanel'
 import { Screenshot, clock } from '../components/Evidence'
 import TestIdeas from '../components/TestIdeas'
+import AgentBrowser from '../components/AgentBrowser'
 import HeuristicChips from '../components/HeuristicChips'
 import { useProject, useProjectPath, useSessionProject } from '../project'
 
@@ -255,6 +256,7 @@ export default function ActiveSession() {
 
         <div style={{ flex: 1, display: 'flex', padding: '22px 32px', gap: 24 }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            {agentRun && <div style={{ marginBottom: 16 }}><AgentBrowser run={agentRun} /></div>}
             <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 11, padding: '14px 16px', marginBottom: 16 }}>
               <textarea
                 ref={box}

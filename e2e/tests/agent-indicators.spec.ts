@@ -24,6 +24,7 @@ test('Mirmera at work: on the stories list and beside the session clock', async 
     exploration: { run_id: 'run-1', status: 'running', charter_id: charter.id, mission, session_id: session.id, steps_used: 12,
       max_steps: 25, actions: 12, recent: steps.slice(-6), bugs: [], summary: null, detail: null },
   }
+  await page.route('**/exploration-runs/run-1/frame?*', (route) => route.fulfill({ status: 204 }))  // no live picture here
   await page.route('**/workspaces/*/agent-activity', (route) => route.fulfill({ json: { items: [running], running: 1 } }))
 
   await test.step('the story Mirmera is on says so in the list; the others do not', async () => {

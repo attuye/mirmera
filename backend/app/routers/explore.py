@@ -1,7 +1,8 @@
 """Exploration agent endpoints: let Mirmera explore a charter, follow it, stop it."""
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session as DBSession
 
 from app import models, schemas
@@ -106,3 +107,33 @@ def cancel(run_id: str, db: DBSession = Depends(get_db)):
     run.cancel_requested = True  # the agent stops before its next step
     db.commit()
     return run
+
+
+# ---------- watching the agent's browser ----------
+
+@router.get("/exploration-runs/{run_id}/frame")
+def live_frame(run_id: str, after: int = -1, db: DBSession = Depends(get_db)):
+    """The agent's browser right now, as a JPEG. 204 when there is nothing newer than ?after=<seq>
+    (so a page can check often for little), or nothing to show: not started yet, or stopped
+    (X-Frame-Live: 0; its steps' pictures show what it did)."""
+    _run_or_404(db, run_id)
+    live = agent.LIVE.get(run_id)
+    if not live or live.frame is None:
+        return Response(status_code=204, headers={"X-Frame-Seq": "-1", "X-Frame-Live": "1" if live else "0"})
+    if live.seq <= after:
+        return Response(status_code=204, headers={"X-Frame-Seq": str(live.seq)})
+    return Response(live.frame, media_type="image/jpeg",
+                    headers={"X-Frame-Seq": str(live.seq), "X-Frame-Url": live.url, "Cache-Control": "no-store"})
+
+
+@router.get("/exploration-runs/{run_id}/steps/{n}/frame")
+def step_frame(run_id: str, n: int, db: DBSession = Depends(get_db)):
+    """The page as the agent saw it when it chose step n."""
+    run = _run_or_404(db, run_id)
+    step = next((s for s in run.steps or [] if s.get("n") == n), None)
+    name = (step or {}).get("frame")
+    folder = runner_api.session_folder(run.session_id) if run.session_id else None
+    path = (folder / name).resolve() if folder and name else None
+    if not path or not path.is_relative_to(runner_api.evidence_root()) or not path.is_file():
+        raise HTTPException(404, "No picture for this step")
+    return FileResponse(path, media_type="image/jpeg")

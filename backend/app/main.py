@@ -54,6 +54,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=True,  # the sign-in cookie
+    expose_headers=["X-Frame-Seq", "X-Frame-Url", "X-Frame-Live"],  # the live view of Mirmera's browser reads them
 )
 GUARDED = [Depends(guard)]  # every route below checks who is calling and their role in the project's workspace
 

@@ -160,3 +160,50 @@ def test_it_does_not_repeat_steps_that_teach_nothing(client, kyc, monkeypatch, c
     with SessionLocal() as db:  # refused steps are not part of the session's recording
         actions = [e for e in db.query(models.Evidence).filter_by(session_id=run["session_id"]).all() if e.kind == "action"]
         assert len(actions) == 4
+
+
+def test_a_tester_can_watch_the_agent_and_replay_each_step(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """Like watching a colleague's screen: the agent's browser live while it works, then each
+    step's picture, with a box where it was about to act."""
+    import asyncio
+
+    from app.config import settings
+    project, charter = kyc
+    seen = {}
+    provider = scripted(monkeypatch, [
+        step("A name", kind="fill", locator={"method": "label", "value": "Full name"}, value="John Smith"),
+        step("Submit", kind="click", locator=VERIFY),
+        step("Covered", kind="done", summary="Watched."),
+    ])
+    plain = provider.complete
+
+    async def watched(system, user, **kwargs):
+        if len(provider.users) == 1:  # while it works on its second step
+            def meanwhile():
+                runs = client.get(f"/charters/{charter['id']}/exploration").json()
+                live = client.get(f"/exploration-runs/{runs['id']}/frame")
+                seq = int(live.headers["X-Frame-Seq"])
+                newest = client.get(f"/exploration-runs/{runs['id']}/frame", params={"after": 10**9})  # nothing newer
+                origin = settings.cors_origins.split(",")[0].strip()  # the frontend reads the headers cross-origin
+                cors = client.get(f"/exploration-runs/{runs['id']}/frame", headers={"Origin": origin})
+                seen.update(live=live, seq=seq, again=newest, exposed=cors.headers.get("access-control-expose-headers", ""))
+            await asyncio.to_thread(meanwhile)
+        return await plain(system, user, **kwargs)
+    provider.complete = watched
+
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 5}).json())
+    live = seen["live"]
+    assert live.status_code == 200 and live.headers["content-type"] == "image/jpeg" and live.content[:2] == b"\xff\xd8"
+    assert live.headers["X-Frame-Url"].startswith("http://127.0.0.1")
+    assert "X-Frame-Seq" in seen["exposed"] and "X-Frame-Url" in seen["exposed"]
+    assert seen["seq"] >= 1 and seen["again"].status_code == 204  # nothing newer to send: cheap to ask often
+    stopped = client.get(f"/exploration-runs/{run['id']}/frame")  # stopped: its steps' pictures show what it did
+    assert stopped.status_code == 204 and stopped.headers["X-Frame-Live"] == "0"
+
+    fill, click, done = run["steps"]
+    assert fill["frame"] and click["frame"] and "frame" not in done
+    x, y, w, h = click["box"]  # where it was about to click, on a 1280×800 page
+    assert 0 <= x < 1280 and 0 <= y < 800 and w > 10 and h > 5
+    picture = client.get(f"/exploration-runs/{run['id']}/steps/2/frame")
+    assert picture.status_code == 200 and picture.content[:2] == b"\xff\xd8"
+    assert client.get(f"/exploration-runs/{run['id']}/steps/3/frame").status_code == 404

@@ -43,6 +43,58 @@ RUN_TIMEOUT_S = 900
 MAX_BAD_REPLIES = 3
 
 ACTIVE: set[str] = set()  # run ids being worked on in this process
+VIEWPORT = {"width": 1280, "height": 800}  # fixed, so a target's box can be drawn on any frame
+
+
+@dataclass
+class Live:
+    """What the agent's browser shows right now, for watching it work."""
+    seq: int = 0
+    frame: bytes | None = None
+    url: str = ""
+
+
+LIVE: dict[str, Live] = {}  # run id -> its latest frame, while it runs
+
+
+async def _start_screencast(page, live: Live) -> None:
+    """Chromium sends a frame whenever the page repaints: kept as the latest frame."""
+    import asyncio
+    import base64
+    try:
+        cdp = await page.context.new_cdp_session(page)
+
+        async def on_frame(params):
+            live.frame, live.url = base64.b64decode(params["data"]), page.url
+            live.seq += 1
+            try:
+                await cdp.send("Page.screencastFrameAck", {"sessionId": params["sessionId"]})
+            except Exception:
+                pass
+
+        cdp.on("Page.screencastFrame", lambda params: asyncio.ensure_future(on_frame(params)))
+        await cdp.send("Page.startScreencast", {"format": "jpeg", "quality": 60,
+                                              "maxWidth": VIEWPORT["width"], "maxHeight": VIEWPORT["height"]})
+    except Exception as err:  # watching is a nicety: the run goes on without it
+        logger.info("No live view for this run: %s", _first_line(err))
+
+
+async def _step_frame(page, folder: Path, run_id: str, n: int, a: schemas.ExploreAction) -> dict:
+    """The page as the agent saw it when it chose step n, and where it is about to act."""
+    out: dict = {}
+    try:
+        name = f"explore-{run_id[:8]}-step-{n}.jpg"
+        folder.mkdir(parents=True, exist_ok=True)
+        await page.screenshot(path=str(folder / name), type="jpeg", quality=60)
+        out["frame"] = name
+        if a.locator and a.kind in ("click", "fill", "fill_secret", "select", "check", "uncheck", "press"):
+            from app.regression.replay import _locator
+            box = await _locator(page, a.locator.model_dump(exclude_none=True)).first.bounding_box(timeout=1_000)
+            if box:
+                out["box"] = [round(box[k]) for k in ("x", "y", "width", "height")]
+    except Exception:
+        pass
+    return out
 
 
 @dataclass
@@ -252,7 +304,9 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=headless, executable_path=executable_path or None)
             try:
-                page = await (await browser.new_context()).new_page()
+                page = await (await browser.new_context(viewport=VIEWPORT)).new_page()
+                live = LIVE[run_id] = Live()
+                await _start_screencast(page, live)
                 signals = Signals()
                 signals.attach(page)
                 seen_signals: dict[str, int] = {}
@@ -301,6 +355,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     a = step.action
                     entry = {"n": len(history) + 1, "thought": step.thought, "action": describe(a), "kind": a.kind,
                              "status": "ok", "detail": "", "url": page.url}
+                    if a.kind != "done":
+                        entry |= await _step_frame(page, folder, run_id, entry["n"], a)
 
                     if a.kind == "done":
                         history.append(entry)
@@ -381,6 +437,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
             _save(run_id, steps=list(history), bug_ids=list(bug_ids), finished_at=utcnow(), **final)
         finally:
             ACTIVE.discard(run_id)
+            LIVE.pop(run_id, None)  # from here on, its steps' frames show what it did
 
 
 def _wrap_up(session_id: str, final: dict, history: list[dict], bug_ids: list[str]) -> None:
