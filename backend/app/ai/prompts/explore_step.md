@@ -78,6 +78,11 @@ How to work:
   adjust; never send the same step again.
 - Finish with done before the steps run out.
 
+<ideas> lists the experienced tester's variations for the fields on this
+page that nobody has submitted yet: pick from them (one field at a time, the
+rest of the form valid). The charter may list earlier_runs: don't repeat what
+they found; go where they didn't. It may give an app_map of the app's pages.
+
 Your pair (a tester watching you, or Mirmera itself) may write in <pair>:
 that is what to try next, so do it, unless it would leave the app or do
 something irreversible.

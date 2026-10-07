@@ -35,8 +35,18 @@ def _run_or_404(db: DBSession, run_id: str) -> models.ExplorationRun:
     return run
 
 
+def app_map_text(db: DBSession, project_id: str) -> str | None:
+    """The latest survey of the app, in a few lines for the agent."""
+    from app import ai_jobs
+    job = ai_jobs.latest(db, project_id, "app_map")
+    if not job or job.status != "done" or not job.result:
+        return None
+    return "; ".join(p["summary"] for p in job.result.get("pages", [])[:20])[:1500] or None
+
+
 def start_exploration(db: DBSession, charter: models.Charter, *, started_by: str, base_url: str | None = None,
-                      provider_name: str | None = None, max_steps: int = 25) -> models.ExplorationRun:
+                      provider_name: str | None = None, max_steps: int = 25,
+                      conditions: dict | None = None) -> models.ExplorationRun:
     """Opens a session for the agent on the charter and starts it on the runner's loop."""
     project = charter.project
     base = (base_url or project.app_url or "").strip().rstrip("/")
@@ -56,12 +66,15 @@ def start_exploration(db: DBSession, charter: models.Charter, *, started_by: str
         risks=[{"ref": r.ref, "title": r.title, "failure_mode": r.failure_mode} for r in charter.risks],
         story=artifact_text(story) if story else None,
         criteria=agent.criteria_from(story.description) if story else [],
+        earlier=agent.earlier_runs(db, charter),
+        app_map=app_map_text(db, project.id),
     )
     session = models.Session(charter_id=charter.id, tester_id=agent.TESTER)
     db.add(session)
     db.flush()
     run = models.ExplorationRun(project_id=project.id, charter_id=charter.id, session_id=session.id, status="running",
                                 start_url=base + "/", max_steps=max_steps, steps=[], bug_ids=[], started_by=started_by,
+                                conditions=conditions or None,
                                 ai_provider=provider.name, ai_model=provider.model, prompt_version=agent.PROMPT_VERSION)
     db.add(run)
     db.commit()
@@ -72,7 +85,7 @@ def start_exploration(db: DBSession, charter: models.Charter, *, started_by: str
         agent.run_agent(run.id, ctx, provider, session_id=session.id, charter_id=charter.id, start_url=run.start_url,
                         origins={origin(base)}, max_steps=max_steps, headless=True,
                         executable_path=settings.runner_chromium_path, folder=runner_api.session_folder(session.id),
-                        checker=checker),
+                        checker=checker, conditions=conditions),
         manager.loop._get(),
     )
     return run
@@ -86,7 +99,8 @@ def explore(charter_id: str, payload: schemas.ExploreRequest, user: models.User 
         raise HTTPException(404, "Charter not found")
     try:
         return start_exploration(db, charter, started_by=user.name, base_url=payload.base_url,
-                                 provider_name=payload.provider, max_steps=payload.max_steps)
+                                 provider_name=payload.provider, max_steps=payload.max_steps,
+                                 conditions=payload.conditions.model_dump(exclude_none=True) if payload.conditions else None)
     except ExploreProblem as err:
         raise HTTPException(409, str(err))
 

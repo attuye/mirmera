@@ -739,6 +739,7 @@ export interface WorkspaceKey {
   set: boolean; shown: string | null; unreadable: boolean; updated_at: string | null; updated_by: string | null; server_fallback: boolean
 }
 export interface WorkspaceKeys { keys: WorkspaceKey[]; server_keys_for_all: boolean }
+export interface ExploreConditions { device?: 'desktop' | 'phone'; network?: 'normal' | 'slow'; locale?: string; timezone?: string }
 export interface ExplorationRun {
   id: string; project_id: string; charter_id: string; session_id: string | null
   status: 'running' | 'finished' | 'cancelled' | 'error'; start_url: string; max_steps: number
@@ -749,6 +750,7 @@ export interface ExplorationRun {
   video?: string | null
   /** What a tester (or Mirmera) asked it to try next; step = the step that took it up. */
   hints?: { id: string; text: string; by: string; at: string; step: number | null }[]
+  conditions?: ExploreConditions | null
 }
 export interface AgentStage { key: string; label: string; status: 'done' | 'active' | 'todo' | 'skipped' | 'failed' | 'cancelled' }
 export interface AgentStep { n: number; thought: string; action: string; kind: string; status: string; detail: string }
@@ -762,7 +764,9 @@ export interface AgentActivity {
     bugs: { id: string; title: string; severity: string }[]; summary: string | null; detail: string | null
   } | null
 }
-export type AiJobKind = 'product_model' | 'risk_analysis' | 'charters_from_risks'
+export type AiJobKind = 'product_model' | 'risk_analysis' | 'charters_from_risks' | 'app_map'
+export interface AppMapPage { path: string; url: string; title: string; heading: string; fields: { label: string; type: string; required?: boolean; options?: string[] }[]; buttons: string[]; summary?: string; error?: string }
+export interface AppMap { base_url: string; pages: AppMapPage[]; forms: number }
 export interface AiJob<T = unknown> {
   id: string; project_id: string; kind: AiJobKind; label: string; status: 'running' | 'done' | 'failed'
   request: Record<string, unknown>; result: T | null; error: string | null; started_by: string | null
@@ -1027,7 +1031,7 @@ export const api = {
     request<WorkspaceKeys>(`/workspaces/${workspaceId}/keys`, { method: 'PUT', body: JSON.stringify({ values }) }),
   workspaceActivity: (workspaceId: string) => request<AgentActivityList>(`/workspaces/${workspaceId}/agent-activity`),
   storyActivity: (storyId: string) => request<AgentActivityList>(`/stories/${storyId}/agent-activity`),
-  exploreCharter: (charterId: string, body: { max_steps?: number; base_url?: string } = {}) =>
+  exploreCharter: (charterId: string, body: { max_steps?: number; base_url?: string; conditions?: ExploreConditions } = {}) =>
     request<ExplorationRun>(`/charters/${charterId}/explore`, { method: 'POST', body: JSON.stringify(body) }),
   charterExploration: (charterId: string) => request<ExplorationRun | null>(`/charters/${charterId}/exploration`),
   explorationRun: (runId: string) => request<ExplorationRun>(`/exploration-runs/${runId}`),

@@ -27,11 +27,13 @@ INTERRUPTED = "Interrupted: the backend stopped while the AI was working. Start 
 
 
 def _kinds():
+    from app.agent import survey
     from app.routers import risks
     return {
         "product_model": ("Build the product model", risks.build_product_model, schemas.ProductModelRequest),
         "risk_analysis": ("Propose risks", risks.analyze_risks, schemas.RiskAnalyzeRequest),
         "charters_from_risks": ("Draft charters from risks", risks.charters_from_risks, schemas.ChartersFromRisksRequest),
+        "app_map": ("Survey the app", survey.survey, schemas.AppMapRequest),
     }
 
 

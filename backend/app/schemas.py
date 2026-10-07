@@ -1352,10 +1352,19 @@ class LLMExploreStep(BaseModel):
         return d
 
 
+class ExploreConditions(BaseModel):
+    """How the agent's browser is set up, like a tester picking up another device."""
+    device: Literal["desktop", "phone"] = "desktop"
+    network: Literal["normal", "slow"] = "normal"
+    locale: Optional[str] = Field(default=None, pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$")  # e.g. "am-ET"
+    timezone: Optional[str] = Field(default=None, pattern=r"^[A-Za-z_]+(/[A-Za-z_+\-0-9]+)*$")  # e.g. "Africa/Addis_Ababa"
+
+
 class ExploreRequest(BaseModel):
     base_url: Optional[str] = Field(default=None, pattern=r"^https?://")  # default: the project's app URL
     provider: Optional[str] = None
     max_steps: int = Field(default=25, ge=3, le=60)
+    conditions: Optional[ExploreConditions] = None
 
 
 class ExplorationRunOut(BaseModel):
@@ -1376,6 +1385,7 @@ class ExplorationRunOut(BaseModel):
     ai_model: Optional[str] = None
     video: Optional[str] = None  # set when its recording was kept: GET /exploration-runs/{id}/video
     hints: list[dict] = []  # what a tester (or Mirmera) asked it to try next, and the step that took it up
+    conditions: Optional[dict] = None  # device, network, locale, timezone it browsed with
     created_at: datetime
     finished_at: Optional[datetime] = None
 
@@ -2307,7 +2317,7 @@ class AgentActivityList(BaseModel):
 # ---------- AI jobs: AI steps that survive a refresh ----------
 
 class AiJobCreate(BaseModel):
-    kind: Literal["product_model", "risk_analysis", "charters_from_risks"]
+    kind: Literal["product_model", "risk_analysis", "charters_from_risks", "app_map"]
     request: dict = Field(default_factory=dict)
 
 
@@ -2324,3 +2334,9 @@ class AiJobOut(BaseModel):
     started_by: Optional[str] = None
     created_at: datetime
     finished_at: Optional[datetime] = None
+
+
+class AppMapRequest(BaseModel):
+    """Survey the app: follow its links (same site), read its pages and forms, change nothing."""
+    base_url: Optional[str] = Field(default=None, pattern=r"^https?://")
+    max_pages: int = Field(default=25, ge=1, le=60)

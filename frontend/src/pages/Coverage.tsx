@@ -7,7 +7,8 @@ import Sidebar from '../components/Sidebar'
 import SprintPicker from '../components/SprintPicker'
 import { utcDate } from '../components/Evidence'
 import { ErrorLine, errorText, quietButton } from '../components/ui'
-import { api, CoverageArea, CoverageFlag, CoverageMap, CoveragePage } from '../api/client'
+import { api, AppMap, CoverageArea, CoverageFlag, CoverageMap, CoveragePage } from '../api/client'
+import { elapsed, useAiJob } from '../components/useAiJob'
 import { useProject, useProjectPath } from '../project'
 
 const FLAG: Record<CoverageFlag, { label: string; fg: string; bg: string; hint: string }> = {
@@ -108,6 +109,44 @@ function Areas({ areas }: { areas: CoverageArea[] }) {
   )
 }
 
+/** The app's map, from a survey that opens every page it can reach and changes nothing:
+ *  what's there to test, and which pages no session has opened yet. */
+function AppMapSection({ projectId, tested }: { projectId: string; tested: Set<string> }) {
+  const job = useAiJob<AppMap>(projectId, 'app_map')
+  const result = job.job?.status === 'done' ? job.job.result : null
+  const untested = result ? result.pages.filter((p) => !tested.has(p.path)).length : 0
+  return (
+    <section aria-label="App map" style={{ marginTop: 20, border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px' }}>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
+        <h2 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>App map</h2>
+        <span style={{ fontSize: 12, color: 'var(--text-tertiary)', flex: 1 }}>
+          {result ? `${result.pages.length} page${result.pages.length === 1 ? '' : 's'}, ${result.forms} with a form · ${untested} never opened in a session · surveyed ${elapsed(job.job!.finished_at ?? job.job!.created_at)} ago`
+            : 'Mirmera opens every page it can reach from the app\'s address and reads its forms. It never submits anything.'}
+        </span>
+        <button onClick={() => job.start({})} disabled={job.running} style={{ ...quietButton, fontSize: 12, padding: '4px 10px' }}>
+          {job.running ? `Surveying… ${job.since}` : result ? 'Survey again' : 'Survey the app'}
+        </button>
+      </div>
+      <ErrorLine message={job.error} />
+      {result && (
+        <ul aria-label="Pages in the app" style={{ listStyle: 'none', margin: '10px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {result.pages.map((p) => (
+            <li key={p.path} aria-label={p.path} style={{ fontSize: 12.5, display: 'flex', gap: 10, alignItems: 'baseline' }}>
+              <span className="mono" style={{ minWidth: 120 }}>{p.path}</span>
+              <span style={{ flex: 1, color: 'var(--text-secondary)' }}>
+                {p.heading || p.title || 'untitled'}
+                {p.fields.length > 0 && <span style={{ color: 'var(--text-tertiary)' }}> · {p.fields.map((f) => f.label).join(', ')}</span>}
+                {p.error && <span style={{ color: 'var(--warning)' }}> · couldn't open: {p.error}</span>}
+              </span>
+              <span style={{ fontSize: 11.5, color: tested.has(p.path) ? 'var(--accent)' : 'var(--warning)' }}>{tested.has(p.path) ? 'tested' : 'never tested'}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 export default function Coverage() {
   const { project } = useProject()
   const path = useProjectPath()
@@ -152,6 +191,8 @@ export default function Coverage() {
           </div>
         </div>
         <ErrorLine message={error} />
+
+        <AppMapSection projectId={project.id} tested={new Set((map?.pages ?? []).map((p) => p.path))} />
 
         {map && (
           <>
