@@ -16,6 +16,7 @@ before a draft is made, and it has a step budget, a time limit and can be cancel
 """
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -36,7 +37,8 @@ from app.timeutil import utcnow
 logger = logging.getLogger(__name__)
 
 PROMPT = (Path(__file__).resolve().parents[1] / "ai" / "prompts" / "explore_step.md").read_text(encoding="utf-8")
-PROMPT_VERSION = "explore-step-v2"
+PROMPT_VERSION = "explore-step-v3"
+JUDGE_PROMPT = (Path(__file__).resolve().parents[1] / "ai" / "prompts" / "explore_judge.md").read_text(encoding="utf-8")
 TESTER = "Mirmera agent"
 HISTORY_LIMIT = 20
 RUN_TIMEOUT_S = 900
@@ -136,6 +138,38 @@ class CharterContext:
     oracles: list[str] = field(default_factory=list)
     risks: list[dict] = field(default_factory=list)  # ref, title, failure_mode
     story: str | None = None  # the story's claims, when the charter belongs to one
+    criteria: list[str] = field(default_factory=list)  # its acceptance criteria, one rule each
+
+    def has_rules(self) -> bool:
+        return bool(self.criteria or self.risks)
+
+
+CRITERIA_HEADING = re.compile(r"^\W*acceptance criteria\W*$", re.I)
+BULLET = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
+
+
+def criteria_from(story: str | None) -> list[str]:
+    """The story's acceptance criteria: the lines under an "Acceptance criteria" heading
+    (bulleted or not), or else its bulleted lines."""
+    if not story:
+        return []
+    lines = [l.strip() for l in story.splitlines()]
+    out, inside = [], False
+    for line in lines:
+        if CRITERIA_HEADING.match(line) or re.match(r"^\W*acceptance criteria\s*:", line, re.I):
+            inside = True
+            rest = line.split(":", 1)[1].strip() if ":" in line else ""
+            if rest:
+                out.append(rest)
+            continue
+        if inside:
+            if line.startswith("#") or (line.endswith(":") and not BULLET.match(line)):
+                break  # the next section
+            if line:
+                out.append(BULLET.sub("", line))
+    if not out:
+        out = [BULLET.sub("", l) for l in lines if BULLET.match(l)]
+    return [c[:300] for c in out if len(c) > 3][:20]
 
 
 def _save(run_id: str, **fields) -> None:
@@ -260,6 +294,8 @@ def _user_message(ctx: CharterContext, history: list[dict], observation: str, st
     lines = [f"{h['n']}. {h['action']} -> {h['status']}{': ' + h['detail'] if h['detail'] else ''}"
              for h in history[-HISTORY_LIMIT:]]
     charter = {"mission": ctx.mission, "test_ideas": ctx.test_ideas, "oracles": ctx.oracles, "risks": ctx.risks}
+    if ctx.criteria:
+        charter["acceptance_criteria"] = [f"AC{i}: {c}" for i, c in enumerate(ctx.criteria, 1)]
     if ctx.story:
         charter["story"] = ctx.story
     return (
@@ -283,6 +319,29 @@ def _record(session_id: str, signals: list[Signal]) -> None:
     from app.routers.runner import store_signals
     with SessionLocal() as db:
         store_signals(db, session_id, signals)
+
+
+# ---------- checking what the app answered ----------
+
+def sent_text(before: FormState) -> str:
+    """The form as it was submitted, in one line (passwords only as "(filled)")."""
+    return "; ".join(f'{f["label"][:60]} = {f["value"][:80] or "(empty)"}' for f in before.fields)[:900]
+
+
+async def judge(provider: LLMProvider, ctx: CharterContext, before: FormState, said: list[str], url: str
+                ) -> schemas.LLMExploreJudgement | None:
+    """Does what the app just answered break one of the story's rules? A separate, focused
+    question: a small model that steers the browser often walks past a wrong answer."""
+    rules = [f"AC{i}: {c}" for i, c in enumerate(ctx.criteria, 1)] + \
+            [f"{r['ref']}: {r['title']} ({r.get('failure_mode') or ''})" for r in ctx.risks]
+    user = (f"Today: {utcnow().date().isoformat()}\n\n<rules>\n{defang(chr(10).join(rules))}\n</rules>\n\n"
+            f"<sent>\n{defang(sent_text(before)) or '(no form)'}\n</sent>\n\n"
+            f"<answer>\nPage: {defang(url)}\n" + "\n".join(f"Says: {defang(m[:300])}" for m in said) + "\n</answer>")
+    try:
+        return await complete_json(provider, JUDGE_PROMPT, user, schemas.LLMExploreJudgement, task="explore_judge", max_tokens=500)
+    except (LLMOutputError, ProviderError) as err:
+        logger.info("Couldn't check an answer: %s", _first_line(err))
+        return None
 
 
 def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evidence: str, steps: list[dict],
@@ -444,11 +503,15 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         await _back_into_app(page, entry["url"], signals)
                         entry["detail"] = (entry["detail"] + "; " if entry["detail"] else "") + \
                             f"that left the app ({origin(left)}), so the browser went back"
+                    said: list[str] = []  # what the app answered this step
                     if entry["status"] == "ok" and not page.is_closed():
                         after = await form_state(page)
                         said = [m for m in after.messages if m not in before.messages]
                         if said:  # what the app answered: kept in the history, so the AI can compare tries
                             entry["detail"] = "the page now says " + "; ".join(f'"{m[:160]}"' for m in said[:3])
+                        elif a.kind in ("click", "press") and after.messages:  # a submit answered the same as before
+                            said = after.messages
+                            entry["detail"] = "the page still says " + "; ".join(f'"{m[:160]}"' for m in said[:3])
                     if entry["status"] == "ok":
                         if a.kind == "goto":
                             steps.append({"type": "goto", "url": a.url})
@@ -456,8 +519,36 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         elif rec := recorded_action(a):
                             steps.append({"type": "action", "action": rec, "url": entry["url"]})
                             _record(session_id, [Signal("action", describe_action(rec), entry["url"], now(), rec)])
+                    if said and ctx.has_rules() and a.kind in ("click", "press"):  # a submit, and the app answered
+                        j = await judge(provider, ctx, before, said, page.url)
+                        if j:
+                            entry["judged"] = j.verdict
+                            note = f"Sent: {sent_text(before)[:400]}. The app said: \"{said[0][:160]}\"."
+                            if j.verdict == "breaks":
+                                note += f" Breaks \"{j.criterion}\": {j.why}"
+                                key = ("rule", (j.criterion or "").lower())
+                                if key not in reported:
+                                    problem = schemas.ExploreProblem(
+                                        title=j.title, expected=j.expected, actual=j.actual, severity=j.severity,
+                                        symptom=schemas.Symptom(kind="text_visible", value=said[0][:300],
+                                                                explanation=f"Breaks: {j.criterion}"[:600]))
+                                    ok, evidence = await verify(page, problem.symptom, signals)
+                                    if ok:
+                                        shot = folder / f"explore-{run_id[:8]}-{len(bug_ids) + 1}.png"
+                                        try:
+                                            await page.screenshot(path=str(shot))
+                                        except Exception:
+                                            shot = None
+                                        bug_ids.append(_draft_bug(session_id, charter_id, problem,
+                                                                  f"{evidence}. Breaks: {j.criterion}", steps, page.url, shot, provider))
+                                        reported.add(key)
+                                        entry["status"] = "drafted"
+                                entry["detail"] += f'; breaks "{(j.criterion or "")[:120]}"'
+                            elif j.verdict == "consistent":
+                                note += f" As the rules expect. {j.why}".rstrip()
+                            _note(session_id, "test", note)
                     history.append(entry)
-                    _save(run_id, steps=list(history))
+                    _save(run_id, steps=list(history), bug_ids=list(bug_ids))
                 else:
                     final = {"status": "finished", "detail": f"Used all {max_steps} steps."}
                 drain_signals()

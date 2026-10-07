@@ -6,7 +6,8 @@ test('exploration agent: Mirmera explores a charter and leaves a session and a b
   const project = await api.newProject('AddisVerify Explore')
   await request.patch(`${API_URL}/projects/${project.id}`, { data: { app_url: 'http://localhost:5190' } })
   const story = await (await request.post(`${API_URL}/projects/${project.id}/stories`, { data: { title: 'Search uploaded documents', key: 'EXP-1' } })).json()
-  const charter = await api.charter(project.id, 'Explore document search with odd names to discover what fails')
+  const risk = await api.risk(project.id, 'Search breaks on non-Latin names', 4, 3)
+  const charter = await api.charter(project.id, 'Explore document search with odd names to discover what fails', [risk.id])
   await request.put(`${API_URL}/stories/${story.id}/charters`, { data: { ids: [charter.id] } })
 
   await test.step('let Mirmera explore the charter from the story', async () => {
@@ -48,5 +49,7 @@ test('exploration agent: Mirmera explores a charter and leaves a session and a b
     await left.getByRole('button', { name: 'Review session' }).click()
     await expect(page.getByText('GET /api/documents fails with 500').first()).toBeVisible()
     await expect(page.getByRole('button', { name: 'Resume' })).toBeVisible()  // paused, waiting for a tester to end it
+    // After its submit, Mirmera checked the answer against the charter's risks and noted what was sent and seen.
+    await expect(page.getByText(/^Sent: Search documents = .*The app said: "No documents match/)).toBeVisible()
   })
 })

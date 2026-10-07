@@ -235,3 +235,67 @@ def test_the_run_is_filmed_and_each_step_knows_where_it_is_in_the_film(client, k
     assert client.get(f"/exploration-runs/{run['id']}/video", headers={"Range": f"bytes={size}-"}).status_code == 416
     leftovers = [p.name for p in (runner_api.session_folder(run["session_id"])).iterdir() if p.is_dir()]
     assert leftovers == []  # the recording's temporary folder is gone
+
+
+def test_each_answer_is_checked_against_the_story_and_a_broken_rule_becomes_a_bug(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """Seen with qwen3:8b: it submitted an expired date, the app said "Verified", and it moved on.
+    Mirmera now asks a separate, focused question after each submit: does this answer break one
+    of the story's acceptance criteria? If so, a checked bug draft."""
+    from app.ai.mock_provider import MockProvider
+    project, charter = kyc
+    story = client.post(f"/projects/{project['id']}/stories", json={
+        "key": "SCRUM-11", "title": "Sender verifies identity",
+        "description": "As a UK sender I want to verify my identity.\n\nAcceptance criteria\n"
+                       "- All three document types are verified the same way\n"
+                       "- An expired document is refused, with its expiry date shown\n"}).json()
+    client.put(f"/stories/{story['id']}/charters", json={"ids": [charter["id"]]})
+
+    class Steering(Scripted):  # the scripted steps steer; the mock answers the checking question
+        async def complete(self, system, user, **kwargs):
+            if kwargs.get("task") == "explore_judge":
+                self.judged = getattr(self, "judged", []) + [user]
+                return await MockProvider().complete(system, user, **kwargs)
+            return await super().complete(system, user, **kwargs)
+
+    provider = Steering([
+        step("Valid first", kind="fill", locator=EXPIRY, value="2030-01-01"),
+        step("Submit", kind="click", locator=VERIFY),
+        step("Expired", kind="fill", locator=EXPIRY, value="2020-01-01"),
+        step("Submit", kind="click", locator=VERIFY),
+        step("Covered", kind="done", summary="Tried a future and a past date."),
+    ])
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 8}).json())
+
+    assert "AC2: An expired document is refused, with its expiry date shown" in provider.users[0]  # the agent sees the rules
+    valid, expired = provider.judged
+    assert "Expiry date = 2030-01-01" in valid and "Says: Verified" in valid
+    assert "Expiry date = 2020-01-01" in expired and "AC2: An expired document is refused" in expired
+    steps = run["steps"]
+    assert (steps[1]["judged"], steps[1]["status"]) == ("consistent", "ok")
+    assert steps[3]["judged"] == "breaks" and steps[3]["status"] == "drafted"
+    assert steps[3]["detail"].startswith('the page still says "Verified"')  # same answer as the valid date
+
+    [bug_id] = run["bug_ids"]
+    bug = client.get(f"/sessions/{run['session_id']}/bugs").json()[0]
+    assert bug["id"] == bug_id and bug["kind"] is None and bug["severity"] == "high"
+    assert bug["title"] == "Expired document is accepted" and "2020-01-01" in bug["actual"]
+    assert "Breaks: An expired document is refused" in bug["description"]
+    notes = [n["content"] for n in client.get(f"/sessions/{run['session_id']}/notes").json()]
+    assert any(n.startswith("Sent:") and "2020-01-01" in n and "Breaks" in n for n in notes)  # coverage, in the tester's words
+
+
+def test_acceptance_criteria_are_read_from_the_story():
+    from app.agent.explore import criteria_from
+    story = ("As a UK sender, I want to verify my identity.\n\nAcceptance criteria\n"
+             "The document type can be National ID, Passport or Driver's licence.\n\n"
+             "All three types are verified the same way; none is second-class.\n"
+             "* Many of our senders hold only a passport: verifying with a passport must work first time.\n\n"
+             "Notes:\nnot a criterion\n")
+    assert criteria_from(story) == [
+        "The document type can be National ID, Passport or Driver's licence.",
+        "All three types are verified the same way; none is second-class.",
+        "Many of our senders hold only a passport: verifying with a passport must work first time."]
+    assert criteria_from("Acceptance criteria: an expired ID is refused") == ["an expired ID is refused"]
+    assert criteria_from("Intro\n- one rule here\n- another rule") == ["one rule here", "another rule"]
+    assert criteria_from(None) == []

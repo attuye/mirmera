@@ -59,6 +59,8 @@ class MockProvider(LLMProvider):
             return json.dumps(self._reproduce_step(user))
         if task == "explore_step":
             return json.dumps(self._explore_step(user))
+        if task == "explore_judge":
+            return json.dumps(self._explore_judge(user))
         if task == "report_summary":
             return json.dumps(self._report_summary(user))
         if task == "test_strategy":
@@ -249,6 +251,24 @@ class MockProvider(LLMProvider):
         return {"charters": charters}
 
     # ---- bug reports ----
+
+    @staticmethod
+    def _explore_judge(user: str) -> dict:
+        """A small, predictable checker for one rule shape: an expiry date in the past that
+        the app accepted, when a rule says expired documents are refused."""
+        today = (re.search(r"Today: (\d{4}-\d{2}-\d{2})", user) or [None, "9999-12-31"])[1]
+        rules, sent, said = _between(user, "rules"), _between(user, "sent"), _between(user, "answer")
+        answer = said.lower()
+        rule = next((r for r in rules.splitlines() if "expir" in r.lower()), None)
+        past = [d for label, d in re.findall(r"([^;=]*expir[^;=]*)=\s*(\d{4}-\d{2}-\d{2})", sent, re.I) if d < today]
+        refused = any(w in answer for w in ("expir", "refus", "reject", "invalid", "not accepted"))
+        if rule and past and not refused:
+            return {"verdict": "breaks", "criterion": rule.split(": ", 1)[-1], "severity": "high",
+                    "why": f"(mock) The expiry date {past[0]} is before {today}, yet the app accepted the document.",
+                    "title": "Expired document is accepted",
+                    "expected": "A document whose expiry date has passed is refused, with the expiry date shown.",
+                    "actual": f"With expiry date {past[0]} the app answered: {said.splitlines()[-1].removeprefix('Says: ')[:200]}"}
+        return {"verdict": "consistent" if rule else "unclear", "why": "(mock) Nothing in the rules contradicts this answer."}
 
     @staticmethod
     def _explore_step(user: str) -> dict:
