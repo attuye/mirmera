@@ -347,6 +347,8 @@ def answer_of(a: schemas.ExploreAction, before: FormState, after: FormState) -> 
     message, a toast, an error under a field, a new page) or "still" (a submit got the same
     message as before). New status messages come first."""
     new_messages = [m for m in after.messages if m not in before.messages]
+    if a.kind == "goto":  # a page it opened itself: its text isn't an answer to anything
+        return new_messages[:6], "now"
     old = set(before.lines) | set(new_messages)
     new_lines = [l for l in after.lines if l not in old and not any(l in m for m in new_messages)]
     said = (new_messages + new_lines)[:6]
@@ -403,9 +405,23 @@ def crashes(failed: list[str], page_errors: list[str]) -> list[schemas.ExplorePr
     return out
 
 
-def incomplete(before: FormState) -> bool:
-    """A field left empty or a box left unticked: a refusal may be about that, not the rule."""
-    return any((f["value"] in ("", "not checked")) for f in before.fields if f["type"] != "radio")
+GAP_WORDS = ("required", "missing", "empty", "please enter", "please fill", "please provide", "can't be blank",
+             "cannot be blank", "is mandatory")
+LABEL_NOISE = {"the", "your", "and", "for", "with", "enter", "create", "accept", "date", "number"}
+
+
+def refusal_about_a_gap(before: FormState, said: list[str]) -> bool:
+    """Is a refusal about a field left empty or a box left unticked, rather than about what
+    the rule is about? Yes if the answer names one of those fields, or says something is
+    required or missing. "Name must use letters only." with the phone left empty is not."""
+    gaps = [f for f in before.fields if f["type"] != "radio" and f["value"] in ("", "not checked")]
+    if not gaps:
+        return False
+    answer = _norm(" ".join(said))
+    if any(w in answer for w in GAP_WORDS):
+        return True
+    words = set(re.findall(r"\w+", answer))
+    return any(w in words for f in gaps for w in re.findall(r"\w+", f["label"].lower()) if len(w) > 2 and w not in LABEL_NOISE)
 
 
 def decide(j: schemas.LLMExploreJudgement, rules: dict[str, str], before: FormState, said: list[str]) -> tuple[str, str]:
@@ -421,8 +437,8 @@ def decide(j: schemas.LLMExploreJudgement, rules: dict[str, str], before: FormSt
     if did == "error" and expects == "accept":
         return "breaks", "it broke, but the rule says it must be accepted"
     if did == "refused" and expects == "accept":
-        if incomplete(before):
-            return "unclear", "refused, but a field was empty or unticked, so it may be about that"
+        if refusal_about_a_gap(before, said):
+            return "unclear", "refused because a field was empty or unticked, not because of the rule"
         return "breaks", "refused, but the rule says it must be accepted"
     if (did == "accepted" and expects == "accept") or (did == "refused" and expects == "refuse"):
         return "consistent", "as the rule expects"
@@ -608,7 +624,9 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         entry["status"], entry["detail"] = await act(page, browser_action, origins)
                     except Exception as err:
                         entry["status"], entry["detail"] = "failed", _first_line(err)
-                    await signals.settle()
+                    # A submit's answer can take a while (a document check, a slow API): wait for what
+                    # it sent to come back, up to 10 s, so the answer is read, not "Checking…".
+                    await signals.settle(timeout_ms=10_000 if a.kind in ("click", "press") else 3_000)
                     if not page.is_closed() and not in_app(page.url, origins):
                         left = page.url
                         await _back_into_app(page, entry["url"], signals)
@@ -677,7 +695,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         ok, evidence = await verify(page, crash.symptom, signals)
                         if not ok:
                             continue
-                        crash.actual = (f"After {entry['action']}" + (f" (sent: {sent_text(before)[:300]})" if before.fields else "")
+                        sent = f" (sent: {sent_text(before)[:300]})" if a.kind in ("click", "press") and before.fields else ""
+                        crash.actual = (f"After {entry['action']}{sent}"
                                         + f": {crash.actual}" + (f' The page said: "{said[0][:160]}".' if said else ""))[:600]
                         shot = folder / f"explore-{run_id[:8]}-{len(bug_ids) + 1}.png"
                         try:
