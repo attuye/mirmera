@@ -52,7 +52,7 @@ export default function AgentBrowser({ run, compact = false }: { run: Exploratio
   return (
     <section aria-label="Mirmera's browser" style={{
       border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--panel)',
-      width: '100%', maxWidth: compact ? 360 : 880,
+      width: '100%', maxWidth: 360,  // beside the session's Browser/API tools; a progress card's preview
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: compact ? '5px 8px' : '7px 10px', borderBottom: '1px solid var(--border)' }}>
         {!compact && <span aria-hidden style={{ display: 'flex', gap: 5 }}>
@@ -92,7 +92,7 @@ export default function AgentBrowser({ run, compact = false }: { run: Exploratio
       </div>
 
       {caption && !compact && (
-        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', fontSize: 12.5 }}>
+        <div style={{ padding: '7px 10px', borderTop: '1px solid var(--border)', fontSize: 12 }}>
           <span className="mono" style={{ fontSize: 11, color: 'var(--text-quiet)', marginRight: 8 }}>Step {caption.n}</span>
           <span>{caption.action}</span>
           {caption.status !== 'ok' && <span style={{ color: 'var(--warning)' }}> ({caption.status})</span>}
@@ -102,7 +102,7 @@ export default function AgentBrowser({ run, compact = false }: { run: Exploratio
       )}
 
       {!compact && framed.length > 0 && (
-        <div role="group" aria-label="Steps" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px 10px' }}>
+        <div role="group" aria-label="Steps" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px 8px' }}>
           <button aria-label="Previous step" disabled={at <= 0} onClick={() => setPicked(Math.max(0, at - 1))} style={navButton}><ChevronLeft size={14} /></button>
           <input type="range" aria-label="Step" min={0} max={framed.length - 1} value={at}
             onChange={(e) => setPicked(Number(e.target.value))} style={{ flex: 1 }} />
