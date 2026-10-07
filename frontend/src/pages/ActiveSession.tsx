@@ -256,7 +256,6 @@ export default function ActiveSession() {
 
         <div style={{ flex: 1, display: 'flex', padding: '22px 32px', gap: 24 }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            {agentRun && <div style={{ marginBottom: 16 }}><AgentBrowser run={agentRun} /></div>}
             <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 11, padding: '14px 16px', marginBottom: 16 }}>
               <textarea
                 ref={box}
@@ -335,6 +334,7 @@ export default function ActiveSession() {
               <div hidden={tool !== 'browser'}><BrowserPanel sessionId={sessionId} runner={runner} disabled={ending} project={project} /></div>
               {tool === 'api' && <ApiPanel sessionId={sessionId} project={project} disabled={ending}
                 onNote={(note) => setNotes((prev) => [...prev, note])} />}
+              {agentRun && <div style={{ width: 360 }}><AgentBrowser run={agentRun} /></div>}
             </div>
           )}
         </div>
