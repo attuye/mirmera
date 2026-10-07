@@ -1,11 +1,12 @@
 """Exploration agent with a real headless Chromium, against the planted-bug app from
 test_regression ("Passport" makes POST /api/verify fail): it explores a charter, leaves a
 session (notes, recording, signals) and drafts bugs for a tester to review."""
+import json
 import time
 
 import pytest
 
-from app import models
+from app import models, schemas
 from app.database import SessionLocal
 from app.routers import runner as runner_api
 from tests.test_regression import App, app_url, bug_present  # noqa: F401  (fixtures)
@@ -280,7 +281,7 @@ def test_each_answer_is_checked_against_the_story_and_a_broken_rule_becomes_a_bu
     bug = client.get(f"/sessions/{run['session_id']}/bugs").json()[0]
     assert bug["id"] == bug_id and bug["kind"] is None and bug["severity"] == "high"
     assert bug["title"] == "Expired document is accepted" and "2020-01-01" in bug["actual"]
-    assert "Breaks: An expired document is refused" in bug["description"]
+    assert "Breaks AC2: An expired document is refused" in bug["description"]
     notes = [n["content"] for n in client.get(f"/sessions/{run['session_id']}/notes").json()]
     assert any(n.startswith("Sent:") and "2020-01-01" in n and "Breaks" in n for n in notes)  # coverage, in the tester's words
 
@@ -299,3 +300,116 @@ def test_acceptance_criteria_are_read_from_the_story():
     assert criteria_from("Acceptance criteria: an expired ID is refused") == ["an expired ID is refused"]
     assert criteria_from("Intro\n- one rule here\n- another rule") == ["one rule here", "another rule"]
     assert criteria_from(None) == []
+
+
+
+class Reading(Scripted):
+    """Scripted steps steer the browser; the checking question gets the given facts in turn
+    (or the mock's reading when they run out)."""
+
+    def __init__(self, steps, facts=()):
+        super().__init__(steps)
+        self.facts, self.judged = list(facts), []
+
+    async def complete(self, system, user, **kwargs):
+        if kwargs.get("task") == "explore_judge":
+            self.judged.append(user)
+            if self.facts:
+                return json.dumps(self.facts.pop(0))
+            from app.ai.mock_provider import MockProvider
+            return await MockProvider().complete(system, user, **kwargs)
+        return await super().complete(system, user, **kwargs)
+
+
+def story_for(client, project, charter, criteria):
+    story = client.post(f"/projects/{project['id']}/stories", json={
+        "key": "SCRUM-11", "title": "Sender verifies identity",
+        "description": "Acceptance criteria\n" + "\n".join(f"- {c}" for c in criteria)}).json()
+    client.put(f"/stories/{story['id']}/charters", json={"ids": [charter["id"]]})
+
+
+def test_the_ai_reports_facts_and_mirmera_decides_so_a_misreading_drafts_no_bug(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """The three drafts qwen3:8b made on SCRUM-11, replayed. Only the real one is a bug now:
+    a refusal that the rule expects agrees with it, and a quote that isn't in the answer counts for nothing."""
+    project, charter = kyc
+    story_for(client, project, charter, ["An expired document is refused, with its expiry date shown",
+                                          "The sender must accept the terms; without it, verification is refused with a reason"])
+    name = {"method": "label", "value": "Full name"}
+    terms = {"method": "label", "value": "I accept the terms"}
+    provider = Reading([
+        step("Expired, terms not ticked", kind="fill", locator=EXPIRY, value="2020-01-01"),
+        step("Submit", kind="click", locator=VERIFY),
+        step("A name", kind="fill", locator=name, value="John Smith"),
+        step("Submit", kind="click", locator=VERIFY),
+        step("Tick the terms", kind="check", locator=terms),
+        step("Submit", kind="click", locator=VERIFY),
+        step("Covered", kind="done", summary="Done."),
+    ], facts=[
+        # 1. qwen: "not refused, it asked to accept the terms" — but it did refuse, as AC2 expects
+        {"answer_means": "refused", "answer_quote": "Verified", "rule": "AC2", "rule_expects": "refuse", "because": "terms"},
+        # 2. qwen copied an example: "yet the document was verified" — not what the app said
+        {"answer_means": "accepted", "answer_quote": "the document was verified", "rule": "AC1", "rule_expects": "refuse",
+         "because": "The expiry date 2020-01-01 is in the past, yet the document was verified"},
+        # 3. the real one: expired, everything else filled, "Verified"
+        {"answer_means": "accepted", "answer_quote": "Verified", "rule": "AC1", "rule_expects": "refuse",
+         "because": "2020-01-01 is in the past", "title": "Expired document is accepted"},
+    ])
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 10}).json())
+    judged = [s.get("judged") for s in run["steps"] if s.get("judged")]
+    assert judged == ["consistent", "unclear", "breaks"]
+    [bug] = client.get(f"/sessions/{run['session_id']}/bugs").json()
+    assert bug["title"] == "Expired document is accepted" and bug["severity"] == "high"
+    assert 'Per AC1 ("An expired document is refused' in bug["expected"] and "2020-01-01" in bug["actual"]
+    notes = [n["content"] for n in client.get(f"/sessions/{run['session_id']}/notes").json() if n["content"].startswith("Sent:")]
+    assert "As AC2 expects." in notes[0]
+    assert "Not judged: the words it quoted aren't in the app's answer." in notes[1]
+    assert "Breaks AC1" in notes[2]
+
+
+def test_any_answer_counts_a_line_under_the_form_or_a_new_page(client, kyc, app_url, monkeypatch, chromium_available):  # noqa: F811
+    """Many apps answer without a status area: a red line under a field, or the next page."""
+    project, charter = kyc
+    story_for(client, project, charter, ["An expired document is refused, with its expiry date shown"])
+    name = {"method": "label", "value": "Full name"}
+    provider = Reading([
+        step("The plain form", kind="goto", url=f"{app_url}/plain"),
+        step("Expired, no name", kind="fill", locator=EXPIRY, value="2020-01-01"),
+        step("Submit", kind="click", locator=VERIFY),
+        step("A name", kind="fill", locator=name, value="John Smith"),
+        step("Submit", kind="click", locator=VERIFY),
+        step("Covered", kind="done", summary="Done."),
+    ])
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 10}).json())
+    refused, accepted = [s for s in run["steps"] if s.get("judged")]
+    assert refused["detail"].startswith('the page now says "Full name is required"')
+    assert refused["judged"] == "consistent"  # an expired date refused (for a missing name): no bug
+    assert accepted["detail"].startswith('the page now says "You\'re verified"')
+    assert accepted["judged"] == "breaks"
+    assert "Went to: " in provider.judged[1] and "/welcome" in provider.judged[1]
+    [bug] = client.get(f"/sessions/{run['session_id']}/bugs").json()
+    assert "the app answered" in bug["actual"]
+
+
+def test_how_mirmera_decides_from_the_facts():
+    from app.agent.explore import FormState, decide
+    rules = {"AC1": "An expired document is refused", "R2": "Ge'ez names are accepted"}
+    full = FormState(fields=[{"label": "Full name", "type": "text", "value": "አበበ", "required": False},
+                             {"label": "Terms", "type": "checkbox", "value": "checked", "required": False}])
+    gap = FormState(fields=[{"label": "Full name", "type": "text", "value": "", "required": False}])
+
+    def facts(**kw):
+        base = {"answer_means": "accepted", "answer_quote": "Verified", "rule": "AC1", "rule_expects": "refuse"}
+        return schemas.LLMExploreJudgement(**(base | kw))
+    said = ["Verified. Welcome!"]
+    assert decide(facts(), rules, full, said)[0] == "breaks"
+    assert decide(facts(rule_expects="accept"), rules, full, said)[0] == "consistent"
+    assert decide(facts(answer_quote="yet it was verified"), rules, full, said)[0] == "unclear"  # not the app's words
+    assert decide(facts(rule="AC9"), rules, full, said)[0] == "unclear"  # no such rule
+    assert decide(facts(rule_expects="none"), rules, full, said)[0] == "unclear"
+    refused = ["Name must use letters only."]
+    r = facts(answer_means="refused", answer_quote="Name must use letters only", rule="R2", rule_expects="accept")
+    assert decide(r, rules, full, refused)[0] == "breaks"  # a Ge'ez name refused, everything filled
+    assert decide(r, rules, gap, refused)[0] == "unclear"  # a field was empty: may be the reason
+    assert decide(facts(answer_means="other"), rules, full, said)[0] == "unclear"

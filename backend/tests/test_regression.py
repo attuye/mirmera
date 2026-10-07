@@ -38,6 +38,25 @@ document.getElementById('f').addEventListener('submit', async (e) => {
 </script>"""
 
 
+# The same form, answering the way many apps do: no status area. A refused submit shows a
+# plain line under the form; an accepted one goes to a new page.
+PLAIN = b"""<!doctype html><title>KYC verify (plain)</title>
+<form id=f>
+  <label for=name>Full name</label><input id=name>
+  <label for=expiry>Expiry date</label><input id=expiry type=date>
+  <button type=submit>Verify</button>
+</form>
+<div id=err style="color:red"></div>
+<script>
+document.getElementById('f').addEventListener('submit', (e) => {
+  e.preventDefault()
+  if (!document.getElementById('name').value) { document.getElementById('err').textContent = 'Full name is required'; return }
+  location.href = '/welcome'
+})
+</script>"""
+WELCOME = b"<!doctype html><title>Welcome</title><h1>You're verified</h1><p>Welcome to AddisVerify.</p>"
+
+
 class App(BaseHTTPRequestHandler):
     fixed = False
     flaky = False  # Passport fails on every other request only: an intermittent bug
@@ -45,7 +64,8 @@ class App(BaseHTTPRequestHandler):
     delay = 0.0  # seconds before /api/verify answers: a slow backend, like a busy CI machine
 
     def do_GET(self):
-        self._send(200 if self.path == "/" else 404, APP if self.path == "/" else b"", "text/html")
+        page = {"/": APP, "/plain": PLAIN, "/welcome": WELCOME}.get(self.path)
+        self._send(200 if page else 404, page or b"", "text/html")
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))

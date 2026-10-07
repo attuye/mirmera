@@ -1237,20 +1237,14 @@ class ExploreAction(BaseModel):
 
 
 class LLMExploreJudgement(BaseModel):
-    """AI contract: does what the app answered break one of the story's rules?"""
-    verdict: Literal["breaks", "consistent", "unclear"]
-    criterion: Optional[str] = Field(default=None, max_length=400)  # the rule it breaks, quoted
-    why: str = Field(default="", max_length=600)
+    """AI contract for checking one answer: plain facts only. Mirmera compares them and
+    decides itself whether the answer breaks the rule (see agent/explore.py: decide)."""
+    answer_means: Literal["accepted", "refused", "error", "other"]
+    answer_quote: str = Field(default="", max_length=400)  # copied from the answer; checked
+    rule: Optional[str] = Field(default=None, max_length=20)  # "AC2", "R3", or null
+    rule_expects: Literal["accept", "refuse", "none"] = "none"
+    because: str = Field(default="", max_length=600)
     title: Optional[str] = Field(default=None, max_length=200)
-    expected: Optional[str] = Field(default=None, max_length=600)
-    actual: Optional[str] = Field(default=None, max_length=600)
-    severity: Literal["high", "medium", "low"] = "medium"
-
-    @model_validator(mode="after")
-    def complete(self):
-        if self.verdict == "breaks" and not (self.criterion and self.title and self.expected and self.actual):
-            raise ValueError("breaks needs the criterion, a title, expected and actual")
-        return self
 
 
 class LLMExploreStep(BaseModel):
