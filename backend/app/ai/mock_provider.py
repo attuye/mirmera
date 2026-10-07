@@ -254,21 +254,33 @@ class MockProvider(LLMProvider):
 
     @staticmethod
     def _explore_judge(user: str) -> dict:
-        """A small, predictable checker for one rule shape: an expiry date in the past that
-        the app accepted, when a rule says expired documents are refused."""
+        """A small, predictable reader of one answer: what the app did (from its words), and
+        what a terms rule or an expiry rule expects for what was sent."""
         today = (re.search(r"Today: (\d{4}-\d{2}-\d{2})", user) or [None, "9999-12-31"])[1]
-        rules, sent, said = _between(user, "rules"), _between(user, "sent"), _between(user, "answer")
-        answer = said.lower()
-        rule = next((r for r in rules.splitlines() if "expir" in r.lower()), None)
-        past = [d for label, d in re.findall(r"([^;=]*expir[^;=]*)=\s*(\d{4}-\d{2}-\d{2})", sent, re.I) if d < today]
-        refused = any(w in answer for w in ("expir", "refus", "reject", "invalid", "not accepted"))
-        if rule and past and not refused:
-            return {"verdict": "breaks", "criterion": rule.split(": ", 1)[-1], "severity": "high",
-                    "why": f"(mock) The expiry date {past[0]} is before {today}, yet the app accepted the document.",
-                    "title": "Expired document is accepted",
-                    "expected": "A document whose expiry date has passed is refused, with the expiry date shown.",
-                    "actual": f"With expiry date {past[0]} the app answered: {said.splitlines()[-1].removeprefix('Says: ')[:200]}"}
-        return {"verdict": "consistent" if rule else "unclear", "why": "(mock) Nothing in the rules contradicts this answer."}
+        rules, sent = _between(user, "rules"), _between(user, "sent")
+        says = [l.removeprefix("Says: ") for l in _between(user, "answer").splitlines() if l.startswith("Says: ")]
+        text = " ".join(says).lower()
+        if any(w in text for w in ("please", "required", "must", "invalid", "expired", "refus", "reject", "letters only")):
+            means = "refused"
+        elif any(w in text for w in ("went wrong", "error")):
+            means = "error"
+        elif any(w in text for w in ("verified", "welcome", "success", "saved")):
+            means = "accepted"
+        else:
+            means = "other"
+        by_id = {l.split(": ", 1)[0]: l.split(": ", 1)[-1].lower() for l in rules.splitlines() if ": " in l}
+        rule, expects, because = None, "none", "(mock) No rule is about what was sent."
+        terms = next((k for k, v in by_id.items() if "terms" in v), None)
+        expiry = next((k for k, v in by_id.items() if "expir" in v), None)
+        date = re.search(r"expir[^;=]*=\s*(\d{4}-\d{2}-\d{2})", sent, re.I)
+        if terms and re.search(r"terms[^;=]*=\s*not checked", sent, re.I):
+            rule, expects, because = terms, "refuse", "(mock) The terms box was not ticked."
+        elif expiry and date:
+            past = date.group(1) < today
+            rule, expects = expiry, "refuse" if past else "accept"
+            because = f"(mock) The expiry date {date.group(1)} is {'before' if past else 'after'} {today}."
+        return {"answer_means": means, "answer_quote": says[0] if says else "", "rule": rule, "rule_expects": expects,
+                "because": because, "title": "Expired document is accepted" if expects == "refuse" and rule == expiry else None}
 
     @staticmethod
     def _explore_step(user: str) -> dict:

@@ -89,6 +89,27 @@ async def _run(task: str, p: LLMProvider) -> str:
         step = await complete_json(p, agent.PROMPT, agent._user_message(ctx, [], page, 20), schemas.LLMAgentStep,
                                    task="reproduce_step", max_tokens=800)
         return f"{step.action.kind}: {step.thought}"[:160]
+    if task == "explore_check":
+        # Two answers from the practice app, one per verdict: is the model's reading right?
+        from app.agent import explore
+        ctx = explore.CharterContext(mission="Explore expiry dates", criteria=[
+            "An expired document is refused, with its expiry date shown",
+            "The sender must accept the terms; without it, verification is refused with a reason"])
+        cases = [("an expired date, Verified", "breaks", "Verified. Welcome to AddisVerify!",
+                  [("Full name", "John Smith"), ("Document number", "ET1234567"), ("Expiry date", "2020-01-01"), ("I accept the terms", "checked")]),
+                 ("terms unticked, refused", "consistent", "Please accept the terms.",
+                  [("Full name", "John Smith"), ("Document number", "ET1234567"), ("Expiry date", "2030-01-01"), ("I accept the terms", "not checked")])]
+        out = []
+        p.expected = len(cases)  # one call per case; more means a reply had to be asked again
+        for name, want, answer, values in cases:
+            before = explore.FormState(fields=[{"label": k, "type": "checkbox" if "terms" in k else "text", "value": v, "required": False}
+                                               for k, v in values], url="http://localhost:4000/verify")
+            j = await explore.judge(p, ctx, before, [answer], before.url)
+            if j is None:
+                raise ValueError(f"No usable reply for '{name}'")
+            got, _ = explore.decide(j, explore.rules_of(ctx), before, [answer])
+            out.append(f"{name} → {got} ({'right' if got == want else 'expected ' + want})")
+        return "; ".join(out)
     if task == "report_summary":
         r = await tasks.summarize_report(p, project_name=PROJECT, facts=[
             "Period: 2026-09-05 to 2026-10-04", "Totals: 9 sessions (11 h 20 min, 3 testers) · 6 bugs (2 high, 3 medium, 1 low)",
@@ -117,7 +138,7 @@ async def check(provider_name: str, task: str, keys=None) -> dict:
     base["model"] = p.model
     try:
         sample = await _run(task, p)
-        result = "ok" if p.calls <= 1 else "retried"
+        result = "ok" if p.calls <= getattr(p, "expected", 1) else "retried"
         return {**base, "result": result, "seconds": round(time.monotonic() - started, 1), "sample": sample,
                 "detail": "The first reply was unusable; the second worked." if result == "retried" else None}
     except Exception as err:  # a provider error, or a reply that stayed unusable

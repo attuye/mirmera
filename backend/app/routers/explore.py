@@ -49,6 +49,7 @@ def start_exploration(db: DBSession, charter: models.Charter, *, started_by: str
         raise ExploreProblem("Mirmera is already exploring this charter.")
 
     provider = provider_for(project, "agent", provider_name)
+    checker = provider_for(project, "explore_check", provider_name)  # may be a stronger model than the one that browses
     story = charter.stories[0] if charter.stories else None
     ctx = agent.CharterContext(
         mission=charter.mission_statement, test_ideas=list(charter.test_ideas or []), oracles=list(charter.oracles or []),
@@ -70,7 +71,8 @@ def start_exploration(db: DBSession, charter: models.Charter, *, started_by: str
     asyncio.run_coroutine_threadsafe(
         agent.run_agent(run.id, ctx, provider, session_id=session.id, charter_id=charter.id, start_url=run.start_url,
                         origins={origin(base)}, max_steps=max_steps, headless=True,
-                        executable_path=settings.runner_chromium_path, folder=runner_api.session_folder(session.id)),
+                        executable_path=settings.runner_chromium_path, folder=runner_api.session_folder(session.id),
+                        checker=checker),
         manager.loop._get(),
     )
     return run
