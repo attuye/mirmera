@@ -1,10 +1,12 @@
 /** User stories: import one from Jira or GitHub, or write one here. Each story links to
  *  risks and charters; its page shows the testing under them and what is still left. */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { Bot } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
+import { useAgentActivity } from '../components/AgentProgress'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton } from '../components/ui'
-import { api, SprintSummary, StorySummary } from '../api/client'
+import { AgentActivity, api, SprintSummary, StorySummary } from '../api/client'
 import { useProject, useProjectPath } from '../project'
 
 type Mode = 'import' | 'write'
@@ -99,6 +101,25 @@ function AddStory({ onAdded }: { onAdded: (id: string) => void }) {
   )
 }
 
+/** What Mirmera is doing on a story right now, in a few words. */
+export function agentDoing(item: AgentActivity): string {
+  const ex = item.exploration
+  if (ex && item.stage === 'explore') return `Exploring in the app · step ${ex.steps_used} of ${ex.max_steps}`
+  const active = item.stages.find((s) => s.status === 'active')
+  return active ? active.label : 'Working'
+}
+
+function MirmeraWorking({ item }: { item: AgentActivity }) {
+  return (
+    <span role="status" aria-label="Mirmera is working on this story" style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--info)', whiteSpace: 'nowrap',
+      border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px', background: 'var(--panel)',
+    }}>
+      <Bot size={12} aria-hidden className="mm-pulse" />Mirmera: {agentDoing(item)}
+    </span>
+  )
+}
+
 export default function Stories() {
   const { project } = useProject()
   const path = useProjectPath()
@@ -113,6 +134,15 @@ export default function Stories() {
     api.listStories(project.id).then(setStories).catch((e) => setError(errorText(e)))
     api.listSprints(project.id).then(setSprints).catch(() => {})
   }, [project.id])
+  // Mirmera's work in this workspace (started from Jira or here): which stories it is on right now.
+  const activity = useAgentActivity(() => api.workspaceActivity(project.org_id), `stories-${project.org_id}`, 5000)
+  const working = new Map((activity?.items ?? []).filter((i) => i.state === 'running' && i.story_id).map((i) => [i.story_id!, i]))
+  const workingOn = [...working.keys()].sort().join(',')
+  const wasWorkingOn = useRef('')
+  useEffect(() => {  // it started on a story (maybe a new one from Jira) or finished one: the list changed
+    if (workingOn !== wasWorkingOn.current) api.listStories(project.id).then(setStories).catch(() => {})
+    wasWorkingOn.current = workingOn
+  }, [workingOn, project.id])
   const inSprint = (s: StorySummary) => !sprint || (sprint === 'none' ? !s.sprint : s.sprint?.id === sprint)
   const shown = (stories ?? []).filter((s) => inSprint(s) && (show === 'all' || (show === 'done') === s.closed))
   const count = (which: Show) => (stories ?? []).filter((s) => inSprint(s) && (which === 'all' || (which === 'done') === s.closed)).length
@@ -162,6 +192,7 @@ export default function Stories() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   {s.key && <span className="mono" style={{ fontSize: 11.5, color: 'var(--text-tertiary)', flexShrink: 0 }}>{s.key}</span>}
                   <Link to={path(`/stories/${s.id}`)} style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--text)', flex: 1, minWidth: 0 }}>{s.title}</Link>
+                  {working.has(s.id) && <MirmeraWorking item={working.get(s.id)!} />}
                   <StoryStatus story={s} />
                 </div>
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 6, fontSize: 12, color: 'var(--text-tertiary)' }}>
