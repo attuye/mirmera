@@ -70,7 +70,10 @@ def test_it_explores_and_drafts_a_checked_bug(client, kyc, monkeypatch, chromium
     assert run["summary"] == "Passport fails; national ID not tried yet."
     statuses = [s["status"] for s in run["steps"]]
     # The 500 after the submit is drafted by Mirmera itself; the agent's own report of it is then a repeat.
-    assert statuses == ["ok", "ok", "drafted", "not verified", "refused", "refused", "refused", "ok"]
+    # Three steps in a row that taught nothing: Mirmera steps in with the charter's next idea, then the agent goes on.
+    assert statuses == ["ok", "ok", "drafted", "not verified", "refused", "refused", "ok", "refused", "ok"]
+    assert run["steps"][6]["by"] == "Mirmera" and run["steps"][6]["action"] == 'try Document type = "National ID", then submit'
+    assert "Verified" in run["steps"][6]["detail"]
     assert "<charter>" in provider.users[0] and "Try a passport" in provider.users[0]
 
     [bug_id] = run["bug_ids"]

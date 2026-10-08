@@ -118,6 +118,7 @@ export default function AgentProgress({ item, showTitle = true }: { item: AgentA
                   <span className="mono" style={{ fontSize: 10.5, color: 'var(--text-quiet)', minWidth: 22, textAlign: 'right' }}>{s.n}</span>
                   <span style={{ width: 7, height: 7, borderRadius: 4, flexShrink: 0, alignSelf: 'center', background: STEP_COLOR[s.status] ?? 'var(--text-quiet)' }} aria-hidden />
                   <span style={{ minWidth: 0 }}>
+                    {s.by === 'Mirmera' && <span title="The AI was stuck, so Mirmera took this step itself" style={{ fontSize: 10.5, marginRight: 6, padding: '1px 6px', borderRadius: 8, background: 'var(--accent-bg)', color: 'var(--accent)' }}>Mirmera stepped in</span>}
                     <span>{s.action}</span>
                     {s.status !== 'ok' && <span style={{ color: STEP_COLOR[s.status] ?? 'var(--text-tertiary)' }}> ({s.status})</span>}
                     {s.detail && <span style={{ color: 'var(--text-secondary)' }}> → {s.detail.length > 160 ? s.detail.slice(0, 157) + '…' : s.detail}</span>}

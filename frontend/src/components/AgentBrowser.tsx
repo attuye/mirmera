@@ -162,6 +162,7 @@ export default function AgentBrowser({ run, compact = false }: { run: Exploratio
       {step && !compact && (
         <div aria-label="Step on screen" style={{ padding: '7px 10px', borderTop: '1px solid var(--border)', fontSize: 12 }}>
           <span className="mono" style={{ fontSize: 11, color: 'var(--text-quiet)', marginRight: 8 }}>Step {step.n}</span>
+          {step.by === 'Mirmera' && <span title="The AI was stuck, so Mirmera took this step itself" style={{ fontSize: 10.5, marginRight: 6, padding: '1px 6px', borderRadius: 8, background: 'var(--accent-bg)', color: 'var(--accent)' }}>Mirmera stepped in</span>}
           <span>{step.action}</span>
           {step.status !== 'ok' && <span style={{ color: 'var(--warning)' }}> ({step.status})</span>}
           {step.detail && <span style={{ color: 'var(--text-secondary)' }}> → {step.detail}</span>}

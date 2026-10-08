@@ -60,6 +60,19 @@ test("Mirmera's browser: replay each step, and watch it live", async ({ page, ap
     await page.unroute(`**/charters/${charter.id}/exploration`)
   })
 
+  await test.step('a step Mirmera took itself, because the AI was stuck, is marked', async () => {
+    const steps = run.steps.map((s: { n: number }, i: number) => (i === 0 ? { ...s, by: 'Mirmera' } : s))
+    await page.route(`**/charters/${charter.id}/exploration`, (route) => route.fulfill({ json: { ...run, steps, video: null } }))
+    await page.goto(`/projects/${project.id}/sessions/${run.session_id}`)
+    const view = page.getByRole('region', { name: "Mirmera's browser" })
+    await view.getByRole('button', { name: 'Play' }).click()  // from the end: starts again at the first
+    await view.getByRole('button', { name: 'Pause' }).click()
+    await expect(view.getByLabel('Step on screen')).toContainText(`Step ${run.steps[0].n}`)
+    await expect(view.getByLabel('Step on screen').getByTitle('The AI was stuck, so Mirmera took this step itself')).toHaveText('Mirmera stepped in')
+    if (process.env.SHOTS) await view.screenshot({ path: `${process.env.SHOTS}/stepped-in.png` })
+    await page.unroute(`**/charters/${charter.id}/exploration`)
+  })
+
   await test.step('while it works: the live picture, marked LIVE (its run is faked as still going)', async () => {
     const jpeg = await (await request.get(`${API_URL}/exploration-runs/${run.id}/steps/${last.n}/frame`)).body()
     await page.route(`**/charters/${charter.id}/exploration`, async (route) =>

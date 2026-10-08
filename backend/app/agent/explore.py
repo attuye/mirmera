@@ -42,7 +42,11 @@ JUDGE_PROMPT = (Path(__file__).resolve().parents[1] / "ai" / "prompts" / "explor
 TESTER = "Mirmera agent"
 HISTORY_LIMIT = 20
 RUN_TIMEOUT_S = 900
-MAX_BAD_REPLIES = 3
+MAX_BAD_REPLIES = 4  # unusable replies in a row before the run stops: the model is not up to it
+STEP_IN_AFTER = 3  # steps in a row that taught nothing before Mirmera takes the next step itself
+SUBMITS = ("click", "press", "try")
+# A note that says the app accepted or refused something: only true after a submit.
+CLAIM = re.compile(r"\b(accepts|accepted|rejects|rejected|refuses|refused|works|succeeds|successful(?:ly)?|confirm(?:s|ed|ing)?)\b", re.I)
 
 ACTIVE: set[str] = set()  # run ids being worked on in this process
 VIEWPORT = {"width": 1280, "height": 800}  # fixed per run, so a target's box can be drawn on any frame
@@ -217,6 +221,8 @@ def describe(a: schemas.ExploreAction) -> str:
         return f"problem: {a.problem.title}"
     if a.kind == "done":
         return "done"
+    if a.kind == "try":
+        return try_text(a.values)
     return describe_browser(a.as_browser_action())
 
 
@@ -246,7 +252,8 @@ FORM_JS = """() => {
     return text.replace(/\\s+/g, ' ').trim()
   }
   const fields = []
-  for (const el of document.querySelectorAll('input, select, textarea')) {
+  const all = [...document.querySelectorAll('input, select, textarea')]
+  for (const [idx, el] of all.entries()) {
     const type = (el.type || el.tagName).toLowerCase()
     if (['hidden', 'submit', 'button', 'reset', 'image'].includes(type) || !visible(el)) continue
     let value
@@ -254,9 +261,16 @@ FORM_JS = """() => {
     else if (type === 'password') value = el.value ? '(filled)' : ''
     else if (el.tagName === 'SELECT') value = el.selectedOptions[0] ? el.selectedOptions[0].text : ''
     else value = el.value
-    fields.push({ label: labelOf(el), type, value, required: el.required,
+    fields.push({ label: labelOf(el), type, value, required: el.required, idx,
+                  keys: [el.id, el.name, el.getAttribute('placeholder'), el.getAttribute('aria-label')].filter(Boolean),
                   ...(el.tagName === 'SELECT' ? { options: [...el.options].map((o) => o.text) } : {}) })
   }
+  // The button that sends the form: a submit button inside a form with fields, else the only button.
+  const buttons = [...document.querySelectorAll('button, input[type=submit]')].filter(visible)
+  const submitEl = buttons.find((b) => b.form && (b.type === 'submit')) || (buttons.length === 1 ? buttons[0] : null)
+  const submit = submitEl ? (submitEl.innerText || submitEl.value || '').replace(/\\s+/g, ' ').trim() : ''
+  const links = [...document.querySelectorAll('a[href]')].filter(visible)
+    .map((a) => ({ text: a.innerText.replace(/\\s+/g, ' ').trim(), href: a.href })).filter((l) => l.text).slice(0, 40)
   const messages = [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')]
     .filter(visible).map((el) => el.innerText.replace(/\\s+/g, ' ').trim()).filter(Boolean)
   // Every visible line of text: what appears after a submit (a toast, an error under a field,
@@ -264,7 +278,7 @@ FORM_JS = """() => {
   const lines = [...new Set((document.body ? document.body.innerText : '').split('\\n')
     .map((l) => l.replace(/\\s+/g, ' ').trim()).filter((l) => l.length > 1))].slice(0, 400)
   const h1 = document.querySelector('h1')
-  return { fields, messages, lines, title: document.title, heading: h1 ? h1.innerText.trim() : '' }
+  return { fields, messages, lines, title: document.title, heading: h1 ? h1.innerText.trim() : '', submit, links }
 }"""
 
 
@@ -276,6 +290,8 @@ class FormState:
     url: str = ""
     title: str = ""
     heading: str = ""
+    submit: str = ""  # the text of the button that sends the form
+    links: list[dict] = field(default_factory=list)  # text, href
 
     def text(self) -> str:
         """For the AI: every field with what it holds now (empty ones marked), and the page's messages.
@@ -305,7 +321,8 @@ async def form_state(page) -> FormState:
         data = await page.evaluate(FORM_JS)
         return FormState(fields=data.get("fields") or [], messages=data.get("messages") or [],
                          lines=[l[:200] for l in data.get("lines") or []], url=page.url,
-                         title=(data.get("title") or "")[:200], heading=(data.get("heading") or "")[:200])
+                         title=(data.get("title") or "")[:200], heading=(data.get("heading") or "")[:200],
+                         submit=(data.get("submit") or "")[:80], links=data.get("links") or [])
     except Exception:  # navigating, or a page without a DOM to read
         return FormState()
 
@@ -314,16 +331,202 @@ def pointless(a: schemas.ExploreAction, url: str, before: FormState, tried: dict
     """Why a step would learn nothing, or None. A small model loops: it submits the same form
     again and again, or fills a field with the value it already holds. Such a step isn't run."""
     if a.kind == "fill" and a.locator:
-        current = before.value_of(a.locator.value or a.locator.name)
+        f = find_field(before, field_name(a))
+        current = f["value"] if f else before.value_of(a.locator.value or a.locator.name)
         if current is not None and current == a.value:
             return (f'that field already holds "{a.value}". Change a different field, or change this one to a '
                     "different value, then submit")
-    if a.kind in ("click", "press"):
+    if a.kind in SUBMITS:
         key = (describe(a), url, before.values())
         if key in tried:
             return (f"you did exactly this at step {tried[key]} on this page with the same field values, and it can't show "
                     "anything new. Change one field first (keep the others valid), or try another idea")
     return None
+
+
+# ---------- acting on fields the way a person would ----------
+
+FIELDS = "input, select, textarea"
+TRUTHY = {"true", "yes", "on", "1", "checked", "check", "tick", "ticked", "x", "accept", "accepted", "agree"}
+
+
+def _key(text: str) -> str:
+    """"documentType", "document-type" and "Document type" are the same name."""
+    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text or "")
+    return re.sub(r"[^\w]+", " ", text, flags=re.U).strip().lower()
+
+
+def find_field(state: FormState, name: str | None) -> dict | None:
+    """The form field a small model means, by its label, id, name, placeholder or aria-label:
+    exactly first, then the one field whose label contains the name (or the other way round)."""
+    k = _key(name or "")
+    if not k:
+        return None
+    exact = [f for f in state.fields if k in {_key(x) for x in [f["label"], *f.get("keys", [])]}]
+    if len(exact) >= 1:
+        return exact[0]
+    near = [f for f in state.fields if k in _key(f["label"]) or (_key(f["label"]) and _key(f["label"]) in k)]
+    return near[0] if len(near) == 1 else None
+
+
+def field_name(a: schemas.ExploreAction) -> str | None:
+    if a.locator and a.locator.method != "role":
+        return a.locator.value
+    if a.locator and a.locator.role in ("textbox", "combobox", "checkbox", "radio", "spinbutton", "searchbox"):
+        return a.locator.name
+    return None
+
+
+def option_of(f: dict, value: str) -> str | None:
+    """The option of a select that a value means ("passport" is "Passport")."""
+    opts = f.get("options") or []
+    for o in opts:
+        if o == value:
+            return o
+    hits = [o for o in opts if _key(o) == _key(value)] or [o for o in opts if _key(value) and _key(value) in _key(o)]
+    return hits[0] if hits else None
+
+
+def valid_value(f: dict, today) -> str | None:
+    """Ordinary valid data for a field, so a try changes only the fields it names. None: leave it."""
+    from datetime import timedelta
+    label, kind = f["label"].lower(), f["type"]
+    if kind.startswith("select"):
+        opts = [o for o in f.get("options") or [] if not re.search(r"^(choose|select|pick|--|-)", o.strip().lower())]
+        return opts[0] if opts else None  # the same baseline every time, whatever was chosen before
+    if kind == "checkbox":
+        return "checked" if f.get("required") or re.search(r"accept|agree|terms|consent|confirm", label) else None
+    if kind in ("radio", "file", "range", "color"):
+        return None
+    if kind == "date" or "date" in label:
+        if "birth" in label or "dob" in label:
+            return "1990-05-15"
+        if re.search(r"expir|valid|until|end", label):
+            return (today + timedelta(days=365)).isoformat()
+        return today.isoformat()
+    if kind == "password":
+        return "Mirmera-Test-Pass-24!"
+    if kind == "email" or "mail" in label:
+        return "abebe.kebede@example.com"
+    if kind == "tel" or "phone" in label or "mobile" in label:
+        return "+251911223344"
+    if kind == "number":
+        return "12345"
+    if "number" in label or " no" in f" {label}" or "id" == label:
+        return "A1234567"
+    if "name" in label:
+        return "Abebe Kebede"
+    if kind == "url" or "website" in label:
+        return "https://example.com"
+    return "Test value"
+
+
+async def set_field(page, f: dict, kind: str, value: str | None) -> tuple[str, str, str]:
+    """Sets one field as a person would, whatever the action said: a dropdown gets its option
+    chosen, a checkbox gets ticked. Returns (status, detail, the action that was done)."""
+    el = page.locator(FIELDS).nth(f["idx"])
+    t = f["type"]
+    if t.startswith("select"):
+        opt = option_of(f, value or "")
+        if opt is None:
+            return "failed", f'"{f["label"]}" has no option "{value}". Its options: ' + ", ".join(f'"{o}"' for o in f.get("options") or []), kind
+        await el.select_option(label=opt, timeout=5_000)
+        return "ok", (f'"{f["label"]}" is a dropdown, so Mirmera chose "{opt}"' if kind != "select" else ""), "select"
+    if t in ("checkbox", "radio"):
+        on = kind == "check" or (kind != "uncheck" and (value or "").strip().lower() in TRUTHY)
+        await (el.check if on else el.uncheck)(timeout=5_000)
+        how = "check" if on else "uncheck"
+        return "ok", (f'"{f["label"]}" is a checkbox, so Mirmera {"ticked" if on else "cleared"} it' if kind != how else ""), how
+    if kind in ("check", "uncheck"):
+        return "failed", f'"{f["label"]}" is not a checkbox; fill it with a value', kind
+    await el.fill(value or "", timeout=5_000)
+    return "ok", "", "fill"
+
+
+def field_changes(before: FormState, after: FormState) -> list[tuple[dict, str, str]]:
+    """The fields whose value changed: (field, was, now)."""
+    was = {(f["label"], f.get("idx")): f["value"] for f in before.fields}
+    return [(f, was[(f["label"], f.get("idx"))], f["value"]) for f in after.fields
+            if (f["label"], f.get("idx")) in was and was[(f["label"], f.get("idx"))] != f["value"]]
+
+
+async def do_try(page, a: schemas.ExploreAction, before: FormState, today) -> tuple[str, str, list[dict], FormState | None]:
+    """One experiment: the named fields get the given values, every other field ordinary valid
+    data, then the form is sent. Returns (status, detail, recorded actions, the form as sent)."""
+    done, notes, recorded = set(), [], []
+    for name, value in a.values.items():
+        f = find_field(before, name)
+        if not f:
+            return "failed", f'no field "{name}" on this page. Fields: ' + ", ".join(f'"{x["label"]}"' for x in before.fields[:12]), [], None
+        status, detail, how = await set_field(page, f, "fill", value)
+        if status != "ok":
+            return status, detail, [], None
+        done.add(f["idx"])
+        recorded.append(_rec(how, f, value))
+    for f in before.fields:
+        if f["idx"] in done:
+            continue
+        v = valid_value(f, today)
+        if v is None or (f["type"] not in ("checkbox",) and f["value"] == v):
+            continue
+        if f["type"] == "checkbox" and f["value"] == "checked":
+            continue
+        status, detail, how = await set_field(page, f, "fill", v)
+        if status == "ok":
+            recorded.append(_rec(how, f, v))
+        else:
+            notes.append(detail)
+    sent = await form_state(page)
+    if not before.submit:
+        return "failed", "the fields are set, but Mirmera found no button that sends this form: click it yourself", recorded, None
+    await page.get_by_role("button", name=before.submit, exact=True).first.click(timeout=5_000)
+    recorded.append({"action": "click", "locator": {"method": "role", "role": "button", "name": before.submit}})
+    return "ok", "; ".join(notes), recorded, sent
+
+
+def _rec(how: str, f: dict, value: str) -> dict:
+    out = {"action": how, "locator": {"method": "label", "value": f["label"]}}
+    if how in ("fill", "select"):
+        out["value"] = value
+    return out
+
+
+def try_text(values: dict[str, str]) -> str:
+    return "try " + (", ".join(f'{k} = "{v[:60]}"' for k, v in values.items()) or "the form with valid data") + ", then submit"
+
+
+def _stems(text: str) -> set[str]:
+    """Content words, plural or not: "documents" and "document" are one word here."""
+    return {w[:-1] if w.endswith("s") and len(w) > 4 else w for w in re.findall(r"\w+", (text or "").lower()) if len(w) > 3}
+
+
+def suggest(ctx: "CharterContext", state: FormState, tried_values: dict[str, set[str]], dirty: dict[str, str],
+            submits: int, visited: set[str], today) -> tuple[dict, str] | None:
+    """The next step an experienced tester would take here: (action, why). Shown to the AI when it
+    loops, and run by Mirmera itself when the AI is stuck. The charter decides which field first."""
+    if dirty and state.submit:
+        return {"kind": "try", "values": dict(dirty)}, "you changed fields but haven't submitted, so nothing was tested yet"
+    if state.fields and state.submit and not submits:
+        return {"kind": "try", "values": {}}, "first send the form once with ordinary valid data, to see what success looks like"
+    words = _stems(" ".join([ctx.mission, *ctx.test_ideas]))
+    fields = sorted(state.fields[:12], key=lambda f: len(_stems(f["label"]) & words), reverse=True)
+    best = len(_stems(fields[0]["label"]) & words) if fields else 0
+    links = [l for l in state.links if l["href"].split("#")[0] not in visited and _stems(l["text"]) & words]
+    link = max(links, key=lambda l: len(_stems(l["text"]) & words), default=None)
+    if link and submits and len(_stems(link["text"]) & words) >= best:
+        return {"kind": "goto", "url": link["href"]}, f'the charter is about "{link["text"]}", not looked at yet'
+    if state.submit:
+        for f in fields:
+            for what, v in ideas_for(f, today):
+                if v not in tried_values.get(f["label"], set()):
+                    return {"kind": "try", "values": {f["label"]: v}}, f'the next test idea for {f["label"]}: {what}'
+    if link:
+        return {"kind": "goto", "url": link["href"]}, f'the charter is about "{link["text"]}", not looked at yet'
+    return None
+
+
+def suggestion_text(s: tuple[dict, str] | None) -> str:
+    return f" Next, for example: {json.dumps(s[0], ensure_ascii=False)} ({s[1]})." if s else ""
 
 
 # ---------- test ideas: an experienced tester's checklist, per field ----------
@@ -436,7 +639,8 @@ def generalize_hint(before: FormState, title: str) -> str | None:
 
 
 def _user_message(ctx: CharterContext, history: list[dict], observation: str, steps_left: int,
-                  hints: list[dict] | None = None, ideas: str = "") -> str:
+                  hints: list[dict] | None = None, ideas: str = "", tip: tuple[dict, str] | None = None,
+                  dirty: dict[str, str] | None = None) -> str:
     lines = [f"{h['n']}. {h['action']} -> {h['status']}{': ' + h['detail'] if h['detail'] else ''}"
              for h in history[-HISTORY_LIMIT:]]
     charter = {"mission": ctx.mission, "test_ideas": ctx.test_ideas, "oracles": ctx.oracles, "risks": ctx.risks}
@@ -453,6 +657,10 @@ def _user_message(ctx: CharterContext, history: list[dict], observation: str, st
         f"<history>\n{chr(10).join(lines) or '(no steps yet)'}\n</history>\n\n"
         f"<page>\n{observation}\n</page>\n\n"
         + (f"<ideas>\n{defang(ideas)}\n</ideas>\n\n" if ideas else "")
+        + ((f"You changed {', '.join(defang(k) for k in dirty)} since the last submit: nothing is tested until the form is sent.\n"
+            if dirty else "")
+           + (f"<next>\nA good next step, if you have nothing better: {defang(json.dumps(tip[0], ensure_ascii=False))} "
+              f"({defang(tip[1])})\n</next>\n\n" if tip else ""))
         + (("<pair>\n" + "\n".join(f"{h['by']}: {defang(h['text'])}" for h in hints) + "\n</pair>\n"
             "Your pair asks you to try this next: do it now, unless it would leave the app or do something "
             "irreversible (then say so in a note).\n\n") if hints else "")
@@ -501,7 +709,7 @@ def answer_of(a: schemas.ExploreAction, before: FormState, after: FormState) -> 
     said = (new_messages + new_lines)[:6]
     if said:
         return said, "now"
-    if a.kind in ("click", "press") and after.messages:
+    if a.kind in SUBMITS and after.messages:
         return after.messages[:6], "still"
     return [], ""
 
@@ -743,6 +951,10 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                 asked: set[str] = set()  # questions already noted
                 tried_values: dict[str, set[str]] = {}  # field label -> values submitted (for the test ideas)
                 last_fields: list[dict] = []  # the last form seen, for the ideas tally at the end
+                dirty: dict[str, str] = {}  # fields changed since the last submit: nothing is tested until it is sent
+                n_submits = 0
+                visited: set[str] = {start_url.split("#")[0]}
+                stuck = 0  # steps in a row that taught nothing (refused, failed, unusable)
                 await page.goto(start_url, wait_until="domcontentloaded", timeout=30_000)
                 await signals.settle()
                 _record(session_id, [Signal("navigation", f"Opened {start_url}", start_url, now())])
@@ -773,29 +985,53 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         observation += "\n" + defang(before.text())
                     drain_signals()
                     hints = _pending_hints(run_id)
-                    ideas, _, _ = ideas_text(before.fields, tried_values, utcnow().date())
-                    try:
-                        step = await complete_json(provider, PROMPT, _user_message(ctx, history, observation, max_steps - n + 1,
-                                                                                   hints, ideas),
-                                                   schemas.LLMExploreStep, task="explore_step", max_tokens=900)
-                    except LLMOutputError as err:
-                        bad_replies += 1
-                        reason = str(err).split("Details: ", 1)[-1].splitlines()[:3]
-                        history.append({"n": len(history) + 1, "thought": "", "action": "(unusable reply)", "kind": "invalid",
-                                        "status": "failed", "detail": "; ".join(reason), "url": page.url})
-                        _save(run_id, steps=list(history))
-                        if bad_replies >= MAX_BAD_REPLIES:
-                            raise
-                        continue
-                    bad_replies = 0
+                    today = utcnow().date()
+                    ideas, _, _ = ideas_text(before.fields, tried_values, today)
+                    tip = suggest(ctx, before, tried_values, dirty, n_submits, visited, today)
+                    stepped_in = False
+                    if stuck >= STEP_IN_AFTER and tip and not hints:
+                        # A small model can loop for the rest of the run; a tester at its side would take
+                        # the keyboard for a moment. Mirmera does: it runs the next idea itself.
+                        step = schemas.LLMExploreStep(thought=f"Mirmera stepped in: {stuck} steps in a row taught nothing, "
+                                                              f"so it took the next step itself ({tip[1]}).",
+                                                      action=schemas.ExploreAction(**tip[0]))
+                        stepped_in = True
+                    else:
+                        try:
+                            step = await complete_json(provider, PROMPT, _user_message(ctx, history, observation, max_steps - n + 1,
+                                                                                       hints, ideas, tip, dirty),
+                                                       schemas.LLMExploreStep, task="explore_step", max_tokens=900)
+                        except LLMOutputError as err:
+                            bad_replies += 1
+                            stuck += 1
+                            reason = str(err).split("Details: ", 1)[-1].splitlines()[:3]
+                            history.append({"n": len(history) + 1, "thought": "", "action": "(unusable reply)", "kind": "invalid",
+                                            "status": "failed", "detail": "; ".join(reason), "url": page.url})
+                            _save(run_id, steps=list(history))
+                            if bad_replies >= MAX_BAD_REPLIES:
+                                raise
+                            continue
+                        bad_replies = 0
                     if hints:
                         _hints_taken(run_id, {h["id"] for h in hints}, len(history) + 1)
                         for h in hints:
                             if h["by"] != "Mirmera":
                                 _note(session_id, "setup", f"Hint from {h['by']}: {h['text']}")
                     a = step.action
-                    entry = {"n": len(history) + 1, "thought": step.thought, "action": describe(a), "kind": a.kind,
-                             "status": "ok", "detail": "", "url": page.url}
+                    picked = ""
+                    if a.pick:  # a fill without a value: the next test idea for that field
+                        f = find_field(before, field_name(a))
+                        choice = next(((w, v) for w, v in ideas_for(f, today) if v not in tried_values.get(f["label"], set())),
+                                      None) if f else None
+                        if f and (choice or valid_value(f, today) is not None):
+                            what, value = choice or ("ordinary valid data", valid_value(f, today))
+                            a = a.model_copy(update={"value": value, "pick": False})
+                            picked = f"no value given, so Mirmera used the next test idea ({what})"
+                    entry = {"n": len(history) + 1, "thought": step.thought,
+                             "action": describe(a) if not a.pick else f"{a.kind} {field_name(a) or '?'} (no value)",
+                             "kind": a.kind, "status": "ok", "detail": "", "url": page.url}
+                    if stepped_in:
+                        entry["by"] = "Mirmera"
                     entry["t"] = round(time.monotonic() - filmed_from, 2)  # where this step is in the recording
                     if a.kind != "done":
                         entry |= await _step_frame(page, folder, run_id, entry["n"], a)
@@ -804,10 +1040,25 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         history.append(entry)
                         final = {"status": "finished", "summary": a.summary, "detail": "The agent finished the charter."}
                         break
+                    if a.pick:
+                        entry["status"], entry["detail"] = "refused", f"{a.kind} needs a value and a field of this page." + suggestion_text(tip)
+                        history.append(entry)
+                        stuck += 1
+                        _save(run_id, steps=list(history))
+                        continue
                     if a.kind == "note":
+                        why = None
                         if _norm(a.note) in noted:
-                            entry["status"], entry["detail"] = "refused", "you already noted this: try the next idea"
+                            why = "you already noted this."
+                        elif history and history[-1]["kind"] == "note" and history[-1]["status"] == "ok":
+                            why = "two notes in a row: don't describe the plan, act on it."
+                        elif CLAIM.search(a.note) and (dirty or not n_submits):
+                            why = (("nothing was submitted since the form changed" if n_submits else "nothing was submitted yet")
+                                   + ", so the app hasn't accepted or refused anything: submit to find out.")
+                        if why:
+                            entry["status"], entry["detail"] = "refused", why + suggestion_text(tip)
                             history.append(entry)
+                            stuck += 1
                             _save(run_id, steps=list(history))
                             continue
                         noted.add(_norm(a.note))
@@ -833,29 +1084,49 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                 bug_ids.append(_draft_bug(session_id, charter_id, a.problem, detail, steps, page.url, shot, provider))
                                 reported.add(key)
                                 entry["status"], entry["detail"] = "drafted", detail
+                        if entry["status"] != "drafted":
+                            entry["detail"] += "." + suggestion_text(tip)
+                        stuck = 0 if entry["status"] == "drafted" else stuck + 1
                         history.append(entry)
                         _save(run_id, steps=list(history), bug_ids=list(bug_ids))
                         continue
 
                     if why := pointless(a, page.url, before, tried):
-                        entry["status"], entry["detail"] = "refused", f"not run: {why}"
+                        entry["status"], entry["detail"] = "refused", f"not run: {why}." + suggestion_text(tip)
                         history.append(entry)
+                        stuck += 1
                         _save(run_id, steps=list(history))
                         continue
-                    if a.kind in ("click", "press"):
+                    if a.kind in SUBMITS:
                         tried[(describe(a), page.url, before.values())] = entry["n"]
-                        for f in before.fields:  # a value counts as tried once it has been submitted
-                            tried_values.setdefault(f["label"], set()).add(f["value"])
                     failed_before, page_errors_before = len(signals.failed), len(signals.page_errors)
                     acted_at = time.monotonic()
-                    browser_action = a.as_browser_action()
+                    done_actions: list[dict] | None = None  # what was done, when Mirmera did it its own way
                     try:
-                        entry["status"], entry["detail"] = await act(page, browser_action, origins)
+                        if a.kind == "try":
+                            entry["status"], entry["detail"], done_actions, sent_form = await do_try(page, a, before, today)
+                            if sent_form:
+                                before = sent_form  # the form as it was sent: what the answer is read against
+                        elif a.kind in ("fill", "select", "check", "uncheck") and (f := find_field(before, field_name(a))):
+                            entry["status"], entry["detail"], how = await set_field(page, f, a.kind, a.value)
+                            if entry["status"] == "ok":
+                                a = a.model_copy(update={"kind": how, "locator": schemas.PlanLocator(method="label", value=f["label"]),
+                                                         "value": a.value if how in ("fill", "select") else None})
+                                if how == "select":
+                                    a = a.model_copy(update={"value": option_of(f, a.value or "")})
+                                entry["action"], entry["kind"] = describe(a), a.kind
+                        else:
+                            entry["status"], entry["detail"] = await act(page, a.as_browser_action(), origins)
                     except Exception as err:
                         entry["status"], entry["detail"] = "failed", _first_line(err)
+                    if picked:
+                        entry["detail"] = picked + ("; " + entry["detail"] if entry["detail"] else "")
+                    if a.kind in SUBMITS and entry["status"] == "ok":
+                        for f in before.fields:  # a value counts as tried once it has been submitted
+                            tried_values.setdefault(f["label"], set()).add(f["value"])
                     # A submit's answer can take a while (a document check, a slow API): wait for what
                     # it sent to come back, up to 10 s, so the answer is read, not "Checking…".
-                    await signals.settle(timeout_ms=10_000 if a.kind in ("click", "press") else 3_000)
+                    await signals.settle(timeout_ms=10_000 if a.kind in SUBMITS else 3_000)
                     if not page.is_closed() and not in_app(page.url, origins):
                         left = page.url
                         await _back_into_app(page, entry["url"], signals)
@@ -864,19 +1135,39 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     broke = crashes(signals.failed[failed_before:], signals.page_errors[page_errors_before:])
                     said: list[str] = []  # what the app answered this step
                     after = FormState()
+                    toggled = False
                     if entry["status"] == "ok" and not page.is_closed():
                         after = await form_state(page)
-                        said, how = answer_of(a, before, after)
-                        if said:  # kept in the history, so the AI can compare tries
-                            entry["detail"] = f"the page {how} says " + "; ".join(f'"{m[:160]}"' for m in said[:3])
+                        changes = field_changes(before, after)
+                        if a.kind == "click" and changes and all(f["type"] in ("checkbox", "radio") for f, _, _ in changes) \
+                                and not [m for m in after.messages if m not in before.messages]:
+                            # A click on a checkbox or its label ticks it; it doesn't send anything.
+                            toggled = True
+                            entry["detail"] = "; ".join(f'"{f["label"]}" is now {now_}' for f, _, now_ in changes) + \
+                                " (not sent yet: the page's old message stays until you submit)"
+                        else:
+                            said, how = answer_of(a, before, after)
+                            if said:  # kept in the history, so the AI can compare tries
+                                entry["detail"] = (entry["detail"] + "; " if entry["detail"] and a.kind != "try" else "") + \
+                                    f"the page {how} says " + "; ".join(f'"{m[:160]}"' for m in said[:3])
+                        if a.kind not in SUBMITS or toggled:
+                            for f, _, now_ in changes:
+                                dirty[f["label"]] = now_
+                        visited.add(after.url.split("#")[0])
                     if entry["status"] == "ok":
                         if a.kind == "goto":
                             steps.append({"type": "goto", "url": a.url})
                             _record(session_id, [Signal("navigation", f"Opened {a.url}", a.url, now())])
-                        elif rec := recorded_action(a):
-                            steps.append({"type": "action", "action": rec, "url": entry["url"]})
-                            _record(session_id, [Signal("action", describe_action(rec), entry["url"], now(), rec)])
-                    if said and ctx.has_rules() and a.kind in ("click", "press"):  # a submit, and the app answered
+                        else:
+                            for rec in (done_actions if done_actions is not None else [recorded_action(a)]):
+                                if rec:
+                                    steps.append({"type": "action", "action": rec, "url": entry["url"]})
+                                    _record(session_id, [Signal("action", describe_action(rec), entry["url"], now(), rec)])
+                    is_submit = a.kind in SUBMITS and not toggled
+                    if is_submit and entry["status"] == "ok":
+                        dirty.clear()
+                        n_submits += 1
+                    if said and ctx.has_rules() and is_submit:  # a submit, and the app answered
                         j = await judge(checker or provider, ctx, before, said, page.url)
                         if j:
                             rules = rules_of(ctx)
@@ -941,7 +1232,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         entry["detail"] = (entry["detail"] + "; " if entry["detail"] else "") + problem.title
                         return True
 
-                    submitted = a.kind in ("click", "press") and entry["status"] in ("ok", "drafted")
+                    submitted = is_submit and entry["status"] in ("ok", "drafted")
                     sent = f" (sent: {sent_text(before)[:300]})" if submitted and before.fields else ""
                     # Crashes need no rule: a server error or an uncaught page error after this step
                     # is a bug draft whatever the story says (Mirmera saw it itself; no AI involved).
@@ -1027,9 +1318,10 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                       + "; ".join(f"{x.get('rule')}: {x.get('text')}" for x in leads[:5]))
                     # Slow answers: a tester notices waiting.
                     took = time.monotonic() - acted_at
-                    if a.kind in ("click", "press") and took > 5:
+                    if is_submit and took > 5:
                         _note(session_id, "issue", f"Slow: after {entry['action']} the app took {took:.1f} s to answer.")
                     history.append(entry)
+                    stuck = stuck + 1 if entry["status"] in ("refused", "failed", "not verified") else 0
                     _save(run_id, steps=list(history), bug_ids=list(bug_ids))
                 else:
                     final = {"status": "finished", "detail": f"Used all {max_steps} steps."}
