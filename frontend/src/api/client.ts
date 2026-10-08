@@ -328,6 +328,8 @@ export interface AgentStep {
   status: string
   detail: string
   url: string
+  /** "Mirmera" when Mirmera took this step itself because the AI was stuck */
+  by?: string
 }
 
 export interface ReproductionRun {
@@ -744,7 +746,9 @@ export interface ExplorationRun {
   id: string; project_id: string; charter_id: string; session_id: string | null
   status: 'running' | 'finished' | 'cancelled' | 'error'; start_url: string; max_steps: number
   steps: { n: number; thought: string; action: string; kind: string; status: string; detail: string; url: string
-    frame?: string; box?: [number, number, number, number]; t?: number }[]
+    frame?: string; box?: [number, number, number, number]; t?: number
+    /** "Mirmera" when Mirmera took this step itself because the AI was stuck */
+    by?: string }[]
   bug_ids: string[]; summary: string | null; detail: string | null; started_by: string | null
   ai_provider: string | null; ai_model: string | null; created_at: string; finished_at: string | null
   video?: string | null

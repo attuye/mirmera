@@ -50,7 +50,7 @@ def exploration(run: models.ExplorationRun | None, db: DBSession) -> dict | None
         "run_id": run.id, "status": run.status, "charter_id": run.charter_id, "mission": run.charter.mission_statement,
         "session_id": run.session_id, "steps_used": len(steps), "max_steps": run.max_steps,
         "actions": sum(1 for s in steps if s.get("kind") not in NOT_ACTIONS),
-        "recent": [{k: s.get(k) for k in ("n", "thought", "action", "kind", "status", "detail")} for s in steps[-RECENT_STEPS:]],
+        "recent": [{k: s.get(k) for k in ("n", "thought", "action", "kind", "status", "detail", "by")} for s in steps[-RECENT_STEPS:]],
         "bugs": [{"id": b.id, "title": b.title, "severity": b.severity} for b in bugs if b],
         "summary": run.summary, "detail": run.detail,
     }

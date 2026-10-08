@@ -4,6 +4,7 @@ import re
 from datetime import date, datetime
 from typing import Any, ClassVar, Optional, Literal
 
+from pydantic.json_schema import SkipJsonSchema
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 
@@ -1227,12 +1228,12 @@ class ExploreProblem(BaseModel):
 
 
 EXPLORE_KINDS = ("goto", "click", "fill", "fill_secret", "select", "check", "uncheck", "press", "wait",
-                 "note", "problem", "done")
+                 "try", "note", "problem", "done")
 
 
 class ExploreAction(BaseModel):
     kind: Literal["goto", "click", "fill", "fill_secret", "select", "check", "uncheck", "press", "wait",
-                  "note", "problem", "done"]
+                  "try", "note", "problem", "done"]
 
     @model_validator(mode="before")
     @classmethod
@@ -1262,8 +1263,27 @@ class ExploreAction(BaseModel):
         if k in ("click", "fill", "select", "check", "uncheck", "press", "fill_secret") and "locator" not in d \
                 and isinstance(d.get("target"), dict):
             d["locator"] = d.pop("target")
+        loc = d.get("locator")
+        if k in ("fill", "select") and d.get("value") is None and isinstance(loc, dict) \
+                and str(loc.get("method", "")).lower() != "role" and loc.get("name") and loc.get("value"):
+            # {"locator": {"method": "label", "name": "Expiry date", "value": "2020-01-01"}}: the field and what to type
+            d["value"], d["locator"] = loc["value"], {**loc, "value": loc["name"]}
+        field_name = d.get("key") if isinstance(d.get("key"), str) and d.get("key") not in AGENT_KEYS else None
+        if k in ("fill", "select", "check", "uncheck") and not d.get("locator") and (field_name or d.get("field")):
+            # {"kind": "select", "key": "documentType", "value": "Passport"}: the field by its name
+            d["locator"] = {"method": "label", "value": field_name or d.get("field")}
+            d.pop("key", None)
+        if k == "try":
+            vals = next((d[x] for x in ("values", "fields", "inputs", "data", "form") if isinstance(d.get(x), dict)), None)
+            if vals is None and isinstance(loc, dict) and d.get("value") is not None:
+                vals = {loc.get("value") or loc.get("name") or "": d["value"]}
+            d["values"] = {str(f): ("" if v is None else str(v)) for f, v in (vals or {}).items() if str(f).strip()}
+        if k in ("fill", "select") and d.get("value") is None and d.get("locator"):
+            d["pick"] = True  # no value given: Mirmera picks the next test idea for that field
         return d
     locator: Optional[PlanLocator] = None
+    values: dict[str, str] = {}  # try: field label -> value; every other field gets ordinary valid data
+    pick: SkipJsonSchema[bool] = False  # fill/select without a value: Mirmera fills in the next test idea (not for the AI to set)
     url: Optional[str] = Field(default=None, max_length=2000)
     value: Optional[str] = Field(default=None, max_length=500)
     secret: Optional[str] = None
@@ -1281,7 +1301,9 @@ class ExploreAction(BaseModel):
             raise ValueError("problem needs title, expected, actual and the symptom")
         if k == "done" and not (self.summary or "").strip():
             raise ValueError("done needs a summary of what was covered")
-        if k not in ("note", "problem", "done"):
+        if k == "try" and len(self.values) > 12:
+            raise ValueError("try changes a few fields at most (the rest are filled with valid data)")
+        if k not in ("note", "problem", "done", "try") and not self.pick:
             self.as_browser_action()  # the same checks as the reproduction agent's actions
         return self
 

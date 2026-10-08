@@ -73,6 +73,7 @@ class RunScore:
     unusable: int = 0  # replies the AI got wrong (format)
     refused: int = 0  # steps Mirmera refused (repeats, outside the app, unverified claims)
     checked: int = 0  # answers checked against the rules
+    stepped_in: int = 0  # steps Mirmera took itself because the AI was stuck
     seconds: float = 0.0
     detail: str = ""
 
@@ -103,6 +104,7 @@ def score(db, run) -> RunScore:
     s.unusable = sum(1 for x in steps if x.get("kind") == "invalid")
     s.refused = sum(1 for x in steps if x.get("status") in ("refused", "not verified"))
     s.checked = sum(1 for x in steps if x.get("judged"))
+    s.stepped_in = sum(1 for x in steps if x.get("by") == "Mirmera")
     if run.finished_at and run.created_at:
         s.seconds = round((run.finished_at - run.created_at).total_seconds(), 1)
     return s
@@ -159,7 +161,8 @@ def run_eval(app_url: str, provider: str, *, checker: str | None = None, runs: i
                 out.append(s)
                 on_progress(f"  {s.status}: found {', '.join(s.found) or 'nothing'}"
                             + (f"; {len(s.false_alarms)} false alarm(s)" if s.false_alarms else "")
-                            + f"; {s.steps} steps, {s.unusable} unusable, {s.seconds}s")
+                            + f"; {s.steps} steps, {s.unusable} unusable, {s.stepped_in} by Mirmera, {s.seconds}s"
+                            + (f"\n  why it stopped: {s.detail}" if s.status == "error" else ""))
     return out
 
 
@@ -177,11 +180,12 @@ def report(scores: list[RunScore], provider: str, checker: str | None) -> str:
     lines += ["", "## False alarms", "",
               f"{len(alarms)} of {drafts} drafts matched no planted bug." + (" Review them: some may be real." if alarms else ""), ""]
     lines += [f"- {a}" for a in alarms]
-    lines += ["", "## Runs", "", "| Charter | Status | Found | False alarms | Steps | Actions | Unusable replies | Refused | Checked | Seconds |",
-              "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+    lines += ["", "## Runs", "", "Mirmera stepped in: steps Mirmera took itself after three steps in a row that taught nothing.", "",
+              "| Charter | Status | Found | False alarms | Steps | Actions | Unusable replies | Refused | Mirmera stepped in | Checked | Seconds |",
+              "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for s in scores:
         lines.append(f"| {s.charter} | {s.status} | {', '.join(s.found) or '–'} | {len(s.false_alarms)} | {s.steps} | {s.actions} "
-                     f"| {s.unusable} | {s.refused} | {s.checked} | {s.seconds} |")
+                     f"| {s.unusable} | {s.refused} | {s.stepped_in} | {s.checked} | {s.seconds} |")
     stopped = [s for s in scores if s.status == "error"]
     if stopped:
         lines += ["", "## Runs that stopped", ""] + [f"- {s.charter}: {s.detail}" for s in stopped]
@@ -196,6 +200,23 @@ def _answers(url: str) -> bool:
         return False
 
 
+def steps_text() -> str:
+    """Every step of every run, with the AI's reasons: what to read when a bug was missed."""
+    from app import models
+    from app.database import SessionLocal
+    out = []
+    with SessionLocal() as db:
+        for run in db.query(models.ExplorationRun).order_by(models.ExplorationRun.created_at).all():
+            out += ["", f"## {run.charter.mission_statement}", "", f"{run.status}: {run.detail or ''}", ""]
+            for st in run.steps or []:
+                who = " (Mirmera stepped in)" if st.get("by") == "Mirmera" else ""
+                out.append(f"{st.get('n')}. [{st.get('kind')}] {st.get('action')} -> {st.get('status')}{who}"
+                           + (f": {st['detail']}" if st.get("detail") else ""))
+                if st.get("thought"):
+                    out.append(f"   - thought: {st['thought'][:300]}")
+    return "# Every step\n" + "\n".join(out) + "\n"
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--provider", default="local", help="mock, local, claude or openai (default: local)")
@@ -204,6 +225,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--steps", type=int, default=25, help="step budget per run")
     ap.add_argument("--only", nargs="*", choices=[k for k, _, _ in CHARTERS], help="just these charters")
     ap.add_argument("--app-url", default="http://localhost:4100", help="the practice app (started here if nothing answers)")
+    ap.add_argument("--ai-only", action="store_true",
+                    help="Mirmera never steps in when the AI is stuck: measures the model on its own")
     ap.add_argument("--out", default=None, help="folder for the database, evidence and report (default: a new temp folder)")
     args = ap.parse_args(argv)
 
@@ -223,10 +246,14 @@ def main(argv: list[str] | None = None) -> int:
             time.sleep(0.2)
     try:
         import app.main  # noqa: F401  (creates the database's tables, as the server does)
+        if args.ai_only:
+            from app.agent import explore as agent
+            agent.STEP_IN_AFTER = 10 ** 6
         scores = run_eval(args.app_url, args.provider, checker=args.checker, runs=args.runs, max_steps=args.steps, only=args.only)
         text = report(scores, args.provider, args.checker)
         (folder / "report.md").write_text(text, encoding="utf-8")
-        print("\n" + text + f"\nReport, database and recordings: {folder}")
+        (folder / "steps.md").write_text(steps_text(), encoding="utf-8")
+        print("\n" + text + f"\nReport (report.md), every step (steps.md), database and recordings: {folder}")
     finally:
         if app_proc:
             app_proc.terminate()

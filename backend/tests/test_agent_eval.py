@@ -149,7 +149,8 @@ def test_an_ideal_tester_finds_every_planted_bug_and_nothing_else(client, practi
     found = {k for s in scores for k in s.found}
     assert found == {"passport", "expired", "geez", "documents"}, [(s.charter, s.found, s.false_alarms, s.detail) for s in scores]
     assert [a for s in scores for a in s.false_alarms] == []
-    assert all(s.status == "finished" and s.unusable == 0 for s in scores)
+    assert all(s.status == "finished" and s.unusable == 0 and s.stepped_in == 0 for s in scores)  # all its own work
+    assert "## Explore expiry dates" in explore_eval.steps_text()
     text = explore_eval.report(scores, "ideal", None)
     assert "| Expired documents are accepted | 1 of 4 runs | 25% |" in text and "0 of 4 drafts matched no planted bug." in text
 
@@ -228,7 +229,7 @@ def test_a_model_that_makes_things_up_drafts_nothing(client, practice_app, monke
     assert [s["status"] for s in steps[1:4]] == ["not verified"] * 3
 
 
-def test_a_model_that_loops_is_stopped_from_repeating_and_the_run_ends(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
+def test_a_model_that_loops_is_refused_and_mirmera_steps_in(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
     looping = [step("Open it", kind="goto", url=f"{practice_app}/verify"),
                step("Name", kind="fill", locator=label("Full name"), value="John"),
                step("Submit", kind="click", locator=VERIFY),
@@ -236,8 +237,57 @@ def test_a_model_that_loops_is_stopped_from_repeating_and_the_run_ends(client, p
                step("Submit", kind="click", locator=VERIFY)]  # repeated to the end
     score, steps, _ = one_charter(monkeypatch, Scripted(looping), practice_app, "expiry", steps=10)
     assert score.status == "finished" and score.steps == 10
-    assert [s["status"] for s in steps[4:]] == ["refused"] * 6  # the same submit, never run again
+    assert [s["status"] for s in steps[4:7]] == ["refused"] * 3  # the same submit, never run again
     assert "you did exactly this at step 3" in steps[4]["detail"]
+    assert '"kind": "try"' in steps[4]["detail"]  # and what to do instead
+    # Three steps that taught nothing: Mirmera takes the keyboard and runs the charter's next idea itself.
+    assert steps[7].get("by") == "Mirmera" and steps[7]["action"].startswith('try Expiry date = "2020-01-01"')
+    assert "stepped in" in steps[7]["thought"]
+    assert score.found == ["expired"]
+
+
+def test_a_small_model_that_only_writes_notes_still_gets_somewhere(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
+    """From a real qwen3:8b run: the same plan, written as a note, step after step. Repeats and
+    second notes are refused with a next step to take; when it still loops, Mirmera takes it."""
+    planning = [step("Open it", kind="goto", url=f"{practice_app}/verify"),
+                step("Plan", kind="note", note="Starting with the National ID verification. I will fill in all fields.")]
+    provider = Scripted(planning)
+    score, steps, _ = one_charter(monkeypatch, provider, practice_app, "documents", steps=12)
+    assert [s["status"] for s in steps[2:5]] == ["refused"] * 3
+    assert "you already noted this" in steps[2]["detail"] and '{"kind": "try", "values": {}}' in steps[2]["detail"]
+    assert "<next>" in provider.users[2]
+    by_mirmera = [s for s in steps if s.get("by") == "Mirmera"]
+    assert by_mirmera[0]["action"] == "try the form with valid data, then submit"
+    assert "Verified" in by_mirmera[0]["detail"]
+    assert by_mirmera[1]["action"] == 'try Document type = "Passport", then submit'  # the charter is about document types
+    assert score.found == ["passport"]
+
+
+def test_fields_are_set_the_way_a_person_would(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
+    """What qwen3:8b got wrong in a real run, each now done as it meant: a date field found by a
+    placeholder it doesn't have, a dropdown and a checkbox "filled", a fill with no value, a click
+    on the terms' label, a note claiming a result before anything was sent."""
+    habits = [step("Open it", kind="goto", url=f"{practice_app}/verify"),
+              step("Past date", kind="fill", locator={"method": "placeholder", "value": "Expiry date"}, value="2020-01-01"),
+              step("Passport", kind="fill", locator=label("Document type"), value="passport"),
+              step("Terms", kind="fill", locator=label("I accept the terms"), value="true"),
+              step("Terms again", kind="click", locator={"method": "text", "value": "I accept the terms"}),
+              step("A name", kind="fill", locator=label("Full name")),
+              step("Claim", kind="note", note="The full name field accepts Ge'ez script."),
+              step("Try it", kind="try", values={"Expiry date": "2020-01-01"}),
+              step("Done", kind="done", summary="Tried an expired document.")]
+    provider = Scripted(habits)
+    score, steps, _ = one_charter(monkeypatch, provider, practice_app, "expiry", steps=10)
+    assert steps[1]["status"] == "ok" and steps[1]["action"] == 'fill label "Expiry date" = "2020-01-01"'
+    assert steps[2]["status"] == "ok" and steps[2]["kind"] == "select" and 'so Mirmera chose "Passport"' in steps[2]["detail"]
+    assert steps[3]["status"] == "ok" and steps[3]["kind"] == "check" and "ticked" in steps[3]["detail"]
+    assert steps[4]["status"] == "ok" and '"I accept the terms" is now not checked' in steps[4]["detail"]
+    assert steps[5]["status"] == "ok" and "next test idea (Ge'ez script)" in steps[5]["detail"]
+    assert steps[6]["status"] == "refused" and "nothing was submitted" in steps[6]["detail"]
+    assert "nothing is tested until the form is sent" in provider.users[6]
+    # One try: the expiry it names, every other field valid (National ID, a Latin name, terms ticked), sent.
+    assert steps[7]["status"] == "drafted" and "Verified" in steps[7]["detail"]
+    assert score.found == ["expired"] and score.false_alarms == []
 
 
 def test_a_model_that_wanders_off_stays_in_the_app(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
@@ -248,7 +298,10 @@ def test_a_model_that_wanders_off_stays_in_the_app(client, practice_app, monkeyp
                  step("Done", kind="done", summary="Wandered.")]
     score, steps, session_id = one_charter(monkeypatch, Scripted(wandering), practice_app, "expiry")
     # Other sites and ports are refused; javascript: and file: aren't even a step (not http).
-    assert [(s["kind"], s["status"]) for s in steps] == [("goto", "refused"), ("invalid", "failed"), ("goto", "refused"), ("done", "ok")]
+    # After three steps that went nowhere, Mirmera steps in, inside the app: the charter mentions documents.
+    assert [(s["kind"], s["status"]) for s in steps] == [("goto", "refused"), ("invalid", "failed"), ("goto", "refused"),
+                                                        ("goto", "drafted"), ("done", "ok")]
+    assert steps[3]["by"] == "Mirmera" and steps[3]["action"] == f"open {practice_app}/documents"
     assert "goto needs an absolute http(s) url" in steps[1]["detail"]
     from app import models
     from app.database import SessionLocal
@@ -393,6 +446,43 @@ def test_near_json_is_read(raw):
     from app import schemas
     from app.ai.llm_json import _parse
     assert _parse(raw, schemas.LLMExploreStep).action.kind == "wait"
+
+
+def test_the_shapes_qwen_wrote_for_fields_are_read_as_meant():
+    from app import schemas
+    from app.ai.llm_json import _parse
+    def act(raw):
+        return _parse('{"thought": "t", "action": %s}' % raw, schemas.LLMExploreStep).action
+    a = act('{"kind": "fill", "locator": {"method": "label", "name": "Expiry date", "value": "2020-01-01"}}')
+    assert (a.locator.value, a.value) == ("Expiry date", "2020-01-01")  # the field, and what to type
+    a = act('{"kind": "select", "key": "documentType", "value": "Passport"}')
+    assert (a.locator.method, a.locator.value, a.value) == ("label", "documentType", "Passport")
+    a = act('{"kind": "fill", "locator": {"method": "label", "value": "Full name"}}')
+    assert a.pick and a.value is None  # no value: Mirmera picks the next test idea for it
+    assert act('{"kind": "try", "fields": {"Expiry date": "2020-01-01", "Full name": null}}').values == \
+        {"Expiry date": "2020-01-01", "Full name": ""}
+    assert act('{"kind": "try"}').values == {}  # the form with valid data only
+    a = act('{"kind": "try", "locator": {"method": "label", "value": "Full name"}, "value": "A"}')
+    assert a.values == {"Full name": "A"}
+
+
+def test_the_field_a_small_model_means_is_found():
+    from datetime import date
+    from app.agent.explore import FormState, find_field, valid_value, option_of
+    st = FormState(fields=[
+        {"label": "Full name", "type": "text", "value": "", "required": False, "idx": 0, "keys": ["name"]},
+        {"label": "Document type", "type": "select-one", "value": "National ID", "required": False, "idx": 1,
+         "keys": ["doctype"], "options": ["National ID", "Passport", "Driver's licence"]},
+        {"label": "Document number", "type": "text", "value": "", "required": False, "idx": 2, "keys": ["docnum"]},
+        {"label": "Expiry date", "type": "date", "value": "", "required": False, "idx": 3, "keys": ["expiry"]},
+        {"label": "I accept the terms", "type": "checkbox", "value": "not checked", "required": False, "idx": 4, "keys": ["terms"]}])
+    assert find_field(st, "documentType")["idx"] == 1 and find_field(st, "doctype")["idx"] == 1
+    assert find_field(st, "expiry")["idx"] == 3 and find_field(st, "terms")["idx"] == 4
+    assert find_field(st, "Document") is None  # two fields could be meant: ask, don't guess
+    assert find_field(st, "Phone") is None
+    assert option_of(st.fields[1], "passport") == "Passport" and option_of(st.fields[1], "licence") == "Driver's licence"
+    today = date(2026, 10, 8)
+    assert [valid_value(f, today) for f in st.fields] == ["Abebe Kebede", "National ID", "A1234567", "2027-10-08", "checked"]
 
 
 def test_what_still_cant_be_read_is_refused():
