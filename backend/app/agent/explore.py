@@ -45,7 +45,25 @@ RUN_TIMEOUT_S = 900
 MAX_BAD_REPLIES = 3
 
 ACTIVE: set[str] = set()  # run ids being worked on in this process
-VIEWPORT = {"width": 1280, "height": 800}  # fixed, so a target's box can be drawn on any frame
+VIEWPORT = {"width": 1280, "height": 800}  # fixed per run, so a target's box can be drawn on any frame
+PHONE = {"width": 390, "height": 844}
+SLOW_NETWORK = {"offline": False, "latency": 400, "downloadThroughput": 50 * 1024, "uploadThroughput": 20 * 1024}
+
+
+def context_options(conditions: dict | None) -> dict:
+    """How the agent's browser is set up: a desktop by default, or a phone, in a language
+    and time zone (the network is slowed separately, on the page)."""
+    c = conditions or {}
+    out: dict = {"viewport": PHONE if c.get("device") == "phone" else VIEWPORT}
+    if c.get("device") == "phone":
+        out |= {"is_mobile": True, "has_touch": True, "device_scale_factor": 2,
+                "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+                              "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"}
+    if c.get("locale"):
+        out["locale"] = c["locale"]
+    if c.get("timezone"):
+        out["timezone_id"] = c["timezone"]
+    return out
 
 
 @dataclass
@@ -59,7 +77,7 @@ class Live:
 LIVE: dict[str, Live] = {}  # run id -> its latest frame, while it runs
 
 
-async def _start_screencast(page, live: Live) -> None:
+async def _start_screencast(page, live: Live, viewport: dict = VIEWPORT, slow: bool = False) -> None:
     """Chromium sends a frame whenever the page repaints: kept as the latest frame."""
     import asyncio
     import base64
@@ -75,20 +93,24 @@ async def _start_screencast(page, live: Live) -> None:
                 pass
 
         cdp.on("Page.screencastFrame", lambda params: asyncio.ensure_future(on_frame(params)))
+        if slow:  # a slow mobile network, for the whole run
+            await cdp.send("Network.enable")
+            await cdp.send("Network.emulateNetworkConditions", SLOW_NETWORK)
         await cdp.send("Page.startScreencast", {"format": "jpeg", "quality": 60,
-                                              "maxWidth": VIEWPORT["width"], "maxHeight": VIEWPORT["height"]})
+                                              "maxWidth": viewport["width"], "maxHeight": viewport["height"]})
     except Exception as err:  # watching is a nicety: the run goes on without it
         logger.info("No live view for this run: %s", _first_line(err))
 
 
-async def _recording_context(browser, folder: Path, run_id: str):
+async def _recording_context(browser, folder: Path, run_id: str, options: dict | None = None):
     """A browser context that films itself (a WebM video, written when the context closes)."""
+    options = options or {"viewport": VIEWPORT}
     try:
-        return await browser.new_context(viewport=VIEWPORT, record_video_dir=str(folder / f"video-{run_id[:8]}"),
-                                         record_video_size=VIEWPORT)
+        return await browser.new_context(**options, record_video_dir=str(folder / f"video-{run_id[:8]}"),
+                                         record_video_size=options["viewport"])
     except Exception as err:  # e.g. Playwright's ffmpeg isn't installed: explore without a recording
         logger.info("No recording for this run: %s", _first_line(err))
-        return await browser.new_context(viewport=VIEWPORT)
+        return await browser.new_context(**options)
 
 
 async def _keep_recording(context, folder: Path, run_id: str) -> str | None:
@@ -139,6 +161,8 @@ class CharterContext:
     risks: list[dict] = field(default_factory=list)  # ref, title, failure_mode
     story: str | None = None  # the story's claims, when the charter belongs to one
     criteria: list[str] = field(default_factory=list)  # its acceptance criteria, one rule each
+    earlier: list[str] = field(default_factory=list)  # what earlier runs on this charter or story found
+    app_map: str | None = None  # the app's pages and forms, from the latest survey
 
     def has_rules(self) -> bool:
         return bool(self.criteria or self.risks)
@@ -302,6 +326,71 @@ def pointless(a: schemas.ExploreAction, url: str, before: FormState, tried: dict
     return None
 
 
+# ---------- test ideas: an experienced tester's checklist, per field ----------
+
+GEEZ_NAME = "አበበ ከበደ"
+
+
+def ideas_for(f: dict, today) -> list[tuple[str, str]]:
+    """(what, value) ideas for one field, from its type and label: the variations an
+    experienced tester tries, so a small model doesn't have to invent them."""
+    from datetime import timedelta
+    label, kind = f["label"].lower(), f["type"]
+    if kind == "date" or "date" in label:
+        return [("a past date", "2020-01-01"), ("today", today.isoformat()),
+                ("tomorrow", (today + timedelta(days=1)).isoformat()), ("29 February", "2028-02-29"),
+                ("far in the future", "2099-12-31")]
+    if kind.startswith("select"):
+        return [(f"option {o}", o) for o in f.get("options") or []]
+    if kind in ("checkbox", "radio") or kind == "password" or kind == "file":
+        return []
+    if kind == "email" or "mail" in label:
+        return [("a valid address", "name@example.com"), ("no @", "name.example.com"), ("no domain", "name@"),
+                ("very long", "a" * 64 + "@example.com")]
+    if kind == "tel" or "phone" in label or "mobile" in label:
+        return [("international format", "+251911223344"), ("local format", "0911223344"), ("letters", "abcdefg"),
+                ("too short", "12")]
+    if kind == "number" or any(w in label for w in ("number", "amount", "quantity", "age")):
+        return [("zero", "0"), ("negative", "-1"), ("very large", "999999999999"), ("letters mixed in", "12a4"),
+                ("spaces around", " 1234 ")]
+    if "name" in label:
+        return [("Ge'ez script", GEEZ_NAME), ("apostrophe and hyphen", "O'Brien-Smith"), ("one letter", "A"),
+                ("very long", "Abebe " * 50), ("spaces around", "  John Smith  "), ("an emoji", "John 😀 Smith")]
+    return [("empty", ""), ("only spaces", "   "), ("very long", "x" * 300), ("markup", "<b>bold</b>"),
+            ("quotes", "It's \"quoted\"")]
+
+
+def ideas_text(fields: list[dict], tried: dict[str, set[str]], today, limit_fields: int = 6) -> tuple[str, int, int]:
+    """The ideas not tried yet for the fields on this page (a few per field), and the tally."""
+    lines, total, done = [], 0, 0
+    for f in fields[:limit_fields]:
+        ideas = ideas_for(f, today)
+        total += len(ideas)
+        left = [(w, v) for w, v in ideas if v not in tried.get(f["label"], set())]
+        done += len(ideas) - len(left)
+        if left:
+            lines.append(f'- {f["label"]}: ' + "; ".join(f'{w} ("{v[:40]}")' for w, v in left[:3]))
+    head = f"Test ideas not tried yet ({done} of {total} tried), each with the rest of the form valid:"
+    return (head + "\n" + "\n".join(lines)) if lines else "", done, total
+
+
+def earlier_runs(db, charter) -> list[str]:
+    """What earlier explorations of this charter, or of its story's other charters, found:
+    an experienced tester doesn't repeat yesterday's session."""
+    ids = {charter.id} | {c.id for s in charter.stories for c in s.charters}
+    runs = (db.query(models.ExplorationRun).filter(models.ExplorationRun.charter_id.in_(ids),
+                                                   models.ExplorationRun.status != "running")
+            .order_by(models.ExplorationRun.created_at.desc()).limit(4).all())
+    out = []
+    for r in runs:
+        bugs = [b.title for b in (db.get(models.Bug, x) for x in r.bug_ids or []) if b]
+        when = r.created_at.strftime("%d %b") if r.created_at else "earlier"
+        out.append(f"{when}, \"{r.charter.mission_statement[:80]}\": "
+                   + (f"found {'; '.join(bugs[:3])}" if bugs else "found no bug")
+                   + (f". Summary: {r.summary[:200]}" if r.summary else ""))
+    return out
+
+
 # ---------- pairing: hints from a tester, or from Mirmera ----------
 
 def add_hint(db, run, text: str, *, by: str) -> dict:
@@ -347,7 +436,7 @@ def generalize_hint(before: FormState, title: str) -> str | None:
 
 
 def _user_message(ctx: CharterContext, history: list[dict], observation: str, steps_left: int,
-                  hints: list[dict] | None = None) -> str:
+                  hints: list[dict] | None = None, ideas: str = "") -> str:
     lines = [f"{h['n']}. {h['action']} -> {h['status']}{': ' + h['detail'] if h['detail'] else ''}"
              for h in history[-HISTORY_LIMIT:]]
     charter = {"mission": ctx.mission, "test_ideas": ctx.test_ideas, "oracles": ctx.oracles, "risks": ctx.risks}
@@ -355,10 +444,15 @@ def _user_message(ctx: CharterContext, history: list[dict], observation: str, st
         charter["acceptance_criteria"] = [f"AC{i}: {c}" for i, c in enumerate(ctx.criteria, 1)]
     if ctx.story:
         charter["story"] = ctx.story
+    if ctx.earlier:
+        charter["earlier_runs"] = ctx.earlier
+    if ctx.app_map:
+        charter["app_map"] = ctx.app_map
     return (
         f"<charter>\n{defang(json.dumps(charter, indent=2, ensure_ascii=False))}\n</charter>\n\n"
         f"<history>\n{chr(10).join(lines) or '(no steps yet)'}\n</history>\n\n"
         f"<page>\n{observation}\n</page>\n\n"
+        + (f"<ideas>\n{defang(ideas)}\n</ideas>\n\n" if ideas else "")
         + (("<pair>\n" + "\n".join(f"{h['by']}: {defang(h['text'])}" for h in hints) + "\n</pair>\n"
             "Your pair asks you to try this next: do it now, unless it would leave the app or do something "
             "irreversible (then say so in a note).\n\n") if hints else "")
@@ -611,7 +705,7 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
 
 async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, session_id: str, charter_id: str,
                     start_url: str, origins: set[str], max_steps: int, headless: bool, executable_path: str | None,
-                    folder: Path, checker: LLMProvider | None = None) -> None:
+                    folder: Path, checker: LLMProvider | None = None, conditions: dict | None = None) -> None:
     from playwright.async_api import async_playwright
 
     ACTIVE.add(run_id)
@@ -631,11 +725,12 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
             browser = await pw.chromium.launch(headless=headless, executable_path=executable_path or None)
             context = None
             try:
-                context = await _recording_context(browser, folder, run_id)
+                options = context_options(conditions)
+                context = await _recording_context(browser, folder, run_id, options)
                 filmed_from = time.monotonic()  # step times are kept against the recording's start
                 page = await context.new_page()
                 live = LIVE[run_id] = Live()
-                await _start_screencast(page, live)
+                await _start_screencast(page, live, options["viewport"], slow=(conditions or {}).get("network") == "slow")
                 signals = Signals()
                 signals.attach(page)
                 seen_signals: dict[str, int] = {}
@@ -646,6 +741,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                 accepted_values: list[str] = []  # values the app accepted: they should show up where the rules say
                 seen_pages: set[str] = set()  # pages already looked at for glitches and accessibility
                 asked: set[str] = set()  # questions already noted
+                tried_values: dict[str, set[str]] = {}  # field label -> values submitted (for the test ideas)
+                last_fields: list[dict] = []  # the last form seen, for the ideas tally at the end
                 await page.goto(start_url, wait_until="domcontentloaded", timeout=30_000)
                 await signals.settle()
                 _record(session_id, [Signal("navigation", f"Opened {start_url}", start_url, now())])
@@ -670,12 +767,16 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         break
                     observation = await observe(page, signals, seen)
                     before = await form_state(page)
+                    if before.fields:
+                        last_fields = before.fields
                     if before.text():
                         observation += "\n" + defang(before.text())
                     drain_signals()
                     hints = _pending_hints(run_id)
+                    ideas, _, _ = ideas_text(before.fields, tried_values, utcnow().date())
                     try:
-                        step = await complete_json(provider, PROMPT, _user_message(ctx, history, observation, max_steps - n + 1, hints),
+                        step = await complete_json(provider, PROMPT, _user_message(ctx, history, observation, max_steps - n + 1,
+                                                                                   hints, ideas),
                                                    schemas.LLMExploreStep, task="explore_step", max_tokens=900)
                     except LLMOutputError as err:
                         bad_replies += 1
@@ -743,6 +844,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         continue
                     if a.kind in ("click", "press"):
                         tried[(describe(a), page.url, before.values())] = entry["n"]
+                        for f in before.fields:  # a value counts as tried once it has been submitted
+                            tried_values.setdefault(f["label"], set()).add(f["value"])
                     failed_before, page_errors_before = len(signals.failed), len(signals.page_errors)
                     acted_at = time.monotonic()
                     browser_action = a.as_browser_action()
@@ -931,6 +1034,13 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                 else:
                     final = {"status": "finished", "detail": f"Used all {max_steps} steps."}
                 drain_signals()
+                if last_fields:
+                    _, done, total = ideas_text(last_fields, tried_values, utcnow().date(), limit_fields=20)
+                    if total:
+                        left = [f'{f["label"]}: {w}' for f in last_fields for w, v in ideas_for(f, utcnow().date())
+                                if v not in tried_values.get(f["label"], set())]
+                        _note(session_id, "setup", f"Test ideas tried: {done} of {total}."
+                              + (f" Not tried: {'; '.join(left[:8])}" + ("…" if len(left) > 8 else "") if left else ""))
             finally:
                 video = await _keep_recording(context, folder, run_id)
                 await browser.close()

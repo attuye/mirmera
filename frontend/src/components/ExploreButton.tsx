@@ -32,9 +32,11 @@ export default function ExploreButton({ charterId, onStarted, onFinished }: { ch
     }, 2000)
   }, [run])  // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [as, setAs] = useState<'desktop' | 'phone' | 'phone-slow'>('desktop')
   async function start() {
     setBusy(true); setError(null)
-    try { setRun(await api.exploreCharter(charterId)); onStarted?.() } catch (e) { setError(errorText(e)) } finally { setBusy(false) }
+    const conditions = as === 'desktop' ? undefined : { device: 'phone' as const, network: as === 'phone-slow' ? 'slow' as const : 'normal' as const }
+    try { setRun(await api.exploreCharter(charterId, conditions ? { conditions } : {})); onStarted?.() } catch (e) { setError(errorText(e)) } finally { setBusy(false) }
   }
 
   const actions = run ? run.steps.filter((s) => !['note', 'problem', 'done', 'invalid'].includes(s.kind)).length : 0
@@ -53,6 +55,13 @@ export default function ExploreButton({ charterId, onStarted, onFinished }: { ch
             title="An AI explores this charter in a browser on the app and drafts bugs for you to review">
             <Bot size={13} aria-hidden />{busy ? 'Starting…' : run ? 'Explore again' : 'Let Mirmera explore'}
           </button>
+          <select aria-label="Explore as" value={as} onChange={(e) => setAs(e.target.value as typeof as)}
+            title="The device and network Mirmera's browser uses"
+            style={{ fontSize: 11.5, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)' }}>
+            <option value="desktop">on a desktop</option>
+            <option value="phone">on a phone</option>
+            <option value="phone-slow">on a phone, slow network</option>
+          </select>
           {run && (
             <span role="status">
               {run.status === 'finished' ? 'Explored' : run.status === 'cancelled' ? 'Stopped' : 'Failed'}: {actions} actions,{' '}

@@ -15,7 +15,7 @@ const STILL_MS = 1500  // playing the pictures: each one this long at 1×
 const SPEEDS = [1, 2, 4]
 const clockText = (t: number) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`
 
-const W = 1280, H = 800  // the agent's fixed viewport (backend/app/agent/explore.py)
+const DESKTOP = { w: 1280, h: 800 }, PHONE = { w: 390, h: 844 }  // the agent's viewports (backend/app/agent/explore.py)
 
 /** The live picture: asks for a newer frame every 400 ms (an unchanged page costs a 204). */
 function useLiveFrame(runId: string, on: boolean): { src: string | null; url: string } {
@@ -49,6 +49,7 @@ function useLiveFrame(runId: string, on: boolean): { src: string | null; url: st
 
 export default function AgentBrowser({ run, compact = false }: { run: ExplorationRun; compact?: boolean }) {
   const running = run.status === 'running'
+  const { w: W, h: H } = run.conditions?.device === 'phone' ? PHONE : DESKTOP
   const live = useLiveFrame(run.id, running)
   const framed = run.steps.filter((s) => s.frame)
   const timed = run.steps.filter((s) => typeof s.t === 'number')
@@ -112,7 +113,7 @@ export default function AgentBrowser({ run, compact = false }: { run: Exploratio
   return (
     <section aria-label="Mirmera's browser" style={{
       border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--panel)',
-      width: '100%', maxWidth: 360,  // beside the session's Browser/API tools; a progress card's preview
+      width: '100%', maxWidth: run.conditions?.device === 'phone' ? 240 : 360,  // beside the session's Browser/API tools; a progress card's preview
     }}>
       {!compact && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px 6px' }}>

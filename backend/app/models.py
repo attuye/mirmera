@@ -772,6 +772,7 @@ class ExplorationRun(Base):
     started_by = Column(String, nullable=True)  # a user's name, or "Jira KYC-12"
     cancel_requested = Column(Boolean, default=False)
     video = Column(String, nullable=True)  # its browser's recording (WebM), in the session's folder
+    conditions = Column(JSON, nullable=True)  # {"device": "phone", "network": "slow", "locale", "timezone"}: how it browsed
     hints = Column(JSON, nullable=True)  # [{"id", "text", "by", "at", "step"}]: what a tester (or Mirmera) asked it to try next
     ai_provider = Column(String, nullable=True)
     ai_model = Column(String, nullable=True)

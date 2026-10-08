@@ -471,6 +471,11 @@ document.getElementById('f').addEventListener('submit', async (e) => {
 })
 </script>""",
     "/list": b"<!doctype html><title>My items</title><h1>My items</h1><p>0 items</p>",
+    "/env": b"""<!doctype html><meta name=viewport content="width=device-width"><title>Env</title><p id=e>...</p><script>
+const t0 = performance.now()
+fetch('/list').then(() => { document.getElementById('e').textContent = 'Seen as: ' + innerWidth + ' wide, ' + navigator.language
+  + ', ' + Intl.DateTimeFormat().resolvedOptions().timeZone + ', ' + (performance.now() - t0 > 350 ? 'slow' : 'fast') + ' network' })
+</script>""",
     "/login": b"""<!doctype html><title>Sign in</title><h1>Sign in</h1>
 <form method=get action=/login><label for=u>Email</label><input id=u name=user>
 <label for=p>Password</label><input id=p name=password type=password><button>Sign in</button></form>""",
@@ -578,3 +583,76 @@ def test_no_false_alarm_from_the_new_oracles_on_the_practice_app_ceiling(client,
     scores = run_with(monkeypatch, IdealTester(practice_app), practice_app, max_steps=12)
     assert {k for s in scores for k in s.found} == {"passport", "expired", "geez", "documents"}
     assert [a for s in scores for a in s.false_alarms] == []
+
+
+# ---------- test ideas, the app's map, earlier runs ----------
+
+def test_the_agent_gets_test_ideas_for_each_field_and_a_tally(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
+    from app.agent.explore import ideas_for
+    plan = [step("Open", kind="goto", url=f"{practice_app}/verify")] + [
+        step(k, kind=k, locator=loc, **({"value": v} if v is not None else {})) for k, loc, v in form(expiry="2020-01-01")] + [
+        step("Done", kind="done", summary="Done.")]
+    provider = Scripted(plan)
+    score, steps, session_id = one_charter(monkeypatch, provider, practice_app, "expiry")
+    on_form = provider.users[1]
+    assert "<ideas>" in on_form and "Test ideas not tried yet (0 of " in on_form
+    assert 'Expiry date: a past date ("2020-01-01")' in on_form and f'Full name: Ge\'ez script ("{GEEZ}")' in on_form
+    assert "Document type: option National ID" in on_form
+    after_submit = provider.users[-1]
+    assert 'a past date ("2020-01-01")' not in after_submit  # submitted, so tried
+    from app import models
+    from app.database import SessionLocal
+    with SessionLocal() as db:
+        tally = [n.content for n in db.get(models.Session, session_id).notes if n.content.startswith("Test ideas tried:")]
+    assert tally and tally[0].startswith("Test ideas tried: ") and "Not tried: " in tally[0]
+    assert [w for w, _ in ideas_for({"label": "Phone number", "type": "text"}, date.today())][:2] == ["international format", "local format"]
+    assert ideas_for({"label": "Create a password", "type": "password"}, date.today()) == []
+
+
+def test_a_survey_maps_the_app_without_changing_anything(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
+    def documents():
+        with urllib.request.urlopen(f"{practice_app}/api/documents") as r:
+            return json.loads(r.read())["total"]
+    before = documents()
+    project = client.post("/projects", json={"name": "Practice"}).json()
+    client.patch(f"/projects/{project['id']}", json={"app_url": practice_app})
+    job = client.post(f"/projects/{project['id']}/ai-jobs", json={"kind": "app_map", "request": {}}).json()
+    assert job["label"] == "Survey the app"
+    done = client.get(f"/ai-jobs/{job['id']}").json()
+    assert done["status"] == "done", done["error"]
+    pages = {p["path"]: p for p in done["result"]["pages"]}
+    assert set(pages) == {"/", "/verify", "/documents"}
+    verify = pages["/verify"]
+    assert [f["label"] for f in verify["fields"]][:3] == ["Full name", "Phone number", "Create a password"]
+    assert {"label": "Document type", "type": "select-one", "required": False,
+            "options": ["National ID", "Passport", "Driver's licence"]} in verify["fields"]
+    assert verify["buttons"] == ["Verify"] and done["result"]["forms"] == 1
+    assert verify["summary"].startswith("/verify (Verify identity): form Full name, Phone number")
+    assert documents() == before  # nothing was submitted
+
+    # The next exploration gets the map, and what earlier runs found.
+    charter = client.post(f"/projects/{project['id']}/charters", json={"mission_statement": "Explore verification"}).json()
+    provider = Scripted([step("Done", kind="done", summary="Looked.")])
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+    from tests.test_explore import finished
+    finished(client, client.post(f"/charters/{charter['id']}/explore", json={}).json())
+    assert '"app_map": "/ (Verify your identity)' in provider.users[0] and "/verify (Verify identity): form" in provider.users[0]
+    finished(client, client.post(f"/charters/{charter['id']}/explore", json={}).json())
+    assert '"earlier_runs": [' in provider.users[-1] and "found no bug. Summary: Looked." in provider.users[-1]
+
+
+def test_explore_as_a_phone_on_a_slow_network_in_amharic(client, shop_app, monkeypatch, chromium_available):  # noqa: F811
+    from tests.test_explore import finished
+    project = client.post("/projects", json={"name": "Shop"}).json()
+    client.patch(f"/projects/{project['id']}", json={"app_url": shop_app})
+    charter = client.post(f"/projects/{project['id']}/charters", json={"mission_statement": "Explore on a phone"}).json()
+    provider = Scripted([step("Open", kind="goto", url=f"{shop_app}/env"), step("Look", kind="wait"),
+                         step("Done", kind="done", summary="Looked.")])
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+    conditions = {"device": "phone", "network": "slow", "locale": "am-ET", "timezone": "Africa/Addis_Ababa"}
+    run = client.post(f"/charters/{charter['id']}/explore", json={"base_url": shop_app, "conditions": conditions}).json()
+    run = finished(client, run)
+    assert run["conditions"] == conditions
+    assert "Seen as: 390 wide, am-ET, Africa/Addis_Ababa, slow network" in provider.users[-1]
+    bad = client.post(f"/charters/{charter['id']}/explore", json={"conditions": {"device": "fridge"}})
+    assert bad.status_code == 422
