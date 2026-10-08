@@ -239,7 +239,8 @@ FORM_JS = """() => {
   // a new page) is the app's answer even when it isn't in a status area.
   const lines = [...new Set((document.body ? document.body.innerText : '').split('\\n')
     .map((l) => l.replace(/\\s+/g, ' ').trim()).filter((l) => l.length > 1))].slice(0, 400)
-  return { fields, messages, lines }
+  const h1 = document.querySelector('h1')
+  return { fields, messages, lines, title: document.title, heading: h1 ? h1.innerText.trim() : '' }
 }"""
 
 
@@ -249,6 +250,8 @@ class FormState:
     messages: list[str] = field(default_factory=list)  # what the page says in its status and alert areas
     lines: list[str] = field(default_factory=list)  # every visible line of text
     url: str = ""
+    title: str = ""
+    heading: str = ""
 
     def text(self) -> str:
         """For the AI: every field with what it holds now (empty ones marked), and the page's messages.
@@ -277,7 +280,8 @@ async def form_state(page) -> FormState:
     try:
         data = await page.evaluate(FORM_JS)
         return FormState(fields=data.get("fields") or [], messages=data.get("messages") or [],
-                         lines=[l[:200] for l in data.get("lines") or []], url=page.url)
+                         lines=[l[:200] for l in data.get("lines") or []], url=page.url,
+                         title=(data.get("title") or "")[:200], heading=(data.get("heading") or "")[:200])
     except Exception:  # navigating, or a page without a DOM to read
         return FormState()
 
@@ -428,6 +432,68 @@ def quoted(quote: str, said: list[str]) -> bool:
     return bool(q) and len(q & _words(answer)) / len(q) >= 0.75
 
 
+# ---------- oracles beyond the written rules ----------
+
+GLITCH = re.compile(r"\bundefined\b|\bNaN\b|\[object Object\]|\{\{[^}]*\}\}|Traceback \(most recent call last\)"
+                    r"|\b[a-z]+(?:_[a-z0-9]+){2,}\b")
+SUCCESS_WORDS = ("verified", "welcome", "success", "saved", "thank you", "thanks", "created", "confirmed", "done")
+REFUSAL_WORDS = ("please", "required", "must", "invalid", "not allowed", "only", "can't", "cannot", "not accepted", "rejected",
+                 "not available", "unavailable", "sorry", "isn't possible", "not possible", "declined")
+LISTING_WORDS = ("list", "lists", "listed", "show", "shows", "shown", "display", "displays", "appear", "appears")
+
+
+def outcome_of(said: list[str], broke: list) -> str:
+    """accepted | refused | error | other, from what the app said (no AI): for comparing tries."""
+    if broke:
+        return "error"
+    text = _norm(" ".join(said))
+    if any(w in text for w in ("went wrong", "error", "failed", "try again later")):
+        return "error"
+    if any(w in text for w in REFUSAL_WORDS):
+        return "refused"
+    if any(w in text for w in SUCCESS_WORDS):
+        return "accepted"
+    return "other"
+
+
+def glitches(lines: list[str]) -> list[str]:
+    """Text no user should see: undefined, NaN, [object Object], {{template}}, a stack trace,
+    an internal code like mrz_parser_unavailable."""
+    out = []
+    for line in lines:
+        m = GLITCH.search(line)
+        if m and line not in out:
+            out.append(line)
+    return out[:3]
+
+
+def one_choice_changed(a: dict, b: dict, fields: list[dict]) -> tuple[str, str, str] | None:
+    """(field, value before, value now) when two submits differ only in one choice (a select)."""
+    diff = [k for k in set(a) | set(b) if a.get(k) != b.get(k)]
+    if len(diff) != 1:
+        return None
+    kind = next((f["type"] for f in fields if f["label"] == diff[0]), "")
+    return (diff[0], a.get(diff[0], ""), b.get(diff[0], "")) if kind.startswith("select") else None
+
+
+def place_rule(rules: dict[str, str], after: FormState) -> tuple[str, str] | None:
+    """The rule that names this page as where something is listed or shown, e.g. AC6:
+    "After verification, My documents lists every verified document" on a page titled
+    "My documents"."""
+    names = {_norm(x.split("·")[0].split("|")[0]) for x in (after.heading, after.title) if x}
+    for rid, text in rules.items():
+        t = _norm(text)
+        if any(w in t.split() for w in LISTING_WORDS) and any(len(n) >= 6 and n in t for n in names):
+            return rid, text
+    return None
+
+
+def kept_values(before: FormState) -> list[str]:
+    """What a submit sent that should be findable later: text values, not secrets or choices."""
+    return [f["value"] for f in before.fields
+            if f["type"] in ("text", "email", "tel", "number", "search", "textarea") and len(f["value"]) >= 4][:4]
+
+
 def crashes(failed: list[str], page_errors: list[str]) -> list[schemas.ExploreProblem]:
     """Bug drafts for what broke during a step: a server error (5xx) or an uncaught error in
     the page. Wrong whatever the rules say, so no AI is asked."""
@@ -576,6 +642,10 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                 seen: dict[str, int] = {}
                 tried: dict[tuple[str, str, str], int] = {}  # (click, page, field values before it) -> step
                 noted: set[str] = set()  # notes already written, so one isn't written again
+                submits: list[tuple[dict, str, int]] = []  # (field values, outcome, step) of each submit that got an answer
+                accepted_values: list[str] = []  # values the app accepted: they should show up where the rules say
+                seen_pages: set[str] = set()  # pages already looked at for glitches and accessibility
+                asked: set[str] = set()  # questions already noted
                 await page.goto(start_url, wait_until="domcontentloaded", timeout=30_000)
                 await signals.settle()
                 _record(session_id, [Signal("navigation", f"Opened {start_url}", start_url, now())])
@@ -674,6 +744,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     if a.kind in ("click", "press"):
                         tried[(describe(a), page.url, before.values())] = entry["n"]
                     failed_before, page_errors_before = len(signals.failed), len(signals.page_errors)
+                    acted_at = time.monotonic()
                     browser_action = a.as_browser_action()
                     try:
                         entry["status"], entry["detail"] = await act(page, browser_action, origins)
@@ -710,6 +781,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             rule_id = (j.rule or "").strip().upper()
                             rule_text = next((v for k, v in rules.items() if k.upper() == rule_id), "")
                             entry["judged"] = verdict
+                            entry["judged_means"] = j.answer_means
                             quote = j.answer_quote.strip() or said[0]
                             note = f"Sent: {sent_text(before)[:400]}. The app said: \"{said[0][:160]}\"."
                             if verdict == "breaks":
@@ -742,30 +814,118 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                 note += f" As {rule_id} expects."
                             else:
                                 note += f" Not judged: {why}."
+                                q = _norm(said[0])[:160]
+                                if why.startswith("no rule") and q not in asked:  # a good tester asks the team
+                                    asked.add(q)
+                                    _note(session_id, "question", f"No rule says what should happen here. Sent: {sent_text(before)[:300]}. "
+                                                                  f"The app said: \"{said[0][:160]}\". Is that what the team wants?")
                             _note(session_id, "test", note)
-                    # Crashes need no rule: a server error or an uncaught page error after this step
-                    # is a bug draft whatever the story says (Mirmera saw it itself; no AI involved).
-                    for crash in broke:
-                        key = (crash.symptom.kind, crash.symptom.value)
+                    async def keep(problem: schemas.ExploreProblem, key: tuple, extra: str = "") -> bool:
+                        """A checked bug draft for something Mirmera saw itself (no AI involved)."""
                         if key in reported:
-                            continue
-                        ok, evidence = await verify(page, crash.symptom, signals)
+                            return False
+                        ok, evidence = await verify(page, problem.symptom, signals)
                         if not ok:
-                            continue
-                        sent = f" (sent: {sent_text(before)[:300]})" if a.kind in ("click", "press") and before.fields else ""
-                        crash.actual = (f"After {entry['action']}{sent}"
-                                        + f": {crash.actual}" + (f' The page said: "{said[0][:160]}".' if said else ""))[:600]
+                            return False
                         shot = folder / f"explore-{run_id[:8]}-{len(bug_ids) + 1}.png"
                         try:
                             await page.screenshot(path=str(shot))
                         except Exception:
                             shot = None
-                        bug_ids.append(_draft_bug(session_id, charter_id, crash, evidence, steps, page.url, shot, provider))
+                        bug_ids.append(_draft_bug(session_id, charter_id, problem, evidence + extra, steps, page.url, shot, provider))
                         reported.add(key)
                         entry["status"] = "drafted"
-                        entry["detail"] = (entry["detail"] + "; " if entry["detail"] else "") + crash.title
-                        if a.kind in ("click", "press") and (g := generalize_hint(before, crash.title)):
+                        entry["detail"] = (entry["detail"] + "; " if entry["detail"] else "") + problem.title
+                        return True
+
+                    submitted = a.kind in ("click", "press") and entry["status"] in ("ok", "drafted")
+                    sent = f" (sent: {sent_text(before)[:300]})" if submitted and before.fields else ""
+                    # Crashes need no rule: a server error or an uncaught page error after this step
+                    # is a bug draft whatever the story says (Mirmera saw it itself; no AI involved).
+                    for crash in broke:
+                        crash.actual = (f"After {entry['action']}{sent}"
+                                        + f": {crash.actual}" + (f' The page said: "{said[0][:160]}".' if said else ""))[:600]
+                        if await keep(crash, (crash.symptom.kind, crash.symptom.value)) and submitted \
+                                and (g := generalize_hint(before, crash.title)):
                             _mirmera_hint(run_id, g)
+
+                    if submitted and (said or broke):
+                        # What the app did: from its own words first (no AI to misread it), else the check's reading.
+                        outcome = outcome_of(said, broke)
+                        if outcome == "other" and entry.get("judged_means") in ("accepted", "refused", "error"):
+                            outcome = entry["judged_means"]
+                        values = {f["label"]: f["value"] for f in before.fields}
+                        # Consistent with itself: the form offers these choices, so each should work like
+                        # the others. Same form, one choice changed, accepted before and not now: a bug.
+                        for prev_values, prev_outcome, prev_n in submits:
+                            change = one_choice_changed(prev_values, values, before.fields)
+                            if change and prev_outcome == "accepted" and outcome in ("refused", "error") and said \
+                                    and entry["status"] != "drafted":
+                                fld, was, now_ = change
+                                what = "refused" if outcome == "refused" else "fails"
+                                await keep(schemas.ExploreProblem(
+                                    title=f"{fld} = {now_} is {what} where {was} is accepted"[:200], severity="high",
+                                    expected=f"Every {fld} the form offers works like the others: with {fld} = {was} and "
+                                             f"everything else the same, the app accepted it (step {prev_n}).",
+                                    actual=f"With {fld} = {now_}{sent}, the app answered: \"{said[0][:200]}\"."[:600],
+                                    symptom=schemas.Symptom(kind="text_visible", value=said[0][:300],
+                                                            explanation="The same form with one choice changed got a different answer.")),
+                                    ("choice", fld, now_), " (consistency with the product itself)")
+                                break
+                        submits.append((values, outcome, entry["n"]))
+                        if outcome == "accepted":
+                            accepted_values += [v for v in kept_values(before) if v not in accepted_values]
+
+                    if entry["status"] in ("ok", "drafted") and not page.is_closed() and after.url:
+                        new_page = after.url.split("#")[0] != (before.url or "").split("#")[0]
+                        # Follow the data: a rule names this page as where accepted data is listed.
+                        if new_page and accepted_values and (pr := place_rule(rules_of(ctx), after)):
+                            rid, rtext = pr
+                            text = " ".join(after.lines)
+                            if not any(v in text for v in accepted_values):  # none of it: the item isn't there at all
+                                key_value = sorted(accepted_values, key=lambda v: (not re.search(r"\d", v), -len(v)))[0]
+                                place = after.heading or after.title
+                                await keep(schemas.ExploreProblem(
+                                    title=f"What was accepted is not listed on {place} ({key_value})"[:200], severity="high",
+                                    expected=f"Per {rid} (\"{rtext[:300]}\"), what the app accepted earlier is listed on {place}.",
+                                    actual=f"Accepted earlier: {', '.join(accepted_values[:4])}. None of it is on {place}."[:600],
+                                    symptom=schemas.Symptom(kind="text_absent", value=key_value[:300],
+                                                            explanation=f"Follow the data: {rid} says it is listed here.")),
+                                    ("listed", rid))
+                        # Text no user should see, on a page seen for the first time or in an answer.
+                        path = after.url.split("?")[0].split("#")[0]
+                        look = after.lines if path not in seen_pages else (said if submitted else [])
+                        for line in glitches(look):
+                            await keep(schemas.ExploreProblem(
+                                title=f"Raw text shown to users: \"{line[:80]}\""[:200], severity="low",
+                                expected="Users see words meant for them, not internal codes or placeholders.",
+                                actual=f"On {path} the page shows: \"{line[:200]}\".",
+                                symptom=schemas.Symptom(kind="text_visible", value=GLITCH.search(line).group(0)[:300],
+                                                        explanation="Raw or internal text on the page.")),
+                                ("glitch", GLITCH.search(line).group(0)))
+                        # A password in the address: it ends up in history, logs and referrers.
+                        query = after.url.split("?", 1)[1] if "?" in after.url else ""
+                        if re.search(r"(?:^|&)(?:password|passwd|pwd|pass)=[^&]+", query, re.I):
+                            await keep(schemas.ExploreProblem(
+                                title="A password is sent in the page address", severity="high",
+                                expected="Passwords never appear in a URL (browser history, server logs, referrers).",
+                                actual=f"After {entry['action']} the address has a password parameter.",
+                                symptom=schemas.Symptom(kind="url", value="pass", explanation="A password parameter in the URL.")),
+                                ("url-password",))
+                        if path not in seen_pages:
+                            seen_pages.add(path)
+                            try:
+                                from app.runner import A11Y_JS
+                                leads = await page.evaluate(A11Y_JS)
+                            except Exception:
+                                leads = []
+                            if leads:
+                                _note(session_id, "issue", f"Accessibility leads on {path} ({len(leads)}): "
+                                      + "; ".join(f"{x.get('rule')}: {x.get('text')}" for x in leads[:5]))
+                    # Slow answers: a tester notices waiting.
+                    took = time.monotonic() - acted_at
+                    if a.kind in ("click", "press") and took > 5:
+                        _note(session_id, "issue", f"Slow: after {entry['action']} the app took {took:.1f} s to answer.")
                     history.append(entry)
                     _save(run_id, steps=list(history), bug_ids=list(bug_ids))
                 else:

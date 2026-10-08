@@ -452,3 +452,129 @@ def test_after_a_bug_mirmera_asks_the_agent_to_try_the_other_options(client, pra
     [nudged] = [u for u in provider.users if "<pair>" in u]
     assert ('Mirmera: You just found "POST /api/verify fails with 500" with Document type = Passport. Generalize it: '
             "submit the same form with Document type = National ID and then Driver's licence") in nudged.replace("’", "'")
+
+
+# ---------- oracles beyond the written rules ----------
+
+SHOP = {
+    "/form": b"""<!doctype html><title>Plans</title><h1>Choose a plan</h1><p>Discount: undefined</p>
+<form id=f><label for=name>Your name</label><input id=name>
+<label for=plan>Plan</label><select id=plan><option>Basic</option><option>Pro</option><option>Team</option></select>
+<input placeholder="Coupon"><button type=submit>Save</button></form>
+<p role=status id=out></p><a href="/list">My items</a>
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const plan = document.getElementById('plan').value
+  const r = await fetch('/api/save?plan=' + plan, { method: 'POST' })
+  document.getElementById('out').textContent = plan === 'Team' ? 'Sorry, that plan is not available' : 'Saved'
+})
+</script>""",
+    "/list": b"<!doctype html><title>My items</title><h1>My items</h1><p>0 items</p>",
+    "/login": b"""<!doctype html><title>Sign in</title><h1>Sign in</h1>
+<form method=get action=/login><label for=u>Email</label><input id=u name=user>
+<label for=p>Password</label><input id=p name=password type=password><button>Sign in</button></form>""",
+}
+
+
+@pytest.fixture(scope="module")
+def shop_app():
+    """Plans that should all work (Team is refused), a list that should show what was saved
+    (it doesn't), raw text, a sign-in that puts the password in the address, a slow answer."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class App(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = SHOP.get(self.path.split("?")[0], b"")
+            self.send_response(200 if body else 404)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            if "Team" in self.path:
+                time.sleep(5.5)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+def shop_charter(client):
+    from app import models
+    from app.database import SessionLocal
+    from app.routers.explore import start_exploration
+    from app.agent import explore as agent
+
+    def run(provider, monkeypatch, app_url, steps=12):
+        monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+        with SessionLocal() as db:
+            project = models.Project(org_id="eval", name="Shop", app_url=app_url, default_ai_provider="mock")
+            db.add(project)
+            db.flush()
+            story = models.Story(project_id=project.id, title="Save a plan",
+                                 description="Acceptance criteria\n- My items lists every saved item.")
+            charter = models.Charter(project_id=project.id, mission_statement="Explore plans", source="eval")
+            charter.stories = [story]
+            db.add_all([story, charter])
+            db.commit()
+            r = start_exploration(db, charter, started_by="eval", max_steps=steps)
+            deadline = time.monotonic() + 120
+            while time.monotonic() < deadline:
+                time.sleep(0.5)
+                db.expire_all()
+                r = db.get(models.ExplorationRun, r.id)
+                if r.status != "running" and r.id not in agent.ACTIVE:
+                    break
+            bugs = [db.get(models.Bug, b) for b in r.bug_ids or []]
+            notes = [(n.tag, n.content) for n in db.get(models.Session, r.session_id).notes]
+            return r, [(b.title, b.severity) for b in bugs], notes
+    return run
+
+
+def test_oracles_beyond_the_written_rules(client, shop_app, monkeypatch, chromium_available):  # noqa: F811
+    name, plan = label("Your name"), label("Plan")
+    save = {"method": "role", "role": "button", "name": "Save"}
+    replies = [step("Open", kind="goto", url=f"{shop_app}/form"),
+               step("Name", kind="fill", locator=name, value="Alice Doe"),
+               step("Basic", kind="select", locator=plan, value="Basic"),
+               step("Save", kind="click", locator=save),
+               step("Team", kind="select", locator=plan, value="Team"),
+               step("Save", kind="click", locator=save),
+               step("Where did it go?", kind="goto", url=f"{shop_app}/list"),
+               step("Sign in", kind="goto", url=f"{shop_app}/login"),
+               step("Email", kind="fill", locator=label("Email"), value="alice@example.com"),
+               step("Password", kind="fill", locator=label("Password"), value="hunter2-secret"),
+               step("Go", kind="click", locator={"method": "role", "role": "button", "name": "Sign in"}),
+               step("Done", kind="done", summary="Done.")]
+    no_rule = lambda user: json.dumps({"answer_means": "accepted", "answer_quote": _between(user, "answer").split("Says: ")[-1].strip()[:40],  # noqa: E731
+                                       "rule": None, "rule_expects": "none"})
+    run, bugs, notes = shop_charter(client)(Scripted(replies, judge=no_rule), monkeypatch, shop_app)
+    titles = dict(bugs)
+    assert titles.get('Raw text shown to users: "Discount: undefined"') == "low"  # first look at the page
+    assert titles.get("Plan = Team is refused where Basic is accepted") == "high"  # consistent with itself
+    assert titles.get("What was accepted is not listed on My items (Alice Doe)") == "high"  # follow the data
+    assert titles.get("A password is sent in the page address") == "high"
+    assert len(bugs) == 4, bugs
+    issues = [c for t, c in notes if t == "issue"]
+    assert any(c.startswith('Slow: after click button "Save" the app took') for c in issues)
+    assert any(c.startswith("Accessibility leads on ") for c in issues)
+    questions = [c for t, c in notes if t == "question"]
+    assert questions and questions[0].startswith("No rule says what should happen here. Sent: Your name = Alice Doe")
+    assert len(questions) == len(set(questions))
+
+
+def test_no_false_alarm_from_the_new_oracles_on_the_practice_app_ceiling(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
+    """The ideal run again, now with every oracle on: still exactly the four planted bugs."""
+    scores = run_with(monkeypatch, IdealTester(practice_app), practice_app, max_steps=12)
+    assert {k for s in scores for k in s.found} == {"passport", "expired", "geez", "documents"}
+    assert [a for s in scores for a in s.false_alarms] == []
