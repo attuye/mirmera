@@ -1226,9 +1226,43 @@ class ExploreProblem(BaseModel):
     symptom: Symptom
 
 
+EXPLORE_KINDS = ("goto", "click", "fill", "fill_secret", "select", "check", "uncheck", "press", "wait",
+                 "note", "problem", "done")
+
+
 class ExploreAction(BaseModel):
     kind: Literal["goto", "click", "fill", "fill_secret", "select", "check", "uncheck", "press", "wait",
                   "note", "problem", "done"]
+
+    @model_validator(mode="before")
+    @classmethod
+    def forgiving(cls, data):
+        """Small models name things their own way: "type" for kind, "CLICK", "text" for what
+        to type or note, "url" given as "value". Read what they mean; anything else still fails."""
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+        if "kind" not in d:
+            for alt in ("type", "action", "name"):
+                if isinstance(d.get(alt), str) and d[alt].strip().lower() in EXPLORE_KINDS:
+                    d["kind"] = d.pop(alt)
+                    break
+        if isinstance(d.get("kind"), str):
+            d["kind"] = d["kind"].strip().lower().replace("-", "_").replace(" ", "_")
+        k = d.get("kind")
+        text = next((d[x] for x in ("text", "input", "content", "message") if isinstance(d.get(x), str)), None)
+        if k in ("fill", "select") and d.get("value") is None and text is not None:
+            d["value"] = text
+        if k == "note" and not d.get("note") and (text or d.get("value")):
+            d["note"] = text or d.get("value")
+        if k == "done" and not d.get("summary") and (text or d.get("note")):
+            d["summary"] = text or d.get("note")
+        if k == "goto" and not d.get("url") and isinstance(d.get("value"), str) and d["value"].startswith(("http", "/")):
+            d["url"] = d.pop("value")
+        if k in ("click", "fill", "select", "check", "uncheck", "press", "fill_secret") and "locator" not in d \
+                and isinstance(d.get("target"), dict):
+            d["locator"] = d.pop("target")
+        return d
     locator: Optional[PlanLocator] = None
     url: Optional[str] = Field(default=None, max_length=2000)
     value: Optional[str] = Field(default=None, max_length=500)
@@ -1266,11 +1300,56 @@ class LLMExploreJudgement(BaseModel):
     because: str = Field(default="", max_length=600)
     title: Optional[str] = Field(default=None, max_length=200)
 
+    @model_validator(mode="before")
+    @classmethod
+    def forgiving(cls, data):
+        """Words small models use for the same facts: "rejected", "success", "Refuse", "AC 2"."""
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+        means = {"accept": "accepted", "accepted": "accepted", "success": "accepted", "succeeded": "accepted", "verified": "accepted",
+                 "refuse": "refused", "refused": "refused", "rejected": "refused", "reject": "refused", "denied": "refused",
+                 "validation_error": "refused", "error": "error", "failed": "error", "failure": "error", "crash": "error",
+                 "other": "other", "unclear": "other", "unknown": "other"}
+        expects = {"accept": "accept", "accepted": "accept", "allow": "accept", "refuse": "refuse", "refused": "refuse",
+                   "reject": "refuse", "rejected": "refuse", "deny": "refuse", "none": "none", "n/a": "none", "null": "none"}
+        if isinstance(d.get("answer_means"), str):
+            d["answer_means"] = means.get(d["answer_means"].strip().lower().replace(" ", "_"), d["answer_means"])
+        if isinstance(d.get("rule_expects"), str):
+            d["rule_expects"] = expects.get(d["rule_expects"].strip().lower(), d["rule_expects"])
+        elif d.get("rule_expects") is None:
+            d["rule_expects"] = "none"
+        if isinstance(d.get("rule"), str):
+            d["rule"] = re.sub(r"\s+", "", d["rule"]).upper() or None
+        return d
+
 
 class LLMExploreStep(BaseModel):
     """AI contract for the exploration agent: one step at a time."""
-    thought: str = Field(min_length=1, max_length=600)
+    thought: str = Field(default="(no reason given)", max_length=600)
     action: ExploreAction
+
+    @model_validator(mode="before")
+    @classmethod
+    def forgiving(cls, data):
+        """A flat reply ({"thought", "kind", "locator"…}), or "action": "click" with the rest
+        beside it, is one step all the same. A done without a summary uses the thought."""
+        if not isinstance(data, dict):
+            return data
+        d = dict(data)
+        if not isinstance(d.get("action"), dict):
+            rest = {k: v for k, v in d.items() if k not in ("thought", "reasoning", "action")}
+            if isinstance(d.get("action"), str):
+                rest["kind"] = d["action"]
+            if rest:
+                d = {"thought": d.get("thought") or d.get("reasoning"), "action": rest}
+        if not d.get("thought"):
+            d["thought"] = d.pop("reasoning", None) or "(no reason given)"
+        action = d.get("action")
+        if isinstance(action, dict) and str(action.get("kind", action.get("type", ""))).lower() == "done" \
+                and not action.get("summary") and not any(isinstance(action.get(x), str) for x in ("text", "note", "message")):
+            d["action"] = {**action, "summary": d["thought"]}
+        return d
 
 
 class ExploreRequest(BaseModel):
