@@ -77,5 +77,17 @@ test("Mirmera's browser: replay each step, and watch it live", async ({ page, ap
     await expect(view.getByRole('img', { name: /^Step \d+: / })).toBeVisible()
     await view.getByRole('button', { name: 'Back to live' }).click()
     await expect(view.getByRole('status', { name: 'Live' })).toBeVisible()
+
+    // Pair with it: a hint for its next step.
+    await page.route(`**/exploration-runs/${run.id}/hints`, async (route) => {
+      expect(route.request().postDataJSON()).toEqual({ text: 'Try a Passport next' })
+      await route.fulfill({ json: { ...run, status: 'running', finished_at: null, hints: [
+        { id: 'h1', text: 'Try a Passport next', by: 'Attu', at: new Date().toISOString(), step: null }] } })
+    })
+    const pair = view.getByRole('group', { name: 'Pair with Mirmera' })
+    await pair.getByLabel('Tell Mirmera what to try next').fill('Try a Passport next')
+    await pair.getByRole('button', { name: 'Send' }).click()
+    await expect(pair).toContainText('Attu: Try a Passport next · waiting for its next step')
+    await expect(pair.getByLabel('Tell Mirmera what to try next')).toHaveValue('')
   })
 })

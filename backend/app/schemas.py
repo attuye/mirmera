@@ -1375,8 +1375,19 @@ class ExplorationRunOut(BaseModel):
     ai_provider: Optional[str] = None
     ai_model: Optional[str] = None
     video: Optional[str] = None  # set when its recording was kept: GET /exploration-runs/{id}/video
+    hints: list[dict] = []  # what a tester (or Mirmera) asked it to try next, and the step that took it up
     created_at: datetime
     finished_at: Optional[datetime] = None
+
+    @field_validator("hints", mode="before")
+    @classmethod
+    def none_is_no_hints(cls, value):
+        return value or []
+
+
+class ExploreHint(BaseModel):
+    """A tester pairing with the agent: what to try next, in plain words."""
+    text: str = Field(min_length=2, max_length=400)
 
 
 class ReproduceRequest(BaseModel):

@@ -404,3 +404,51 @@ def test_what_still_cant_be_read_is_refused():
         _parse("I would click Verify.", schemas.LLMExploreStep)
     j = _parse('{"answer_means": "Rejected", "answer_quote": "x", "rule": "ac 2", "rule_expects": "Refused"}', schemas.LLMExploreJudgement)
     assert (j.answer_means, j.rule, j.rule_expects) == ("refused", "AC2", "refuse")
+
+
+# ---------- pairing ----------
+
+def test_a_hint_from_the_tester_is_read_before_the_next_step(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
+    import asyncio
+    import threading
+    from app import models
+    from app.agent import explore as agent
+    from app.database import SessionLocal
+
+    class Slow(Scripted):
+        async def complete(self, system, user, **kwargs):
+            await asyncio.sleep(0.4)
+            return await super().complete(system, user, **kwargs)
+
+    def hint_after_first_step():
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            with SessionLocal() as db:
+                run = db.query(models.ExplorationRun).filter_by(status="running").first()
+                if run and len(run.steps or []) >= 1:
+                    agent.add_hint(db, run, f"Try the Ge'ez name {GEEZ}", by="Attu")
+                    return
+            time.sleep(0.1)
+    threading.Thread(target=hint_after_first_step, daemon=True).start()
+    provider = Slow([step("Open", kind="goto", url=f"{practice_app}/verify"), step("Look", kind="wait")])
+    score, steps, session_id = one_charter(monkeypatch, provider, practice_app, "names", steps=6)
+    with_hint = [u for u in provider.users if "<pair>" in u]
+    assert with_hint and f"Attu: Try the Ge'ez name {GEEZ}" in with_hint[0]
+    assert sum("<pair>" in u for u in provider.users) == 1  # read once, then it's taken
+    with SessionLocal() as db:
+        run = db.query(models.ExplorationRun).order_by(models.ExplorationRun.created_at.desc()).first()
+        [h] = run.hints
+        assert h["by"] == "Attu" and h["step"] == provider.users.index(with_hint[0]) + 1
+        assert any(n.content == f"Hint from Attu: Try the Ge'ez name {GEEZ}" for n in db.get(models.Session, session_id).notes)
+
+
+def test_after_a_bug_mirmera_asks_the_agent_to_try_the_other_options(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
+    plan = [step("Open", kind="goto", url=f"{practice_app}/verify")] + [
+        step(k, kind=k, locator=loc, **({"value": v} if v is not None else {})) for k, loc, v in form(doc="Passport")] + [
+        step("Look", kind="wait")]
+    provider = Scripted(plan)
+    score, steps, _ = one_charter(monkeypatch, provider, practice_app, "documents", steps=9)
+    assert score.found == ["passport"]
+    [nudged] = [u for u in provider.users if "<pair>" in u]
+    assert ('Mirmera: You just found "POST /api/verify fails with 500" with Document type = Passport. Generalize it: '
+            "submit the same form with Document type = National ID and then Driver's licence") in nudged.replace("’", "'")

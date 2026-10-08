@@ -747,6 +747,8 @@ export interface ExplorationRun {
   bug_ids: string[]; summary: string | null; detail: string | null; started_by: string | null
   ai_provider: string | null; ai_model: string | null; created_at: string; finished_at: string | null
   video?: string | null
+  /** What a tester (or Mirmera) asked it to try next; step = the step that took it up. */
+  hints?: { id: string; text: string; by: string; at: string; step: number | null }[]
 }
 export interface AgentStage { key: string; label: string; status: 'done' | 'active' | 'todo' | 'skipped' | 'failed' | 'cancelled' }
 export interface AgentStep { n: number; thought: string; action: string; kind: string; status: string; detail: string }
@@ -1030,6 +1032,8 @@ export const api = {
   charterExploration: (charterId: string) => request<ExplorationRun | null>(`/charters/${charterId}/exploration`),
   explorationRun: (runId: string) => request<ExplorationRun>(`/exploration-runs/${runId}`),
   cancelExploration: (runId: string) => request<ExplorationRun>(`/exploration-runs/${runId}/cancel`, { method: 'POST' }),
+  hintExploration: (runId: string, text: string) =>
+    request<ExplorationRun>(`/exploration-runs/${runId}/hints`, { method: 'POST', body: JSON.stringify({ text }) }),
   jiraApp: (workspaceId: string) => request<JiraAppOverview>(`/workspaces/${workspaceId}/jira-app`),
   jiraLinkCode: (workspaceId: string) => request<JiraLinkCode>(`/workspaces/${workspaceId}/jira-app/codes`, { method: 'POST' }),
   unlinkJiraSite: (workspaceId: string, installationId: string) =>

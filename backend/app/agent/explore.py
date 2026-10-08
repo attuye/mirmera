@@ -230,7 +230,8 @@ FORM_JS = """() => {
     else if (type === 'password') value = el.value ? '(filled)' : ''
     else if (el.tagName === 'SELECT') value = el.selectedOptions[0] ? el.selectedOptions[0].text : ''
     else value = el.value
-    fields.push({ label: labelOf(el), type, value, required: el.required })
+    fields.push({ label: labelOf(el), type, value, required: el.required,
+                  ...(el.tagName === 'SELECT' ? { options: [...el.options].map((o) => o.text) } : {}) })
   }
   const messages = [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')]
     .filter(visible).map((el) => el.innerText.replace(/\\s+/g, ' ').trim()).filter(Boolean)
@@ -297,7 +298,52 @@ def pointless(a: schemas.ExploreAction, url: str, before: FormState, tried: dict
     return None
 
 
-def _user_message(ctx: CharterContext, history: list[dict], observation: str, steps_left: int) -> str:
+# ---------- pairing: hints from a tester, or from Mirmera ----------
+
+def add_hint(db, run, text: str, *, by: str) -> dict:
+    """Adds a hint for the agent's next step (and keeps it with the run)."""
+    import uuid
+    h = {"id": uuid.uuid4().hex[:8], "text": text[:400], "by": by, "at": utcnow().isoformat(), "step": None}
+    run.hints = list(run.hints or []) + [h]
+    db.commit()
+    return h
+
+
+def _pending_hints(run_id: str) -> list[dict]:
+    with SessionLocal() as db:
+        run = db.get(models.ExplorationRun, run_id)
+        return [h for h in (run.hints or []) if h.get("step") is None] if run else []
+
+
+def _hints_taken(run_id: str, ids: set[str], step: int) -> None:
+    """The step that read these hints. Re-read first, so a hint sent meanwhile isn't lost."""
+    with SessionLocal() as db:
+        run = db.get(models.ExplorationRun, run_id)
+        run.hints = [({**h, "step": step} if h["id"] in ids else h) for h in run.hints or []]
+        db.commit()
+
+
+def _mirmera_hint(run_id: str, text: str) -> None:
+    with SessionLocal() as db:
+        run = db.get(models.ExplorationRun, run_id)
+        if run and not any(h["text"] == text for h in run.hints or []):
+            add_hint(db, run, text, by="Mirmera")
+
+
+def generalize_hint(before: FormState, title: str) -> str | None:
+    """After a bug, the experienced tester's next question: does it happen with the other
+    choices too? (The form's select fields, with the options not sent.)"""
+    for f in before.fields:
+        others = [o for o in f.get("options") or [] if o != f["value"]]
+        if f["type"].startswith("select") and others:
+            return (f'You just found "{title[:120]}" with {f["label"]} = {f["value"]}. Generalize it: submit the same form '
+                    f'with {f["label"]} = ' + " and then ".join(others[:4]) + ", keeping everything else the same, "
+                    "and note whether it happens there too.")
+    return None
+
+
+def _user_message(ctx: CharterContext, history: list[dict], observation: str, steps_left: int,
+                  hints: list[dict] | None = None) -> str:
     lines = [f"{h['n']}. {h['action']} -> {h['status']}{': ' + h['detail'] if h['detail'] else ''}"
              for h in history[-HISTORY_LIMIT:]]
     charter = {"mission": ctx.mission, "test_ideas": ctx.test_ideas, "oracles": ctx.oracles, "risks": ctx.risks}
@@ -309,7 +355,10 @@ def _user_message(ctx: CharterContext, history: list[dict], observation: str, st
         f"<charter>\n{defang(json.dumps(charter, indent=2, ensure_ascii=False))}\n</charter>\n\n"
         f"<history>\n{chr(10).join(lines) or '(no steps yet)'}\n</history>\n\n"
         f"<page>\n{observation}\n</page>\n\n"
-        f"Steps left: {steps_left}. Reply with the next single step."
+        + (("<pair>\n" + "\n".join(f"{h['by']}: {defang(h['text'])}" for h in hints) + "\n</pair>\n"
+            "Your pair asks you to try this next: do it now, unless it would leave the app or do something "
+            "irreversible (then say so in a note).\n\n") if hints else "")
+        + f"Steps left: {steps_left}. Reply with the next single step."
         + (" This is your last step: finish with done." if steps_left == 1 else "")
     )
 
@@ -554,8 +603,9 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     if before.text():
                         observation += "\n" + defang(before.text())
                     drain_signals()
+                    hints = _pending_hints(run_id)
                     try:
-                        step = await complete_json(provider, PROMPT, _user_message(ctx, history, observation, max_steps - n + 1),
+                        step = await complete_json(provider, PROMPT, _user_message(ctx, history, observation, max_steps - n + 1, hints),
                                                    schemas.LLMExploreStep, task="explore_step", max_tokens=900)
                     except LLMOutputError as err:
                         bad_replies += 1
@@ -567,6 +617,11 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             raise
                         continue
                     bad_replies = 0
+                    if hints:
+                        _hints_taken(run_id, {h["id"] for h in hints}, len(history) + 1)
+                        for h in hints:
+                            if h["by"] != "Mirmera":
+                                _note(session_id, "setup", f"Hint from {h['by']}: {h['text']}")
                     a = step.action
                     entry = {"n": len(history) + 1, "thought": step.thought, "action": describe(a), "kind": a.kind,
                              "status": "ok", "detail": "", "url": page.url}
@@ -680,6 +735,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                                                   f"{evidence}. Breaks {rule_id}: {rule_text}", steps, page.url, shot, provider))
                                         reported.add(key)
                                         entry["status"] = "drafted"
+                                        if g := generalize_hint(before, problem.title):
+                                            _mirmera_hint(run_id, g)
                                 entry["detail"] += f"; breaks {rule_id}"
                             elif verdict == "consistent":
                                 note += f" As {rule_id} expects."
@@ -707,6 +764,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         reported.add(key)
                         entry["status"] = "drafted"
                         entry["detail"] = (entry["detail"] + "; " if entry["detail"] else "") + crash.title
+                        if a.kind in ("click", "press") and (g := generalize_hint(before, crash.title)):
+                            _mirmera_hint(run_id, g)
                     history.append(entry)
                     _save(run_id, steps=list(history), bug_ids=list(bug_ids))
                 else:
