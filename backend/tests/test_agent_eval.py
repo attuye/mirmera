@@ -290,6 +290,60 @@ def test_fields_are_set_the_way_a_person_would(client, practice_app, monkeypatch
     assert score.found == ["expired"] and score.false_alarms == []
 
 
+def test_a_rule_naming_what_was_sent_is_checked_without_the_ai(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
+    """From qwen3:8b's second run: it sent the Ge'ez name in all four charters, the app said "Name must
+    use letters only.", and its check read AC2 the wrong way round every time. AC2 names Ge'ez script:
+    Mirmera sees that itself, so the bug no longer depends on the model reading the rule right."""
+    def misreads(user):  # what qwen's check answered: the right rule, the wrong expectation
+        return json.dumps({"answer_means": "refused", "answer_quote": "Name must use letters only.",
+                           "rule": "AC2", "rule_expects": "refuse"}) if GEEZ in user else json.dumps(IdealTester.read(user))
+    replies = [step("Open it", kind="goto", url=f"{practice_app}/verify"),
+               step("Valid first", kind="try", values={}),
+               step("Ge'ez", kind="try", values={"Full name": GEEZ}),
+               step("Done", kind="done", summary="Names tried.")]
+    score, steps, _ = one_charter(monkeypatch, Scripted(replies, judge=misreads), practice_app, "names")
+    assert steps[2]["status"] == "drafted" and "Name must use letters only." in steps[2]["detail"]
+    assert score.found == ["geez"] and score.false_alarms == []
+    from app import models
+    from app.database import SessionLocal
+    with SessionLocal() as db:
+        bug = db.query(models.Bug).order_by(models.Bug.created_at.desc()).first()
+    assert bug.title == "A name in Ge'ez script is refused although AC2 says it is accepted"
+
+
+def test_a_long_value_is_a_short_code_and_two_long_names_are_not_one_try(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
+    """From the same run: the model's own long name and Mirmera's 300-character idea shortened to the
+    same description, so the idea was refused as a repeat 16 times. And a small model copying 300
+    characters repeats them until its reply runs out: ideas name long values "@long300"."""
+    own = "Abebe " * 12
+    replies = [step("Open it", kind="goto", url=f"{practice_app}/verify"),
+               step("Valid first", kind="try", values={}),
+               step("Long", kind="try", values={"Full name": own}),
+               step("Longer", kind="try", values={"Full name": "@long300"}),
+               step("Done", kind="done", summary="Long names tried.")]
+    provider = Scripted(replies)
+    score, steps, _ = one_charter(monkeypatch, provider, practice_app, "names")
+    assert [s["status"] for s in steps[2:4]] == ["ok", "ok"]  # the second is not "the same again"
+    assert '"@long300"' in provider.users[2] and "Abebe Abebe Abebe" not in provider.users[2].split("<ideas>")[1]
+    from app.agent.explore import expand
+    assert len(expand("@long300", {"label": "Full name"})) == 300 and expand("@long64@example.com").endswith("x@example.com")
+
+
+def test_rule_cases():
+    from datetime import date
+    from app.agent.explore import FormState, rule_cases
+    rules = {"AC2": "The full name is entered as written on the document, in Latin or Ge'ez script.",
+             "AC3": "Expired documents are rejected."}
+    def sent(name, expiry):
+        return FormState(fields=[{"label": "Full name", "type": "text", "value": name},
+                                 {"label": "Expiry date", "type": "date", "value": expiry}])
+    today = date(2026, 10, 9)
+    assert [(c[0], c[2]) for c in rule_cases(rules, sent(GEEZ, "2027-01-01"), today)] == [("AC2", "accept")]
+    assert [(c[0], c[2]) for c in rule_cases(rules, sent("Abebe Kebede", "2020-01-01"), today)] == [("AC3", "refuse")]
+    assert rule_cases(rules, sent("Abebe Kebede", "2027-01-01"), today) == []  # nothing the rules single out
+    assert rule_cases(rules, sent("O'Brien-Smith", "2027-01-01"), today) == []  # no rule about apostrophes here
+
+
 def test_a_model_that_wanders_off_stays_in_the_app(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
     wandering = [step("Elsewhere", kind="goto", url="https://example.com/"),
                  step("Script", kind="goto", url="javascript:alert(1)"),

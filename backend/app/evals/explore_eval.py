@@ -212,6 +212,8 @@ def steps_text() -> str:
                 who = " (Mirmera stepped in)" if st.get("by") == "Mirmera" else ""
                 out.append(f"{st.get('n')}. [{st.get('kind')}] {st.get('action')} -> {st.get('status')}{who}"
                            + (f": {st['detail']}" if st.get("detail") else ""))
+                if st.get("judged"):
+                    out.append(f"   - checked: {st['judged']}" + (f" ({st['judged_why']})" if st.get("judged_why") else ""))
                 if st.get("thought"):
                     out.append(f"   - thought: {st['thought'][:300]}")
     return "# Every step\n" + "\n".join(out) + "\n"

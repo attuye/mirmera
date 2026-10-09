@@ -361,9 +361,12 @@ def test_the_ai_reports_facts_and_mirmera_decides_so_a_misreading_drafts_no_bug(
     monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
     run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 10}).json())
     judged = [s.get("judged") for s in run["steps"] if s.get("judged")]
-    assert judged == ["consistent", "unclear", "breaks"]
+    # The first submit already sent an expired date and got "Verified". The AI misread it (note 1), but
+    # AC1 names expired documents, so Mirmera checks that itself and drafts it there, once.
+    assert judged == ["breaks", "unclear", "breaks"]
+    assert run["steps"][1]["status"] == "drafted" and run["steps"][5]["status"] == "ok"  # the same rule: not drafted twice
     [bug] = client.get(f"/sessions/{run['session_id']}/bugs").json()
-    assert bug["title"] == "Expired document is accepted" and bug["severity"] == "high"
+    assert bug["title"] == "An expiry date in the past is accepted although AC1 says it is refused" and bug["severity"] == "high"
     assert 'Per AC1 ("An expired document is refused' in bug["expected"] and "2020-01-01" in bug["actual"]
     notes = [n["content"] for n in client.get(f"/sessions/{run['session_id']}/notes").json() if n["content"].startswith("Sent:")]
     assert "As AC2 expects." in notes[0]

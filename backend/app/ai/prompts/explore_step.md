@@ -50,7 +50,8 @@ How to test an input (most of your steps):
 2. Then vary ONE field per try: {"kind": "try", "values": {"Full name":
    "አበበ ከበደ"}}. The rest stays valid, so the answer is about your idea.
    For a dropdown give the option's text; for a checkbox "checked" or
-   "not checked".
+   "not checked". For a very long value write "@long300" (300 characters;
+   any number works): never type the long text yourself.
 3. Read the answer in the history. Filling a field is not testing it: the
    app only accepts or refuses something once the form is sent. Never write
    that a field "accepts" a value before you submitted it.
