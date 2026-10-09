@@ -41,7 +41,8 @@ PROMPT_VERSION = "explore-step-v3"
 JUDGE_PROMPT = (Path(__file__).resolve().parents[1] / "ai" / "prompts" / "explore_judge.md").read_text(encoding="utf-8")
 TESTER = "Mirmera agent"
 HISTORY_LIMIT = 20
-RUN_TIMEOUT_S = 900
+RUN_TIMEOUT_S = 900  # at least; a run may take STEP_TIME_S per step of its budget
+STEP_TIME_S = 80
 MAX_BAD_REPLIES = 4  # unusable replies in a row before the run stops: the model is not up to it
 STEP_IN_AFTER = 3  # steps in a row that taught nothing before Mirmera takes the next step itself
 SUBMITS = ("click", "press", "try")
@@ -327,6 +328,12 @@ async def form_state(page) -> FormState:
         return FormState()
 
 
+def action_key(a: schemas.ExploreAction) -> str:
+    """The whole action: its description shortens long values, and two different long names
+    must not count as the same try."""
+    return a.model_dump_json(include={"kind", "locator", "value", "values", "key", "url"})
+
+
 def pointless(a: schemas.ExploreAction, url: str, before: FormState, tried: dict[tuple[str, str, str], int]) -> str | None:
     """Why a step would learn nothing, or None. A small model loops: it submits the same form
     again and again, or fills a field with the value it already holds. Such a step isn't run."""
@@ -337,7 +344,7 @@ def pointless(a: schemas.ExploreAction, url: str, before: FormState, tried: dict
             return (f'that field already holds "{a.value}". Change a different field, or change this one to a '
                     "different value, then submit")
     if a.kind in SUBMITS:
-        key = (describe(a), url, before.values())
+        key = (action_key(a), url, before.values())
         if key in tried:
             return (f"you did exactly this at step {tried[key]} on this page with the same field values, and it can't show "
                     "anything new. Change one field first (keep the others valid), or try another idea")
@@ -439,7 +446,7 @@ async def set_field(page, f: dict, kind: str, value: str | None) -> tuple[str, s
         return "ok", (f'"{f["label"]}" is a checkbox, so Mirmera {"ticked" if on else "cleared"} it' if kind != how else ""), how
     if kind in ("check", "uncheck"):
         return "failed", f'"{f["label"]}" is not a checkbox; fill it with a value', kind
-    await el.fill(value or "", timeout=5_000)
+    await el.fill(expand(value, f), timeout=5_000)
     return "ok", "", "fill"
 
 
@@ -518,7 +525,7 @@ def suggest(ctx: "CharterContext", state: FormState, tried_values: dict[str, set
     if state.submit:
         for f in fields:
             for what, v in ideas_for(f, today):
-                if v not in tried_values.get(f["label"], set()):
+                if not is_tried(f, v, tried_values):
                     return {"kind": "try", "values": {f["label"]: v}}, f'the next test idea for {f["label"]}: {what}'
     if link:
         return {"kind": "goto", "url": link["href"]}, f'the charter is about "{link["text"]}", not looked at yet'
@@ -549,7 +556,7 @@ def ideas_for(f: dict, today) -> list[tuple[str, str]]:
         return []
     if kind == "email" or "mail" in label:
         return [("a valid address", "name@example.com"), ("no @", "name.example.com"), ("no domain", "name@"),
-                ("very long", "a" * 64 + "@example.com")]
+                ("very long", "@long64@example.com")]
     if kind == "tel" or "phone" in label or "mobile" in label:
         return [("international format", "+251911223344"), ("local format", "0911223344"), ("letters", "abcdefg"),
                 ("too short", "12")]
@@ -558,9 +565,29 @@ def ideas_for(f: dict, today) -> list[tuple[str, str]]:
                 ("spaces around", " 1234 ")]
     if "name" in label:
         return [("Ge'ez script", GEEZ_NAME), ("apostrophe and hyphen", "O'Brien-Smith"), ("one letter", "A"),
-                ("very long", "Abebe " * 50), ("spaces around", "  John Smith  "), ("an emoji", "John 😀 Smith")]
-    return [("empty", ""), ("only spaces", "   "), ("very long", "x" * 300), ("markup", "<b>bold</b>"),
+                ("very long", "@long300"), ("spaces around", "  John Smith  "), ("an emoji", "John 😀 Smith")]
+    return [("empty", ""), ("only spaces", "   "), ("very long", "@long300"), ("markup", "<b>bold</b>"),
             ("quotes", "It's \"quoted\"")]
+
+
+LONG = re.compile(r"@long(\d{1,5})")
+
+
+def expand(value: str | None, f: dict | None = None) -> str:
+    """"@long300" is 300 characters of filler. A small model asked to copy a long value repeats
+    it until its reply runs out (an unusable reply), so ideas name long values by this code."""
+    if not value or "@long" not in value:
+        return value or ""
+    name = f is not None and "name" in f["label"].lower()
+    def fill(m):
+        n = min(int(m.group(1)), 20_000)
+        return (("Abebe Kebede " * (n // 13 + 1)) if name else ("x" * n))[:n]
+    return LONG.sub(fill, value)
+
+
+def is_tried(f: dict, value: str, tried: dict[str, set[str]]) -> bool:
+    done = tried.get(f["label"], set())
+    return value in done or expand(value, f) in done
 
 
 def ideas_text(fields: list[dict], tried: dict[str, set[str]], today, limit_fields: int = 6) -> tuple[str, int, int]:
@@ -569,11 +596,12 @@ def ideas_text(fields: list[dict], tried: dict[str, set[str]], today, limit_fiel
     for f in fields[:limit_fields]:
         ideas = ideas_for(f, today)
         total += len(ideas)
-        left = [(w, v) for w, v in ideas if v not in tried.get(f["label"], set())]
+        left = [(w, v) for w, v in ideas if not is_tried(f, v, tried)]
         done += len(ideas) - len(left)
         if left:
             lines.append(f'- {f["label"]}: ' + "; ".join(f'{w} ("{v[:40]}")' for w, v in left[:3]))
-    head = f"Test ideas not tried yet ({done} of {total} tried), each with the rest of the form valid:"
+    head = (f"Test ideas not tried yet ({done} of {total} tried), each with the rest of the form valid "
+            '("@long300" stands for 300 characters: send it as written, Mirmera types them):')
     return (head + "\n" + "\n".join(lines)) if lines else "", done, total
 
 
@@ -841,6 +869,33 @@ def refusal_about_a_gap(before: FormState, said: list[str]) -> bool:
     return any(w in words for f in gaps for w in re.findall(r"\w+", f["label"].lower()) if len(w) > 2 and w not in LABEL_NOISE)
 
 
+ETHIOPIC = re.compile(r"[\u1200-\u137F]")
+NEGATIVE_RULE = re.compile(r"\b(reject(?:s|ed)?|refuse[sd]?|not allowed|not accepted|must not|cannot|can't|never|blocked|denied|declined)\b", re.I)
+
+
+def rule_cases(rules: dict[str, str], sent: FormState, today) -> list[tuple[str, str, str, str]]:
+    """The rules that speak about a kind of value in the form as sent, and what they expect:
+    (rule id, rule, accept | refuse, field = value (what kind)). A rule naming Ge'ez script and a
+    name in Ge'ez letters, a rule about expired documents and an expiry date in the past."""
+    out = []
+    for f in sent.fields:
+        v, label = f["value"], f["label"].lower()
+        kinds = []
+        if ETHIOPIC.search(v):
+            kinds.append(("a name in Ge'ez script", ("ge'ez", "ge’ez", "geez", "ethiopic", "amharic", "fidel")))
+        if "name" in label and re.search(r"[A-Za-z]['’][A-Za-z]|[A-Za-z]-[A-Za-z]", v):
+            kinds.append(("a name with an apostrophe or hyphen", ("apostroph", "hyphen")))
+        if re.search(r"expir", label) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", v or "") and v < today.isoformat():
+            kinds.append(("an expiry date in the past", ("expired", "expiry", "expire")))
+        for what, words in kinds:
+            for rid, text in rules.items():
+                if any(w in text.lower() for w in words):
+                    out.append((rid, text, "refuse" if NEGATIVE_RULE.search(text) else "accept",
+                                f'{f["label"]} = "{v[:60]}" ({what})'))
+                    break
+    return out
+
+
 def decide(j: schemas.LLMExploreJudgement, rules: dict[str, str], before: FormState, said: list[str]) -> tuple[str, str]:
     """breaks | consistent | unclear, and why. The AI only reports facts (what the app did,
     what the rule expects); the verdict is made here, so a small model can't talk itself into a bug."""
@@ -922,6 +977,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
     reported: set[tuple[str, str]] = set()
     steps: list[dict] = [{"type": "goto", "url": start_url}]
     started = time.monotonic()
+    run_timeout = max(RUN_TIMEOUT_S, max_steps * STEP_TIME_S)
     final: dict = {}
     video: str | None = None  # the run's recording, kept in the session's folder
 
@@ -974,8 +1030,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     if _cancelled(run_id):
                         final = {"status": "cancelled", "detail": "Stopped by a tester."}
                         break
-                    if time.monotonic() - started > RUN_TIMEOUT_S:
-                        final = {"status": "finished", "detail": f"Stopped: the run took longer than {RUN_TIMEOUT_S // 60} minutes."}
+                    if time.monotonic() - started > run_timeout:
+                        final = {"status": "finished", "detail": f"Stopped: the run took longer than {run_timeout // 60} minutes."}
                         break
                     observation = await observe(page, signals, seen)
                     before = await form_state(page)
@@ -1000,7 +1056,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         try:
                             step = await complete_json(provider, PROMPT, _user_message(ctx, history, observation, max_steps - n + 1,
                                                                                        hints, ideas, tip, dirty),
-                                                       schemas.LLMExploreStep, task="explore_step", max_tokens=900)
+                                                       schemas.LLMExploreStep, task="explore_step", max_tokens=1500)
                         except LLMOutputError as err:
                             bad_replies += 1
                             stuck += 1
@@ -1021,7 +1077,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     picked = ""
                     if a.pick:  # a fill without a value: the next test idea for that field
                         f = find_field(before, field_name(a))
-                        choice = next(((w, v) for w, v in ideas_for(f, today) if v not in tried_values.get(f["label"], set())),
+                        choice = next(((w, v) for w, v in ideas_for(f, today) if not is_tried(f, v, tried_values)),
                                       None) if f else None
                         if f and (choice or valid_value(f, today) is not None):
                             what, value = choice or ("ordinary valid data", valid_value(f, today))
@@ -1032,6 +1088,9 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                              "kind": a.kind, "status": "ok", "detail": "", "url": page.url}
                     if stepped_in:
                         entry["by"] = "Mirmera"
+                        for name, v in (a.values or {}).items():  # it counts as tried whatever happens
+                            if fld := find_field(before, name):
+                                tried_values.setdefault(fld["label"], set()).add(v)
                     entry["t"] = round(time.monotonic() - filmed_from, 2)  # where this step is in the recording
                     if a.kind != "done":
                         entry |= await _step_frame(page, folder, run_id, entry["n"], a)
@@ -1098,7 +1157,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         _save(run_id, steps=list(history))
                         continue
                     if a.kind in SUBMITS:
-                        tried[(describe(a), page.url, before.values())] = entry["n"]
+                        tried[(action_key(a), page.url, before.values())] = entry["n"]
                     failed_before, page_errors_before = len(signals.failed), len(signals.page_errors)
                     acted_at = time.monotonic()
                     done_actions: list[dict] | None = None  # what was done, when Mirmera did it its own way
@@ -1175,6 +1234,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             rule_id = (j.rule or "").strip().upper()
                             rule_text = next((v for k, v in rules.items() if k.upper() == rule_id), "")
                             entry["judged"] = verdict
+                            entry["judged_why"] = why
                             entry["judged_means"] = j.answer_means
                             quote = j.answer_quote.strip() or said[0]
                             note = f"Sent: {sent_text(before)[:400]}. The app said: \"{said[0][:160]}\"."
@@ -1242,6 +1302,30 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         if await keep(crash, (crash.symptom.kind, crash.symptom.value)) and submitted \
                                 and (g := generalize_hint(before, crash.title)):
                             _mirmera_hint(run_id, g)
+
+                    if submitted and said and not broke and ctx.has_rules():
+                        # The rules that name what was sent (Ge'ez script, an expired date…): checked by
+                        # Mirmera itself, so a bug doesn't depend on a small model reading the rule right.
+                        did = outcome_of(said, broke)
+                        cases = rule_cases(rules_of(ctx), before, today)
+                        refusing = [c for c in cases if c[2] == "refuse"]
+                        for rid, rtext, expects, what in cases:
+                            breaks = (did == "accepted" and expects == "refuse") or \
+                                     (did == "refused" and expects == "accept" and not refusing and not refusal_about_a_gap(before, said))
+                            if not breaks or ("rule", rid) in reported:
+                                continue
+                            should, got = ("refused", "accepted") if expects == "refuse" else ("accepted", "refused")
+                            first, kind = what.split(" (", 1)[0], what.split(" (", 1)[-1].rstrip(")")
+                            await keep(schemas.ExploreProblem(
+                                title=f"{kind[:1].upper() + kind[1:]} is {got} although {rid} says it is {should}"[:200],
+                                severity="high" if expects == "refuse" else "medium",
+                                expected=f"Per {rid} (\"{rtext[:300]}\"), {first} is {should}."[:600],
+                                actual=f"With {sent_text(before)[:300]}, the app answered: \"{said[0][:200]}\"."[:600],
+                                symptom=schemas.Symptom(kind="text_visible", value=said[0][:300],
+                                                        explanation=f"Breaks {rid}: {rtext}"[:600])),
+                                ("rule", rid), f". Breaks {rid}: {rtext}")
+                            entry["judged"] = "breaks"
+                            break
 
                     if submitted and (said or broke):
                         # What the app did: from its own words first (no AI to misread it), else the check's reading.
@@ -1330,7 +1414,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     _, done, total = ideas_text(last_fields, tried_values, utcnow().date(), limit_fields=20)
                     if total:
                         left = [f'{f["label"]}: {w}' for f in last_fields for w, v in ideas_for(f, utcnow().date())
-                                if v not in tried_values.get(f["label"], set())]
+                                if not is_tried(f, v, tried_values)]
                         _note(session_id, "setup", f"Test ideas tried: {done} of {total}."
                               + (f" Not tried: {'; '.join(left[:8])}" + ("…" if len(left) > 8 else "") if left else ""))
             finally:
