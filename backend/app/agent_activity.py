@@ -44,11 +44,12 @@ def _state_of_run(r: models.ExplorationRun) -> str:
 def exploration(run: models.ExplorationRun | None, db: DBSession) -> dict | None:
     if not run:
         return None
+    from app.agent import explore
     steps = list(run.steps or [])
     bugs = [db.get(models.Bug, b) for b in run.bug_ids or []]
     return {
         "run_id": run.id, "status": run.status, "charter_id": run.charter_id, "mission": run.charter.mission_statement,
-        "session_id": run.session_id, "steps_used": len(steps), "max_steps": run.max_steps,
+        "session_id": run.session_id, "steps_used": explore.steps_used(steps), "max_steps": run.max_steps,
         "actions": sum(1 for s in steps if s.get("kind") not in NOT_ACTIONS),
         "recent": [{k: s.get(k) for k in ("n", "thought", "action", "kind", "status", "detail", "by")} for s in steps[-RECENT_STEPS:]],
         "bugs": [{"id": b.id, "title": b.title, "severity": b.severity} for b in bugs if b],

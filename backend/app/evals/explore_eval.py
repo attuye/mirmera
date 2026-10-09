@@ -68,7 +68,7 @@ class RunScore:
     status: str
     found: list[str] = field(default_factory=list)  # planted bug ids drafted
     false_alarms: list[str] = field(default_factory=list)  # titles of drafts matching no planted bug
-    steps: int = 0
+    steps: int = 0  # of the budget used
     actions: int = 0
     unusable: int = 0  # replies the AI got wrong (format)
     refused: int = 0  # steps Mirmera refused (repeats, outside the app, unverified claims)
@@ -98,8 +98,9 @@ def score(db, run) -> RunScore:
             s.found.append(key)
         elif not key:
             s.false_alarms.append(b.title)
+    from app.agent.explore import steps_used
     steps = run.steps or []
-    s.steps = len(steps)
+    s.steps = steps_used(steps)  # of the budget: refused steps, counted below, cost none
     s.actions = sum(1 for x in steps if x.get("kind") not in ("note", "problem", "done", "invalid"))
     s.unusable = sum(1 for x in steps if x.get("kind") == "invalid")
     s.refused = sum(1 for x in steps if x.get("status") in ("refused", "not verified"))
