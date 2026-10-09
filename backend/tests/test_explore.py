@@ -2,11 +2,12 @@
 test_regression ("Passport" makes POST /api/verify fail): it explores a charter, leaves a
 session (notes, recording, signals) and drafts bugs for a tester to review."""
 import json
+import re
 import time
 
 import pytest
 
-from app import models, schemas
+from app import agent_activity, models, schemas
 from app.database import SessionLocal
 from app.routers import runner as runner_api
 from tests.test_regression import App, app_url, bug_present  # noqa: F401  (fixtures)
@@ -166,6 +167,34 @@ def test_it_does_not_repeat_steps_that_teach_nothing(client, kyc, monkeypatch, c
     with SessionLocal() as db:  # refused steps are not part of the session's recording
         actions = [e for e in db.query(models.Evidence).filter_by(session_id=run["session_id"]).all() if e.kind == "action"]
         assert len(actions) == 4
+
+
+def test_a_refused_step_costs_none_of_the_budget(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """Seen with small local models: 12 of 25 steps refused, so half the run tried nothing."""
+    project, charter = kyc
+    provider = scripted(monkeypatch, [
+        step("An expired date", kind="fill", locator=EXPIRY, value="2020-01-01"),
+        step("Submit", kind="click", locator=VERIFY),
+        step("Submit again", kind="click", locator=VERIFY),
+        step("Set the same date", kind="fill", locator=EXPIRY, value="2020-01-01"),
+        step("A future date instead", kind="fill", locator=EXPIRY, value="2030-01-01"),
+    ])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 3}).json())
+    assert [s["status"] for s in run["steps"]] == ["ok", "ok", "refused", "refused", "ok"]
+    assert run["detail"] == "Used all 3 steps."
+    assert [re.search(r"Steps left: (\d+)\.", u)[1] for u in provider.users] == ["3", "2", "1", "1", "1"]
+    with SessionLocal() as db:  # what the progress bar shows: 3 of 3, not 5 of 3
+        ex = agent_activity.exploration(db.get(models.ExplorationRun, run["id"]), db)
+        assert ex["steps_used"] == 3 and ex["max_steps"] == 3
+
+
+def test_a_model_that_is_only_ever_refused_still_stops(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    project, charter = kyc
+    monkeypatch.setattr("app.agent.explore.suggest", lambda *a, **k: None)  # no idea for Mirmera to step in with
+    scripted(monkeypatch, [step("Look first", kind="note", note="The form has an expiry date field.")])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 3}).json())
+    assert [s["status"] for s in run["steps"]] == ["ok"] + ["refused"] * 5
+    assert run["status"] == "finished" and run["detail"].startswith("Stopped after 6 replies from the AI, 5 of them refused")
 
 
 def test_a_tester_can_watch_the_agent_and_replay_each_step(client, kyc, monkeypatch, chromium_available):  # noqa: F811

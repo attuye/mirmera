@@ -45,6 +45,7 @@ RUN_TIMEOUT_S = 900  # at least; a run may take STEP_TIME_S per step of its budg
 STEP_TIME_S = 80
 MAX_BAD_REPLIES = 4  # unusable replies in a row before the run stops: the model is not up to it
 STEP_IN_AFTER = 3  # steps in a row that taught nothing before Mirmera takes the next step itself
+REPLIES_PER_STEP = 2  # model replies per step of the budget, refused ones too: a model that is only ever refused still stops
 SUBMITS = ("click", "press", "try")
 # A note that says the app accepted or refused something: only true after a submit.
 CLAIM = re.compile(r"\b(accepts|accepted|rejects|rejected|refuses|refused|works|succeeds|successful(?:ly)?|confirm(?:s|ed|ing)?)\b", re.I)
@@ -53,6 +54,11 @@ ACTIVE: set[str] = set()  # run ids being worked on in this process
 VIEWPORT = {"width": 1280, "height": 800}  # fixed per run, so a target's box can be drawn on any frame
 PHONE = {"width": 390, "height": 844}
 SLOW_NETWORK = {"offline": False, "latency": 400, "downloadThroughput": 50 * 1024, "uploadThroughput": 20 * 1024}
+
+
+def steps_used(steps: list[dict]) -> int:
+    """The steps that count against the budget: a refused step was never run, so it costs none."""
+    return sum(1 for s in steps if s.get("status") != "refused")
 
 
 def context_options(conditions: dict | None) -> dict:
@@ -1026,9 +1032,13 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     if out:
                         _record(session_id, out)
 
-                for n in range(1, max_steps + 1):
+                for _ in range(max_steps * REPLIES_PER_STEP):
                     if _cancelled(run_id):
                         final = {"status": "cancelled", "detail": "Stopped by a tester."}
+                        break
+                    used = steps_used(history)
+                    if used >= max_steps:
+                        final = {"status": "finished", "detail": f"Used all {max_steps} steps."}
                         break
                     if time.monotonic() - started > run_timeout:
                         final = {"status": "finished", "detail": f"Stopped: the run took longer than {run_timeout // 60} minutes."}
@@ -1054,7 +1064,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         stepped_in = True
                     else:
                         try:
-                            step = await complete_json(provider, PROMPT, _user_message(ctx, history, observation, max_steps - n + 1,
+                            step = await complete_json(provider, PROMPT, _user_message(ctx, history, observation, max_steps - used,
                                                                                        hints, ideas, tip, dirty),
                                                        schemas.LLMExploreStep, task="explore_step", max_tokens=1500)
                         except LLMOutputError as err:
@@ -1408,7 +1418,10 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     stuck = stuck + 1 if entry["status"] in ("refused", "failed", "not verified") else 0
                     _save(run_id, steps=list(history), bug_ids=list(bug_ids))
                 else:
-                    final = {"status": "finished", "detail": f"Used all {max_steps} steps."}
+                    used = steps_used(history)
+                    final = {"status": "finished", "detail": f"Used all {max_steps} steps." if used >= max_steps else
+                             f"Stopped after {max_steps * REPLIES_PER_STEP} replies from the AI, "
+                             f"{len(history) - used} of them refused: it kept repeating steps that teach nothing."}
                 drain_signals()
                 if last_fields:
                     _, done, total = ideas_text(last_fields, tried_values, utcnow().date(), limit_fields=20)
