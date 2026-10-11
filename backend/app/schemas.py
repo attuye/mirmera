@@ -1229,6 +1229,9 @@ class ExploreProblem(BaseModel):
     actual: str = Field(min_length=3, max_length=600)
     severity: Literal["high", "medium", "low"] = "medium"
     symptom: Symptom
+    # Mirmera's own key for "the same problem" when the symptom changes every time (a marker
+    # value): set by Mirmera's checks, never by the AI.
+    same_as: SkipJsonSchema[Optional[str]] = None
 
 
 EXPLORE_KINDS = ("goto", "click", "fill", "fill_secret", "select", "check", "uncheck", "press", "wait",
