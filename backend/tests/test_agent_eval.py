@@ -833,3 +833,135 @@ def test_explore_as_a_phone_on_a_slow_network_in_amharic(client, shop_app, monke
     assert "Seen as: 390 wide, am-ET, Africa/Addis_Ababa, slow network" in provider.users[-1]
     bad = client.post(f"/charters/{charter['id']}/explore", json={"conditions": {"device": "fridge"}})
     assert bad.status_code == 422
+
+
+# ---------- rules Mirmera reads itself ----------
+
+GENERAL_RULES = {"AC1": "Phone number is optional.", "AC2": "Quantity must be between 1 and 10.",
+                 "AC3": "The email must be a valid address.", "AC4": "A comment can be at most 200 characters.",
+                 "AC5": "Delivery date is required.", "AC6": "Age: at least 18.",
+                 "AC7": "Orders placed before 2020-01-01 are archived."}  # a date is not a range
+GENERAL_FIELDS = [("Phone number", "tel"), ("Quantity", "number"), ("Email", "email"), ("Comment", "text"),
+                  ("Delivery date", "date"), ("Age", "number")]
+
+
+def general_form(**values):
+    from app.agent.explore import FormState
+    ok = {"Phone number": "+251911223344", "Quantity": "2", "Email": "a@example.com", "Comment": "Fine",
+          "Delivery date": "2027-01-01", "Age": "30"}
+    return FormState(fields=[{"label": label, "type": t, "value": values.get(label, ok[label])} for label, t in GENERAL_FIELDS])
+
+
+@pytest.mark.parametrize("label,value,expected", [
+    ("Phone number", "", ("AC1", "accept")),
+    ("Quantity", "11", ("AC2", "refuse")), ("Quantity", "0", ("AC2", "refuse")), ("Quantity", "10", None),
+    ("Email", "name@", ("AC3", "refuse")), ("Email", "name.example.com", ("AC3", "refuse")),
+    ("Comment", "x" * 201, ("AC4", "refuse")), ("Comment", "x" * 200, None),
+    ("Delivery date", "", ("AC5", "refuse")),
+    ("Age", "17", ("AC6", "refuse")), ("Age", "18", None),
+])
+def test_the_rules_a_story_usually_has_are_read_without_ai(label, value, expected):
+    from datetime import date
+    from app.agent.explore import rule_cases
+    cases = rule_cases(GENERAL_RULES, general_form(**{label: value}), date(2026, 10, 11))
+    assert [(c[0], c[2]) for c in cases] == ([expected] if expected else [])
+    assert rule_cases(GENERAL_RULES, general_form(), date(2026, 10, 11)) == []  # a valid form: nothing singled out
+
+
+def test_boundary_ideas_come_first_from_the_rules():
+    from datetime import date
+    from app.agent.explore import ideas_for
+    def ideas(label, t):
+        return [v for _, v in ideas_for({"label": label, "type": t, "value": ""}, date(2026, 10, 11), GENERAL_RULES)]
+    assert ideas("Quantity", "number")[:4] == ["0", "1", "10", "11"]
+    assert ideas("Comment", "text")[:2] == ["@long200", "@long201"]
+    assert ideas("Phone number", "tel")[0] == "" and ideas("Age", "number")[:2] == ["17", "18"]
+    assert ideas("Quantity", "number").count("0") == 1  # the type's own "zero" idea isn't repeated
+
+
+SIGNUP = b"""<!doctype html><title>Sign up</title><h1>Sign up for the meetup</h1>
+<form id=f novalidate><label for=n>Name</label><input id=n>
+<label for=e>Email</label><input id=e type=email>
+<label for=p>Phone</label><input id=p type=tel>
+<label for=s>Seats</label><input id=s type=number>
+<button type=submit>Sign up</button></form><p role=status id=out></p>
+<script>
+document.getElementById('f').addEventListener('submit', (e) => {
+  e.preventDefault()
+  const v = (id) => document.getElementById(id).value.trim()
+  const out = document.getElementById('out')
+  if (!v('n')) { out.textContent = 'Please enter your name.'; return }
+  if (!v('p')) { out.textContent = 'Phone is required.'; return }
+  out.textContent = "You're signed up!"
+})
+</script>"""
+SIGNUP_STORY = """Acceptance criteria
+- The phone number is optional.
+- Seats: 1 to 4 per person.
+- The email must be a valid email address."""
+
+
+@pytest.fixture
+def signup_app():
+    """A sign-up form whose phone is required though optional, that takes 5 seats and any email."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class App(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(SIGNUP)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+def test_optional_ranges_and_formats_are_checked_without_the_ai(client, signup_app, monkeypatch, chromium_available):  # noqa: F811
+    """Three rules most stories have, broken: an optional field the app requires, a number outside
+    its range, an email that isn't valid. The check answers nonsense: Mirmera finds them itself."""
+    from app import models
+    from app.database import SessionLocal
+    from app.routers.explore import start_exploration
+    from app.agent import explore as agent
+    replies = [step("Open", kind="goto", url=signup_app),
+               step("Valid", kind="try", values={}),
+               step("No phone", kind="try", values={"Phone": ""}),
+               step("5 seats", kind="try", values={"Seats": "5"}),
+               step("Bad email", kind="try", values={"Email": "name@"}),
+               step("Done", kind="done", summary="Done.")]
+    provider = Scripted(replies, judge=lambda user: '{"answer_means": "other", "answer_quote": "", "rule": "", "rule_expects": "none"}')
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+    with SessionLocal() as db:
+        project = models.Project(org_id="eval", name="Meetup", app_url=signup_app, default_ai_provider="mock")
+        db.add(project)
+        db.flush()
+        story = models.Story(project_id=project.id, title="Sign up for the meetup", description=SIGNUP_STORY)
+        charter = models.Charter(project_id=project.id, mission_statement="Explore the sign-up form", source="eval")
+        charter.stories = [story]
+        db.add_all([story, charter])
+        db.commit()
+        r = start_exploration(db, charter, started_by="eval", max_steps=10)
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            db.expire_all()
+            r = db.get(models.ExplorationRun, r.id)
+            if r.status != "running" and r.id not in agent.ACTIVE:
+                break
+        titles = [db.get(models.Bug, b).title for b in r.bug_ids]
+        steps = list(r.steps)
+    assert titles == ["Phone left empty is refused although AC1 says it is accepted",
+                      "Seats 5, outside 1 to 4 is accepted although AC2 says it is refused",
+                      'An email that isn\'t valid, "name@", is accepted although AC3 says it is refused']
+    assert [s["status"] for s in steps[1:5]] == ["ok", "drafted", "drafted", "drafted"]
+    # and the ideas started from the rules: the boundaries of 1 to 4, the optional phone left empty
+    ideas = provider.users[1].split("<ideas>")[1].split("</ideas>")[0]
+    assert '- Seats: just under the minimum 1 ("0"); the minimum 1 ("1"); the maximum 4 ("4")' in ideas
+    assert '- Phone: left empty (the rules say optional) ("")' in ideas
