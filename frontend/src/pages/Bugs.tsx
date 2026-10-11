@@ -105,6 +105,11 @@ export default function Bugs() {
                     <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 4, display: 'block' }}>{b.charter_mission}</span>
                   </span>
                   <span style={{ display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
+                    {(b.sightings?.length ?? 0) > 0 && (
+                      <span title="Mirmera met this problem again in other charters or runs" style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+                        seen {(b.sightings?.length ?? 0) + 1}×
+                      </span>
+                    )}
                     <span style={{ fontSize: 11.5, color: SEVERITY_COLOR[b.severity] }}>{b.severity}</span>
                     <span style={{ fontSize: 11, fontWeight: 600, color: kind.fg, background: kind.bg, padding: '3px 8px', borderRadius: 5 }}>
                       {kind.label}
@@ -158,6 +163,7 @@ function BugDetail({ bug, onSaved, onDeleted, project, onProject }: {
   return (
     <div>
       <Trail bug={bug} />
+      <Sightings bug={bug} />
       <BugEvidence bug={bug} />
       {editing ? (
         <ReviewForm bug={bug} onCancel={() => setEditing(false)} onSaved={(b) => { onSaved(b); setEditing(false) }}
@@ -212,6 +218,27 @@ function BugEvidence({ bug }: { bug: BugListItem }) {
           </div>
         )}
       </div>
+    </section>
+  )
+}
+
+/** Where else the exploration agent met this problem: one draft to review, every place it showed up. */
+function Sightings({ bug }: { bug: BugListItem }) {
+  const seen = bug.sightings ?? []
+  if (!seen.length) return null
+  return (
+    <section aria-label="Seen again" style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: 6 }}>
+        Seen again {seen.length === 1 ? 'once' : `${seen.length} times`}: Mirmera added it here instead of drafting it twice
+      </div>
+      {seen.map((s, i) => (
+        <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12.5, marginBottom: 3 }}>
+          <span className="mono" style={{ color: 'var(--text-quiet)', width: 72, flexShrink: 0, fontSize: 11.5 }}>
+            {new Date(s.at.endsWith('Z') || s.at.includes('+') ? s.at : s.at + 'Z').toLocaleDateString()}
+          </span>
+          <span style={{ color: 'var(--text-secondary)' }}>{s.mission || 'Another charter'}</span>
+        </div>
+      ))}
     </section>
   )
 }
