@@ -74,6 +74,7 @@ class RunScore:
     refused: int = 0  # steps Mirmera refused (repeats, outside the app, unverified claims)
     checked: int = 0  # answers checked against the rules
     stepped_in: int = 0  # steps Mirmera took itself because the AI was stuck
+    tours: int = 0  # Mirmera's flow tours after an accepted submit
     seconds: float = 0.0
     detail: str = ""
 
@@ -105,7 +106,8 @@ def score(db, run) -> RunScore:
     s.unusable = sum(1 for x in steps if x.get("kind") == "invalid")
     s.refused = sum(1 for x in steps if x.get("status") in ("refused", "not verified"))
     s.checked = sum(1 for x in steps if x.get("judged"))
-    s.stepped_in = sum(1 for x in steps if x.get("by") == "Mirmera")
+    s.stepped_in = sum(1 for x in steps if x.get("by") == "Mirmera" and x.get("kind") != "tour")
+    s.tours = sum(1 for x in steps if x.get("kind") == "tour")
     if run.finished_at and run.created_at:
         s.seconds = round((run.finished_at - run.created_at).total_seconds(), 1)
     return s
@@ -181,12 +183,14 @@ def report(scores: list[RunScore], provider: str, checker: str | None) -> str:
     lines += ["", "## False alarms", "",
               f"{len(alarms)} of {drafts} drafts matched no planted bug." + (" Review them: some may be real." if alarms else ""), ""]
     lines += [f"- {a}" for a in alarms]
-    lines += ["", "## Runs", "", "Mirmera stepped in: steps Mirmera took itself after three steps in a row that taught nothing.", "",
-              "| Charter | Status | Found | False alarms | Steps | Actions | Unusable replies | Refused | Mirmera stepped in | Checked | Seconds |",
-              "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+    lines += ["", "## Runs", "", "Mirmera stepped in: steps Mirmera took itself after three steps in a row that taught nothing. "
+              "Flow tours: Mirmera's own tours after an accepted submit (open directly, refresh, back, submit twice).", "",
+              "| Charter | Status | Found | False alarms | Steps | Actions | Unusable replies | Refused | Mirmera stepped in "
+              "| Flow tours | Checked | Seconds |",
+              "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for s in scores:
         lines.append(f"| {s.charter} | {s.status} | {', '.join(s.found) or '–'} | {len(s.false_alarms)} | {s.steps} | {s.actions} "
-                     f"| {s.unusable} | {s.refused} | {s.stepped_in} | {s.checked} | {s.seconds} |")
+                     f"| {s.unusable} | {s.refused} | {s.stepped_in} | {s.tours} | {s.checked} | {s.seconds} |")
     stopped = [s for s in scores if s.status == "error"]
     if stopped:
         lines += ["", "## Runs that stopped", ""] + [f"- {s.charter}: {s.detail}" for s in stopped]
@@ -210,7 +214,7 @@ def steps_text() -> str:
         for run in db.query(models.ExplorationRun).order_by(models.ExplorationRun.created_at).all():
             out += ["", f"## {run.charter.mission_statement}", "", f"{run.status}: {run.detail or ''}", ""]
             for st in run.steps or []:
-                who = " (Mirmera stepped in)" if st.get("by") == "Mirmera" else ""
+                who = " (Mirmera's flow tour)" if st.get("kind") == "tour" else " (Mirmera stepped in)" if st.get("by") == "Mirmera" else ""
                 out.append(f"{st.get('n')}. [{st.get('kind')}] {st.get('action')} -> {st.get('status')}{who}"
                            + (f": {st['detail']}" if st.get("detail") else ""))
                 if st.get("judged"):

@@ -37,6 +37,18 @@ def sign_up(c, name="Attu", email="attu@addisverify.et", workspace="AddisVerify"
     return r.json()
 
 
+def pytest_configure(config):
+    config.addinivalue_line("markers", "tours: the exploration agent tours the flow after an accepted submit")
+
+
+@pytest.fixture(autouse=True)
+def flow_tours(request, monkeypatch):
+    """The agent's flow tours add Mirmera's own steps after an accepted submit. Tests that check
+    other behaviour step by step run without them; tests marked `tours` (and the ceiling) keep them."""
+    if not request.node.get_closest_marker("tours"):
+        monkeypatch.setattr("app.agent.explore.TOURS", False)
+
+
 @pytest.fixture(autouse=True)
 def fresh_attempts():
     from app import auth

@@ -47,6 +47,7 @@ MAX_BAD_REPLIES = 4  # unusable replies in a row before the run stops: the model
 STEP_IN_AFTER = 3  # steps in a row that taught nothing before Mirmera takes the next step itself
 REPLIES_PER_STEP = 2  # model replies per step of the budget, refused ones too: a model that is only ever refused still stops
 SUBMITS = ("click", "press", "try")
+TOURS = True  # after the first accepted submit on a form, Mirmera tours the flow itself
 # A note that says the app accepted or refused something: only true after a submit.
 CLAIM = re.compile(r"\b(accepts|accepted|rejects|rejected|refuses|refused|works|succeeds|successful(?:ly)?|confirm(?:s|ed|ing)?)\b", re.I)
 
@@ -57,8 +58,9 @@ SLOW_NETWORK = {"offline": False, "latency": 400, "downloadThroughput": 50 * 102
 
 
 def steps_used(steps: list[dict]) -> int:
-    """The steps that count against the budget: a refused step was never run, so it costs none."""
-    return sum(1 for s in steps if s.get("status") != "refused")
+    """The steps that count against the budget: a refused step was never run, and a flow tour is
+    Mirmera's own, so they cost none."""
+    return sum(1 for s in steps if s.get("status") != "refused" and s.get("kind") != "tour")
 
 
 def context_options(conditions: dict | None) -> dict:
@@ -1143,6 +1145,120 @@ def _seen(entry: dict, new: bool) -> None:
         entry["detail"] = (entry.get("detail") or "") + " (seen before: added to that draft)"
 
 
+# ---------- flow tours: the ways users really move through a flow ----------
+
+def _marker() -> str:
+    import random
+    return "Tour" + "".join(random.choice("bcdfghjklmnpqrstvwxz") for _ in range(5)).capitalize()
+
+
+async def flow_tour(page, context, signals, form_url: str, answer_url: str, sent: FormState, to_here: list[dict],
+                    rules: dict[str, str], keep) -> str:
+    """After an accepted submit, what a tester does next: open the answer page by its address
+    (a bookmark, a shared link), refresh it, go back, and send the same form twice quickly. A
+    server error or a page error on the way is a draft; so is one double click listed twice.
+    keep(problem, key, (page, signals, steps)) drafts a checked bug. Returns what it did."""
+    from urllib.parse import urlsplit
+    from app.regression.replay import Signals
+    done: list[str] = []
+    found = 0
+
+    async def check(pg, sigs, f0: int, e0: int, how: str, rec: list[dict]) -> None:
+        nonlocal found
+        for c in crashes(sigs.failed[f0:], sigs.page_errors[e0:]):
+            c.actual = f"{how}: {c.actual}"[:600]
+            if await keep(c, (c.symptom.kind, c.symptom.value), (pg, sigs, rec)):
+                found += 1
+
+    answer_path = urlsplit(answer_url).path or "/"
+    # 1. The answer page opened by its address, in a new tab.
+    if answer_url.split("#")[0] != form_url.split("#")[0]:
+        tab = await context.new_page()
+        tab_signals = Signals()
+        tab_signals.attach(tab)
+        try:
+            await tab.goto(answer_url, wait_until="domcontentloaded", timeout=30_000)
+            await tab_signals.settle()
+            await check(tab, tab_signals, 0, 0, f"Opening {answer_path} directly (a bookmark or a shared link)",
+                        [{"type": "goto", "url": answer_url}])
+        finally:
+            await tab.close()
+        done.append(f"opened {answer_path} directly")
+    # 2. Refresh, 3. Back.
+    f0, e0 = len(signals.failed), len(signals.page_errors)
+    await page.reload(wait_until="domcontentloaded", timeout=30_000)
+    await signals.settle()
+    await check(page, signals, f0, e0, f"Refreshing {answer_path} after the submit", to_here + [{"type": "goto", "url": answer_url}])
+    done.append("refreshed")
+    f0, e0 = len(signals.failed), len(signals.page_errors)
+    try:
+        await page.go_back(wait_until="domcontentloaded", timeout=10_000)
+        await signals.settle()
+        await check(page, signals, f0, e0, f"Going back from {answer_path}", to_here)
+        done.append("went back")
+    except Exception:
+        pass
+    # 4. The same form, sent with one double click. A text field carries a marker, so an entry
+    #    listed twice can be counted.
+    await page.goto(form_url, wait_until="domcontentloaded", timeout=30_000)
+    await signals.settle()
+    form = await form_state(page)
+    texts = [f for f in form.fields if f["type"] in ("text", "search", "textarea")]
+    marked = next((f for f in texts if "name" in f["label"].lower()), texts[0] if texts else None)
+    marker = _marker()
+    rec = to_here[:1] + [{"type": "goto", "url": form_url}]
+    for f in form.fields:
+        was = next((x["value"] for x in sent.fields if x["label"] == f["label"]), None)
+        if was is None or f["type"] in ("password", "file"):
+            continue
+        value = f"{was} {marker}".strip() if marked and f["idx"] == marked["idx"] else was
+        status, _, how = await set_field(page, f, "fill", value)
+        if status == "ok":
+            rec.append({"type": "action", "action": _rec(how, f, value), "url": form_url})
+    button = page.get_by_role("button", name=sent.submit, exact=True).first
+    f0, e0 = len(signals.failed), len(signals.page_errors)
+    await button.dblclick(timeout=5_000)
+    click = {"action": "click", "locator": {"method": "role", "role": "button", "name": sent.submit}}
+    rec += [{"type": "action", "action": click, "url": form_url}, {"type": "action", "action": click, "url": form_url}]
+    await signals.settle(timeout_ms=10_000)
+    await check(page, signals, f0, e0, f"Clicking {sent.submit} twice quickly", rec)
+    done.append(f"clicked {sent.submit} twice quickly")
+    # Where submitted things are listed: a link the rules name next to "listed", or a "My …" link.
+    if marked:
+        links = form.links or (await form_state(page)).links
+        place, rule = None, None
+        for rid, text in rules.items():
+            t = _norm(text)
+            if any(w in t.split() for w in LISTING_WORDS):
+                place = next((l for l in links if len(l["text"]) >= 4 and _norm(l["text"]) in t), None)
+                if place:
+                    rule = (rid, text)
+                    break
+        place = place or next((l for l in links if l["text"].lower().startswith("my ")), None)
+        if place:
+            f0, e0 = len(signals.failed), len(signals.page_errors)
+            await page.goto(place["href"], wait_until="domcontentloaded", timeout=30_000)
+            await signals.settle()
+            listed = (await page.evaluate("() => document.body ? document.body.innerText : ''")).count(marker)
+            rec_list = rec + [{"type": "goto", "url": place["href"]}]
+            await check(page, signals, f0, e0, f"Opening {place['text']} after clicking {sent.submit} twice", rec_list)
+            if listed >= 2:
+                why = f" {rule[0]} says: \"{rule[1][:200]}\"" if rule else ""
+                if await keep(schemas.ExploreProblem(
+                        title=f"Clicking {sent.submit} twice quickly creates it twice"[:200], severity="high",
+                        expected=f"One entry per submit, even when the button is clicked twice (users double-click).{why}"[:600],
+                        actual=f"After one double click on {sent.submit}, {place['text']} lists it {listed} times "
+                               f"(marked \"{marker}\")."[:600],
+                        symptom=schemas.Symptom(kind="text_visible", value=marker,
+                                                explanation=f"Listed {listed} times after one double click on {sent.submit}")),
+                        ("double", form_url.split("?")[0]), (page, signals, rec_list)):
+                    found += 1
+            done.append(f"looked in {place['text']}: listed {listed} time{'s' if listed != 1 else ''}")
+    await page.goto(form_url, wait_until="domcontentloaded", timeout=30_000)
+    await signals.settle()
+    return ", ".join(done) + (f"; {found} problem{'s' if found != 1 else ''} drafted" if found else "; nothing broke")
+
+
 # ---------- the run ----------
 
 async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, session_id: str, charter_id: str,
@@ -1186,6 +1302,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                 asked: set[str] = set()  # questions already noted
                 tried_values: dict[str, set[str]] = {}  # field label -> values submitted (for the test ideas)
                 last_fields: list[dict] = []  # the last form seen, for the ideas tally at the end
+                toured: set[str] = set()  # forms whose flow was toured after an accepted submit
+                tour_due = None
                 dirty: dict[str, str] = {}  # fields changed since the last submit: nothing is tested until it is sent
                 n_submits = 0
                 visited: set[str] = {start_url.split("#")[0]}
@@ -1463,25 +1581,27 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                     _note(session_id, "question", f"No rule says what should happen here. Sent: {sent_text(before)[:300]}. "
                                                                   f"The app said: \"{said[0][:160]}\". Is that what the team wants?")
                             _note(session_id, "test", note)
-                    async def keep(problem: schemas.ExploreProblem, key: tuple, extra: str = "") -> bool:
-                        """A checked bug draft for something Mirmera saw itself (no AI involved)."""
+                    async def keep(problem: schemas.ExploreProblem, key: tuple, extra: str = "", *, on=None) -> bool:
+                        """A checked bug draft for something Mirmera saw itself (no AI involved).
+                        on: (page, its signals, the steps to it, the history entry) for a flow tour."""
+                        pg, sigs, rec, ent = on or (page, signals, steps, entry)
                         if key in reported:
                             return False
-                        ok, evidence = await verify(page, problem.symptom, signals)
+                        ok, evidence = await verify(pg, problem.symptom, sigs)
                         if not ok:
                             return False
                         shot = folder / f"explore-{run_id[:8]}-{len(bug_ids) + 1}.png"
                         try:
-                            await page.screenshot(path=str(shot))
+                            await pg.screenshot(path=str(shot))
                         except Exception:
                             shot = None
-                        bid, new = _draft_bug(session_id, charter_id, problem, evidence + extra, steps, page.url, shot, provider)
+                        bid, new = _draft_bug(session_id, charter_id, problem, evidence + extra, rec, pg.url, shot, provider)
                         if bid not in bug_ids:
                             bug_ids.append(bid)
                         reported.add(key)
-                        entry["status"] = "drafted"
-                        entry["detail"] = (entry["detail"] + "; " if entry["detail"] else "") + problem.title
-                        _seen(entry, new)
+                        ent["status"] = "drafted"
+                        ent["detail"] = (ent["detail"] + "; " if ent["detail"] else "") + problem.title
+                        _seen(ent, new)
                         return True
 
                     submitted = is_submit and entry["status"] in ("ok", "drafted")
@@ -1545,6 +1665,10 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         submits.append((values, outcome, entry["n"]))
                         if outcome == "accepted":
                             accepted_values += [v for v in kept_values(before) if v not in accepted_values]
+                            form_path = entry["url"].split("?")[0].split("#")[0]
+                            if TOURS and form_path not in toured and before.submit and not page.is_closed():
+                                toured.add(form_path)
+                                tour_due = (entry["url"], page.url, before, list(steps))
 
                     if entry["status"] in ("ok", "drafted") and not page.is_closed() and after.url:
                         new_page = after.url.split("#")[0] != (before.url or "").split("#")[0]
@@ -1599,6 +1723,23 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     history.append(entry)
                     stuck = stuck + 1 if entry["status"] in ("refused", "failed", "not verified") else 0
                     _save(run_id, steps=list(history), bug_ids=list(bug_ids))
+                    if tour_due:
+                        # An accepted submit: walk the flow the ways users do, not only forward (Mirmera's
+                        # own steps, no AI, outside the budget).
+                        form_url, answer_url, sent_form, to_here = tour_due
+                        tour_due = None
+                        tour = {"n": len(history) + 1, "thought": "Mirmera's flow tour after an accepted submit: open the "
+                                "answer page directly, refresh it, go back, and send the form twice quickly.",
+                                "action": "flow tour", "kind": "tour", "status": "ok", "detail": "", "url": answer_url,
+                                "by": "Mirmera", "t": round(time.monotonic() - filmed_from, 2)}
+                        try:
+                            tour["detail"] = await flow_tour(page, context, signals, form_url, answer_url, sent_form, to_here,
+                                                             rules_of(ctx), lambda prob, key, on: keep(prob, key, on=(*on, tour)))
+                        except Exception as err:  # a tour is extra: it never stops the run
+                            tour["detail"] = f"the tour stopped: {_first_line(err)}"
+                        history.append(tour)
+                        _save(run_id, steps=list(history), bug_ids=list(bug_ids))
+                        _note(session_id, "test", f"Flow tour after the submit on {form_url}: {tour['detail']}")
                 else:
                     used = steps_used(history)
                     final = {"status": "finished", "detail": f"Used all {max_steps} steps." if used >= max_steps else
