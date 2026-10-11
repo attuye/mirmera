@@ -95,7 +95,9 @@ test('a bug the agent met again shows where, instead of a second draft', async (
 
   const at = new Date().toISOString()
   await page.route(`${API_URL}/projects/${project.id}/bugs`, async (route) => {
-    const bugs = await (await route.fetch()).json()
+    const response = await route.fetch().catch(() => null)
+    if (!response) return
+    const bugs = await response.json()
     bugs[0].sightings = [
       { session_id: 's2', charter_id: 'c2', mission: 'Explore expiry dates with a past date, today and a future date', at, url: '' },
       { session_id: 's3', charter_id: 'c3', mission: "Explore full names in Latin and Ge'ez script", at, url: '' },
@@ -111,4 +113,5 @@ test('a bug the agent met again shows where, instead of a second draft', async (
   await expect(seen).toContainText('Explore expiry dates with a past date')
   await expect(seen).toContainText("Explore full names in Latin and Ge'ez script")
   if (process.env.SHOTS) await bug.screenshot({ path: `${process.env.SHOTS}/seen-again.png` })
+  await page.unrouteAll({ behavior: 'ignoreErrors' })  // a list refresh still in flight must not fail the test
 })
