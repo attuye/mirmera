@@ -941,8 +941,43 @@ async def judge(provider: LLMProvider, ctx: CharterContext, before: FormState, s
         return None
 
 
+def signature(p: schemas.ExploreProblem) -> str:
+    """The problem as a key, so the same one met again isn't drafted twice: a failing request
+    by its path, a page error by its message, a wrong answer by the rule it breaks and the
+    words on the page (the same "Order placed" can break two different rules)."""
+    sym = p.symptom
+    value = _norm(sym.value)[:200]
+    if sym.kind in ("text_visible", "text_absent"):
+        return f"{sym.kind}:{_norm(sym.explanation or p.title)[:200]}:{value}"
+    return f"{sym.kind}:{value}"
+
+
+SEEN_AGAIN = "seen again"
+
+
 def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evidence: str, steps: list[dict],
-               page_url: str, screenshot: Path | None, provider: LLMProvider) -> str:
+               page_url: str, screenshot: Path | None, provider: LLMProvider) -> tuple[str, bool]:
+    """(bug id, new?): a bug draft, or, when the project already has a draft of the same problem, a sighting
+    added to it: the tester reviews each problem once, and sees everywhere it showed up."""
+    key = signature(p)
+    with SessionLocal() as db:
+        session = db.get(models.Session, session_id)
+        project_id = session.charter.project_id if session and session.charter else None
+        same = (db.query(models.Bug).join(models.Charter, models.Bug.charter_id == models.Charter.id)
+                .filter(models.Charter.project_id == project_id, models.Bug.signature == key)
+                .order_by(models.Bug.created_at).first()) if project_id else None
+        if same:
+            charter = db.get(models.Charter, charter_id)
+            same.sightings = list(same.sightings or []) + [{
+                "session_id": session_id, "charter_id": charter_id, "at": utcnow().isoformat(), "url": page_url,
+                "mission": (charter.mission_statement if charter else "")[:200]}]
+            if screenshot and screenshot.is_file():
+                db.add(models.Evidence(session_id=session_id, bug_id=same.id, kind="screenshot",
+                                       summary=f"Seen again: {p.title}"[:300], url=page_url, file_path=str(screenshot)))
+            db.add(models.Note(session_id=session_id, tag="bug",
+                               content=f"Seen again: {same.title} (already drafted, so added to that bug)"[:4000]))
+            db.commit()
+            return same.id, False
     try:
         edited = clean_steps(steps)
     except StepError:
@@ -959,6 +994,7 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
                                                                      else f"open {s['url']}" for s in (edited or [])],
             reproduction_trail=trail, edited_steps=edited,
             environment={"browser": "Chromium (headless)", "url": page_url, "found_by": TESTER},
+            signature=key, sightings=[],
         )
         db.add(bug)
         db.flush()
@@ -967,7 +1003,13 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
                                    summary=f"What the agent saw: {p.title}"[:300], url=page_url, file_path=str(screenshot)))
         db.add(models.Note(session_id=session_id, tag="bug", content=f"{p.title}: {p.actual}"[:4000]))
         db.commit()
-        return bug.id
+        return bug.id, True
+
+
+def _seen(entry: dict, new: bool) -> None:
+    if not new:
+        entry["seen_again"] = True
+        entry["detail"] = (entry.get("detail") or "") + " (seen before: added to that draft)"
 
 
 # ---------- the run ----------
@@ -1150,9 +1192,12 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                     await page.screenshot(path=str(shot))
                                 except Exception:
                                     shot = None
-                                bug_ids.append(_draft_bug(session_id, charter_id, a.problem, detail, steps, page.url, shot, provider))
+                                bid, new = _draft_bug(session_id, charter_id, a.problem, detail, steps, page.url, shot, provider)
+                                if bid not in bug_ids:
+                                    bug_ids.append(bid)
                                 reported.add(key)
                                 entry["status"], entry["detail"] = "drafted", detail
+                                _seen(entry, new)
                         if entry["status"] != "drafted":
                             entry["detail"] += "." + suggestion_text(tip)
                         stuck = 0 if entry["status"] == "drafted" else stuck + 1
@@ -1267,10 +1312,13 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                             await page.screenshot(path=str(shot))
                                         except Exception:
                                             shot = None
-                                        bug_ids.append(_draft_bug(session_id, charter_id, problem,
-                                                                  f"{evidence}. Breaks {rule_id}: {rule_text}", steps, page.url, shot, provider))
+                                        bid, new = _draft_bug(session_id, charter_id, problem,
+                                                              f"{evidence}. Breaks {rule_id}: {rule_text}", steps, page.url, shot, provider)
+                                        if bid not in bug_ids:
+                                            bug_ids.append(bid)
                                         reported.add(key)
                                         entry["status"] = "drafted"
+                                        _seen(entry, new)
                                         if g := generalize_hint(before, problem.title):
                                             _mirmera_hint(run_id, g)
                                 entry["detail"] += f"; breaks {rule_id}"
@@ -1296,10 +1344,13 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             await page.screenshot(path=str(shot))
                         except Exception:
                             shot = None
-                        bug_ids.append(_draft_bug(session_id, charter_id, problem, evidence + extra, steps, page.url, shot, provider))
+                        bid, new = _draft_bug(session_id, charter_id, problem, evidence + extra, steps, page.url, shot, provider)
+                        if bid not in bug_ids:
+                            bug_ids.append(bid)
                         reported.add(key)
                         entry["status"] = "drafted"
                         entry["detail"] = (entry["detail"] + "; " if entry["detail"] else "") + problem.title
+                        _seen(entry, new)
                         return True
 
                     submitted = is_submit and entry["status"] in ("ok", "drafted")

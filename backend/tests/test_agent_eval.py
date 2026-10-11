@@ -344,6 +344,39 @@ def test_rule_cases():
     assert rule_cases(rules, sent("O'Brien-Smith", "2027-01-01"), today) == []  # no rule about apostrophes here
 
 
+class EachCharter(Scripted):
+    """The same replies for every charter: starts again when a run starts (no steps yet)."""
+    async def complete(self, system, user, **kwargs):
+        if kwargs.get("task") != "explore_judge" and "(no steps yet)" in user:
+            self.users = []
+        return await super().complete(system, user, **kwargs)
+
+
+def test_the_same_bug_in_another_charter_is_a_sighting_not_a_second_draft(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
+    """From qwen3:8b's runs: the passport crash was drafted in three charters, so a tester
+    reviewed it three times. Now it is drafted once and the other charters add a sighting."""
+    from app import models
+    from app.database import SessionLocal
+    replies = [step("Open it", kind="goto", url=f"{practice_app}/verify"),
+               step("Passport", kind="try", values={"Document type": "Passport"}),
+               step("Done", kind="done", summary="Passport tried.")]
+    scores = run_with(monkeypatch, EachCharter(replies), practice_app, max_steps=6, only=["documents", "expiry", "names"])
+    assert all(s.found == ["passport"] for s in scores)  # each run still counts it as found
+    with SessionLocal() as db:
+        runs = db.query(models.ExplorationRun).order_by(models.ExplorationRun.created_at.desc()).limit(3).all()[::-1]
+        [bug_id] = {b for r in runs for b in r.bug_ids}  # one bug for the three charters
+        bug = db.get(models.Bug, bug_id)
+        assert bug.title == "POST /api/verify fails with 500" and len(bug.sightings) == 2
+        assert [x["mission"][:20] for x in bug.sightings] == ["Explore expiry dates", "Explore full names i"]
+        assert [s["status"] for s in runs[1].steps][1] == "drafted" and runs[1].steps[1]["seen_again"]
+        assert "seen before: added to that draft" in runs[1].steps[1]["detail"]
+        notes = [n.content for n in db.query(models.Note).filter_by(session_id=runs[2].session_id)]
+        assert "Seen again: POST /api/verify fails with 500 (already drafted, so added to that bug)" in notes
+        from app import schemas
+        out = schemas.BugOut.model_validate(bug).model_dump()  # what the bug page gets
+        assert len(out["sightings"]) == 2 and out["sightings"][0]["charter_id"] == runs[1].charter_id
+
+
 def test_a_model_that_wanders_off_stays_in_the_app(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
     wandering = [step("Elsewhere", kind="goto", url="https://example.com/"),
                  step("Script", kind="goto", url="javascript:alert(1)"),

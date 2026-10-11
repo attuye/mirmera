@@ -165,6 +165,8 @@ export interface Bug {
   evidence: Evidence[]
   /** Where it was filed: GitHub and/or Jira. */
   filings: BugFiling[]
+  /** The exploration agent met the same problem again, in another charter or run */
+  sightings?: BugSighting[]
 }
 
 // ---- Issue trackers ----------------------------------------------------------
@@ -452,6 +454,8 @@ export interface DebriefListItem {
   coverage_summary: string | null
   created_at: string
 }
+
+export interface BugSighting { session_id: string; charter_id: string; mission: string; at: string; url: string }
 
 export interface BugListItem extends Bug {
   charter_mission: string

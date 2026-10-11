@@ -402,6 +402,10 @@ class Bug(Base):
     reviewed_at = Column(DateTime, nullable=True)
     # Steps to the bug as the tester edited them (resolved plan steps); None = proposed from the recording
     edited_steps = Column(JSON, nullable=True)
+    # What the exploration agent saw, as a key: the same problem met again (another charter, another
+    # run) is added to this bug as a sighting instead of becoming a second draft.
+    signature = Column(String, nullable=True, index=True)
+    sightings = Column(JSON, nullable=True)  # [{"session_id", "charter_id", "mission", "at", "url"}]
 
     session = relationship("Session", back_populates="bugs")
     charter = relationship("Charter")

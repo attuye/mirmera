@@ -1,4 +1,4 @@
-import { expect, test } from './fixtures'
+import { API_URL, expect, test } from './fixtures'
 
 test('review bugs: draft with AI, enforce the oracle, save as bug or question', async ({ page, api }) => {
   const project = await api.project()
@@ -80,4 +80,38 @@ test('review bugs: draft with AI, enforce the oracle, save as bug or question', 
     await expect(expired.getByLabel('Expected', { exact: true })).toHaveValue('Upload is rejected: the ID has expired')
     await expect(expired.getByText(/An AI draft exists/)).toBeVisible()
   })
+})
+
+// The exploration agent met the same problem in other charters: one draft, with where else it showed up.
+test('a bug the agent met again shows where, instead of a second draft', async ({ page, api }) => {
+  const project = await api.project()
+  const charter = await api.charter(project.id, 'Explore identity verification with each document type')
+  const session = await api.session(charter.id)
+  await page.goto(`/projects/${project.id}/sessions/${session.id}`)
+  await page.getByRole('button', { name: 'Bug', exact: true }).click()
+  await page.getByPlaceholder('What are you observing?').fill('POST /api/verify fails with 500')
+  await page.getByRole('button', { name: 'Log Bug' }).click()
+  await expect(page.getByText('POST /api/verify fails with 500', { exact: true })).toBeVisible()
+
+  const at = new Date().toISOString()
+  await page.route(`${API_URL}/projects/${project.id}/bugs`, async (route) => {
+    const response = await route.fetch().catch(() => null)
+    if (!response) return
+    const bugs = await response.json()
+    bugs[0].sightings = [
+      { session_id: 's2', charter_id: 'c2', mission: 'Explore expiry dates with a past date, today and a future date', at, url: '' },
+      { session_id: 's3', charter_id: 'c3', mission: "Explore full names in Latin and Ge'ez script", at, url: '' },
+    ]
+    await route.fulfill({ json: bugs })
+  })
+  await page.goto(`/projects/${project.id}/bugs`)
+  const bug = page.getByRole('article', { name: 'POST /api/verify fails with 500' })
+  await expect(bug.getByText('seen 3×')).toBeVisible()
+  await bug.getByRole('button', { name: /POST \/api\/verify/ }).click()
+  const seen = bug.getByRole('region', { name: 'Seen again' })
+  await expect(seen).toContainText('Seen again 2 times')
+  await expect(seen).toContainText('Explore expiry dates with a past date')
+  await expect(seen).toContainText("Explore full names in Latin and Ge'ez script")
+  if (process.env.SHOTS) await bug.screenshot({ path: `${process.env.SHOTS}/seen-again.png` })
+  await page.unrouteAll({ behavior: 'ignoreErrors' })  // a list refresh still in flight must not fail the test
 })

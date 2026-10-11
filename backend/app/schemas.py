@@ -354,10 +354,12 @@ class BugOut(BaseModel):
     evidence: list[EvidenceOut] = []
     # Where it was filed: GitHub and/or Jira
     filings: list["BugFilingOut"] = []
+    # The exploration agent met the same problem again: where and when
+    sightings: list[dict] = []
 
     model_config = ConfigDict(from_attributes=True)
 
-    @field_validator("steps_to_reproduce", "open_questions", "reproduction_trail", mode="before")
+    @field_validator("steps_to_reproduce", "open_questions", "reproduction_trail", "sightings", mode="before")
     @classmethod
     def none_is_empty_list(cls, value):
         return value or []
