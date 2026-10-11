@@ -142,6 +142,7 @@ def run_with(monkeypatch, provider, app_url, **kw):
     return explore_eval.run_eval(app_url, "mock", on_progress=lambda *_: None, **kw)
 
 
+@pytest.mark.tours
 def test_an_ideal_tester_finds_every_planted_bug_and_nothing_else(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
     """The ceiling: if the agent always does the right thing, Mirmera drafts all four
     planted bugs and no false alarm. A bug missing here is Mirmera's fault, not the model's."""
@@ -152,7 +153,11 @@ def test_an_ideal_tester_finds_every_planted_bug_and_nothing_else(client, practi
     assert all(s.status == "finished" and s.unusable == 0 and s.stepped_in == 0 for s in scores)  # all its own work
     assert "## Explore expiry dates" in explore_eval.steps_text()
     text = explore_eval.report(scores, "ideal", None)
-    assert "| Expired documents are accepted | 1 of 4 runs | 25% |" in text and "0 of 4 drafts matched no planted bug." in text
+    assert "| Expired documents are accepted | 1 of 4 runs | 25% |" in text and "0 of 5 drafts matched no planted bug." in text
+    # The flow tour after the first accepted submit opens My documents too: its page error shows up
+    # in the expiry run as well, without the agent going there.
+    assert "| My documents shows no documents (page error) | 2 of 4 runs | 50% |" in text
+    assert {s.charter: s.tours for s in scores} == {"documents": 0, "expiry": 1, "names": 0, "my-documents": 1}
 
 
 # ---------- misbehaving models ----------
@@ -965,3 +970,110 @@ def test_optional_ranges_and_formats_are_checked_without_the_ai(client, signup_a
     ideas = provider.users[1].split("<ideas>")[1].split("</ideas>")[0]
     assert '- Seats: just under the minimum 1 ("0"); the minimum 1 ("1"); the maximum 4 ("4")' in ideas
     assert '- Phone: left empty (the rules say optional) ("")' in ideas
+
+
+# ---------- flow tours ----------
+
+BOOKING = {
+    "/book": b"""<!doctype html><title>Book</title><h1>Book a table</h1><a href="/bookings">My bookings</a>
+<form id=f><label for=n>Your name</label><input id=n><button type=submit>Book</button></form><p role=status id=out></p>
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const name = document.getElementById('n').value.trim()
+  if (!name) { document.getElementById('out').textContent = 'Please enter your name.'; return }
+  const r = await fetch('/api/book', { method: 'POST', body: name })
+  sessionStorage.setItem('last', JSON.stringify({ name }))
+  location.href = '/booked'
+})
+</script>""",
+    "/booked": b"""<!doctype html><title>Booked</title><h1>Booked</h1><p role=status>Booking confirmed.</p>
+<p id=who></p><a href="/bookings">My bookings</a>
+<script>document.getElementById('who').textContent = 'For ' + JSON.parse(sessionStorage.getItem('last')).name</script>""",
+}
+
+
+@pytest.fixture
+def booking_app():
+    """A booking form whose confirmation page breaks when opened by its address (a bookmark), and
+    whose Book button books twice on a double click."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    booked = []
+
+    class App(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path.startswith("/bookings"):
+                body = ("<!doctype html><title>My bookings</title><h1>My bookings</h1><ul>"
+                        + "".join(f"<li>{n}</li>" for n in booked) + "</ul>").encode()
+            else:
+                body = BOOKING.get(self.path.split("?")[0], b"<!doctype html><title>Home</title><a href='/book'>Book</a>")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            booked.append(self.rfile.read(n).decode())
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+@pytest.mark.tours
+def test_after_an_accepted_submit_mirmera_tours_the_flow(client, booking_app, monkeypatch, chromium_available):  # noqa: F811
+    """What no amount of form filling finds: the confirmation page opened by its address throws, and
+    a double click on Book books twice. Mirmera tours the flow itself after the first accepted submit,
+    outside the step budget."""
+    from app import models
+    from app.database import SessionLocal
+    from app.routers.explore import start_exploration
+    from app.agent import explore as agent
+    replies = [step("Open", kind="goto", url=f"{booking_app}/book"),
+               step("Book", kind="try", values={"Your name": "Abebe Kebede"}),
+               step("Done", kind="done", summary="Booked once.")]
+    provider = Scripted(replies)
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+    with SessionLocal() as db:
+        project = models.Project(org_id="eval", name="Tables", app_url=booking_app, default_ai_provider="mock")
+        db.add(project)
+        db.flush()
+        story = models.Story(project_id=project.id, title="Book a table",
+                             description="Acceptance criteria\n- Every booking is listed in My bookings, once.")
+        charter = models.Charter(project_id=project.id, mission_statement="Explore booking a table", source="eval")
+        charter.stories = [story]
+        db.add_all([story, charter])
+        db.commit()
+        r = start_exploration(db, charter, started_by="eval", max_steps=3)
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            db.expire_all()
+            r = db.get(models.ExplorationRun, r.id)
+            if r.status != "running" and r.id not in agent.ACTIVE:
+                break
+        bugs = [db.get(models.Bug, b) for b in r.bug_ids]
+        steps = list(r.steps)
+        notes = [n.content for n in db.get(models.Session, r.session_id).notes]
+    assert [s["kind"] for s in steps] == ["goto", "try", "tour", "done"]  # the tour costs none of the 3 steps
+    tour = steps[2]
+    assert tour["by"] == "Mirmera" and tour["status"] == "drafted"
+    assert "opened /booked directly" in tour["detail"] and "clicked Book twice quickly" in tour["detail"]
+    assert "looked in My bookings: listed 2 times" in tour["detail"]
+    titles = [b.title for b in bugs]
+    assert titles == ["Page error: Cannot read properties of null (reading 'name')",
+                      "Clicking Book twice quickly creates it twice"]
+    assert bugs[0].actual.startswith("Opening /booked directly (a bookmark or a shared link): ")
+    assert bugs[0].steps_to_reproduce and bugs[0].steps_to_reproduce[0].startswith("open ") and bugs[0].steps_to_reproduce[0].endswith("/booked")
+    assert 'Every booking is listed in My bookings, once.' in bugs[1].expected
+    assert any(n.startswith(f"Flow tour after the submit on {booking_app}/book:") for n in notes)
