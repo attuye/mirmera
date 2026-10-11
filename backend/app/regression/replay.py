@@ -59,6 +59,12 @@ async def _run_action(page, a: dict) -> str | None:
     act = a.get("action")
     if act == "click":
         await target.click(timeout=STEP_TIMEOUT)
+    elif act == "dblclick":  # a user's double click: two clicks before the page answers
+        await target.dblclick(timeout=STEP_TIMEOUT)
+        try:  # let both requests reach the app before the next step moves on
+            await page.wait_for_load_state("networkidle", timeout=5_000)
+        except Exception:
+            pass
     elif act == "fill" and a.get("masked"):
         secret = a.get("secret") or ""
         if secret not in os.environ:

@@ -48,6 +48,7 @@ STEP_IN_AFTER = 3  # steps in a row that taught nothing before Mirmera takes the
 REPLIES_PER_STEP = 2  # model replies per step of the budget, refused ones too: a model that is only ever refused still stops
 SUBMITS = ("click", "press", "try")
 TOURS = True  # after the first accepted submit on a form, Mirmera tours the flow itself
+CONFIRM_RUNS = 3  # each new draft's steps, replayed in this many fresh browsers when the run ends
 # A note that says the app accepted or refused something: only true after a submit.
 CLAIM = re.compile(r"\b(accepts|accepted|rejects|rejected|refuses|refused|works|succeeds|successful(?:ly)?|confirm(?:s|ed|ing)?)\b", re.I)
 
@@ -60,7 +61,7 @@ SLOW_NETWORK = {"offline": False, "latency": 400, "downloadThroughput": 50 * 102
 def steps_used(steps: list[dict]) -> int:
     """The steps that count against the budget: a refused step was never run, and a flow tour is
     Mirmera's own, so they cost none."""
-    return sum(1 for s in steps if s.get("status") != "refused" and s.get("kind") != "tour")
+    return sum(1 for s in steps if s.get("status") != "refused" and s.get("kind") not in ("tour", "confirm"))
 
 
 def context_options(conditions: dict | None) -> dict:
@@ -1127,7 +1128,7 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
                                                                      else f"open {s['url']}" for s in (edited or [])],
             reproduction_trail=trail, edited_steps=edited,
             environment={"browser": "Chromium (headless)", "url": page_url, "found_by": TESTER},
-            signature=key, sightings=[],
+            signature=key, sightings=[], symptom=p.symptom.model_dump(),
         )
         db.add(bug)
         db.flush()
@@ -1218,8 +1219,8 @@ async def flow_tour(page, context, signals, form_url: str, answer_url: str, sent
     button = page.get_by_role("button", name=sent.submit, exact=True).first
     f0, e0 = len(signals.failed), len(signals.page_errors)
     await button.dblclick(timeout=5_000)
-    click = {"action": "click", "locator": {"method": "role", "role": "button", "name": sent.submit}}
-    rec += [{"type": "action", "action": click, "url": form_url}, {"type": "action", "action": click, "url": form_url}]
+    rec.append({"type": "action", "url": form_url,
+                "action": {"action": "dblclick", "locator": {"method": "role", "role": "button", "name": sent.submit}}})
     await signals.settle(timeout_ms=10_000)
     await check(page, signals, f0, e0, f"Clicking {sent.submit} twice quickly", rec)
     done.append(f"clicked {sent.submit} twice quickly")
@@ -1257,6 +1258,33 @@ async def flow_tour(page, context, signals, form_url: str, answer_url: str, sent
     await page.goto(form_url, wait_until="domcontentloaded", timeout=30_000)
     await signals.settle()
     return ", ".join(done) + (f"; {found} problem{'s' if found != 1 else ''} drafted" if found else "; nothing broke")
+
+
+# ---------- confirming a draft before a tester reads it ----------
+
+async def confirm_drafts(pw, bug_ids: list[str], session_id: str, headless: bool, executable_path: str | None) -> str:
+    """Replays each draft this session made (not sightings of older ones) from its steps, in fresh
+    browsers, and checks its symptom each time: "always" (every time), "intermittent" (some
+    times) or "once" (never again). Kept on the bug as its reproducibility and confirmation."""
+    from app.agent.reproduce import _reruns
+    with SessionLocal() as db:
+        todo = [(b.id, b.title, b.edited_steps, b.symptom) for b in (db.get(models.Bug, i) for i in bug_ids)
+                if b and b.session_id == session_id and b.symptom and not b.confirmation]
+    out = []
+    for bug_id, title, steps, symptom in todo:
+        if steps:
+            result = await _reruns({"steps": steps}, symptom, CONFIRM_RUNS, headless, executable_path, pw)
+        else:
+            result = {"runs": 0, "reproduced": 0, "results": [], "note": "no steps to replay"}
+        n, runs = result["reproduced"], result["runs"]
+        with SessionLocal() as db:
+            bug = db.get(models.Bug, bug_id)
+            bug.confirmation = {**result, "at": utcnow().isoformat()}
+            if runs:
+                bug.reproducibility = "always" if n == runs else "intermittent" if n else "once"
+            db.commit()
+        out.append(f"\"{title[:80]}\" {n} of {runs}" if runs else f"\"{title[:80]}\": no steps to replay")
+    return ("Replayed each new draft in a fresh browser: " + "; ".join(out)) if out else ""
 
 
 # ---------- the run ----------
@@ -1756,6 +1784,19 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
             finally:
                 video = await _keep_recording(context, folder, run_id)
                 await browser.close()
+            if CONFIRM_RUNS and bug_ids and final.get("status") != "cancelled":
+                # Before a tester reads a draft: does it happen again from its steps alone, in a
+                # browser that saw nothing before? (No AI.)
+                confirm = {"n": len(history) + 1, "thought": f"Mirmera replays each new draft's steps {CONFIRM_RUNS} times in "
+                           "a fresh browser, to tell a steady bug from a one-off.", "action": "confirm the drafts",
+                           "kind": "confirm", "status": "ok", "detail": "", "url": start_url, "by": "Mirmera"}
+                try:
+                    confirm["detail"] = await confirm_drafts(pw, bug_ids, session_id, headless, executable_path)
+                except Exception as err:  # confirming is extra: it never fails the run
+                    confirm["detail"] = f"could not replay: {_first_line(err)}"
+                if confirm["detail"]:
+                    history.append(confirm)
+                    _save(run_id, steps=list(history))
     except ProviderError as err:
         final = {"status": "error", "detail": f"The AI could not continue: {err}"}
     except Exception as err:

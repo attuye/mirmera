@@ -83,7 +83,7 @@ test('review bugs: draft with AI, enforce the oracle, save as bug or question', 
 })
 
 // The exploration agent met the same problem in other charters: one draft, with where else it showed up.
-test('a bug the agent met again shows where, instead of a second draft', async ({ page, api }) => {
+test('a bug the agent met again shows where, and how often it shows from its steps', async ({ page, api }) => {
   const project = await api.project()
   const charter = await api.charter(project.id, 'Explore identity verification with each document type')
   const session = await api.session(charter.id)
@@ -102,6 +102,7 @@ test('a bug the agent met again shows where, instead of a second draft', async (
       { session_id: 's2', charter_id: 'c2', mission: 'Explore expiry dates with a past date, today and a future date', at, url: '' },
       { session_id: 's3', charter_id: 'c3', mission: "Explore full names in Latin and Ge'ez script", at, url: '' },
     ]
+    bugs[0].confirmation = { runs: 3, reproduced: 3, results: [1, 2, 3].map((run) => ({ run, reproduced: true, detail: 'seen' })) }
     await route.fulfill({ json: bugs })
   })
   await page.goto(`/projects/${project.id}/bugs`)
@@ -112,6 +113,7 @@ test('a bug the agent met again shows where, instead of a second draft', async (
   await expect(seen).toContainText('Seen again 2 times')
   await expect(seen).toContainText('Explore expiry dates with a past date')
   await expect(seen).toContainText("Explore full names in Latin and Ge'ez script")
+  await expect(bug.getByRole('region', { name: 'Replayed by Mirmera' })).toContainText('shown 3 of 3 (every time)')
   if (process.env.SHOTS) await bug.screenshot({ path: `${process.env.SHOTS}/seen-again.png` })
   await page.unrouteAll({ behavior: 'ignoreErrors' })  // a list refresh still in flight must not fail the test
 })

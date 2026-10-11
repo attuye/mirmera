@@ -50,6 +50,8 @@ def action_line(a: dict) -> list[str]:
         lines.append("// Review: this happened inside a frame; it may need page.frameLocator(...).")
     if act == "click":
         lines.append(f"await {target}.click()")
+    elif act == "dblclick":
+        lines.append(f"await {target}.dblclick()")
     elif act == "fill" and a.get("masked"):
         secret = re.sub(r"[^A-Z0-9_]", "_", str(a.get("secret") or "MIRMERA_SECRET_VALUE").upper())
         lines.append(f"// Not recorded (sensitive). Set {secret} when running the test.")
