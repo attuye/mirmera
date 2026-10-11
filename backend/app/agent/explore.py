@@ -1079,6 +1079,8 @@ def signature(p: schemas.ExploreProblem) -> str:
     """The problem as a key, so the same one met again isn't drafted twice: a failing request
     by its path, a page error by its message, a wrong answer by the rule it breaks and the
     words on the page (the same "Order placed" can break two different rules)."""
+    if p.same_as:
+        return p.same_as
     sym = p.symptom
     value = _norm(sym.value)[:200]
     if sym.kind in ("text_visible", "text_absent"):
@@ -1228,13 +1230,14 @@ async def flow_tour(page, context, signals, form_url: str, answer_url: str, sent
     if marked:
         links = form.links or (await form_state(page)).links
         place, rule = None, None
+        named = []  # (link, rule): a link a rule names as whole words, in a rule about listing or showing
         for rid, text in rules.items():
-            t = _norm(text)
+            t = f" {_norm(text)} "
             if any(w in t.split() for w in LISTING_WORDS):
-                place = next((l for l in links if len(l["text"]) >= 4 and _norm(l["text"]) in t), None)
-                if place:
-                    rule = (rid, text)
-                    break
+                named += [(l, (rid, text)) for l in links if len(l["text"]) >= 4
+                          and re.search(rf"(?<!\w){re.escape(_norm(l['text']))}(?!\w)", t)]
+        if named:  # a rule that says "list" first, then the longest link ("My orders", not "Order")
+            place, rule = max(named, key=lambda x: (bool(re.search(r"\blist", x[1][1].lower())), len(x[0]["text"])))
         place = place or next((l for l in links if l["text"].lower().startswith("my ")), None)
         if place:
             f0, e0 = len(signals.failed), len(signals.page_errors)
@@ -1251,7 +1254,8 @@ async def flow_tour(page, context, signals, form_url: str, answer_url: str, sent
                         actual=f"After one double click on {sent.submit}, {place['text']} lists it {listed} times "
                                f"(marked \"{marker}\")."[:600],
                         symptom=schemas.Symptom(kind="text_visible", value=marker,
-                                                explanation=f"Listed {listed} times after one double click on {sent.submit}")),
+                                                explanation=f"Listed {listed} times after one double click on {sent.submit}"),
+                        same_as=f"double:{urlsplit(form_url).path}:{_norm(sent.submit)}"),
                         ("double", form_url.split("?")[0]), (page, signals, rec_list)):
                     found += 1
             done.append(f"looked in {place['text']}: listed {listed} time{'s' if listed != 1 else ''}")
@@ -1455,6 +1459,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         _save(run_id, steps=list(history))
                         continue
                     if a.kind == "problem":
+                        a.problem.same_as = None  # Mirmera's own key, never the AI's
                         key = (a.problem.symptom.kind, a.problem.symptom.value)
                         if key in reported:
                             entry["status"], entry["detail"] = "refused", "already reported in this session"
