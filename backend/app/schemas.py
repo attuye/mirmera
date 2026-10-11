@@ -1381,6 +1381,42 @@ class LLMExploreStep(BaseModel):
         return d
 
 
+class AppSignIn(BaseModel):
+    """How Mirmera signs in to the app under test. password: None keeps the saved one, "" clears it."""
+    url: str = Field(min_length=1, max_length=500)  # the sign-in page: a path ("/login") or a full address
+    username_field: str = Field(default="", max_length=120)  # its label, id, name or placeholder
+    username: str = Field(default="", max_length=200)
+    password_field: str = Field(default="Password", max_length=120)
+    password: Optional[str] = Field(default=None, max_length=500)
+    submit: str = Field(default="", max_length=120)  # the button's text; empty: the form's own button, or Enter
+    signed_in_text: str = Field(default="", max_length=200)  # words that show it worked, e.g. "Sign out"
+
+    @field_validator("url")
+    @classmethod
+    def a_page_of_the_app(cls, v: str) -> str:
+        v = v.strip()
+        if not (v.startswith("/") or re.match(r"^https?://", v)):
+            raise ValueError("the sign-in page is a path like /login or an address starting with http:// or https://")
+        return v
+
+
+class AppSignInOut(BaseModel):
+    url: str
+    username_field: str
+    username: str
+    password_field: str
+    password_set: bool
+    submit: str
+    signed_in_text: str
+
+
+class AppSignInTry(BaseModel):
+    ok: bool
+    detail: str
+    url: str
+    screenshot: Optional[str] = None  # a data: URL of what the page showed after signing in
+
+
 class ExploreConditions(BaseModel):
     """How the agent's browser is set up, like a tester picking up another device."""
     device: Literal["desktop", "phone"] = "desktop"

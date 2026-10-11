@@ -233,8 +233,10 @@ def _user_message(ctx: BugContext, history: list[dict], observation: str, steps_
     )
 
 
-async def _reruns(plan: dict, symptom: dict, runs: int, headless: bool, executable_path: str | None, pw) -> dict:
-    """Replays the found steps in fresh browsers and checks the symptom each time."""
+async def _reruns(plan: dict, symptom: dict, runs: int, headless: bool, executable_path: str | None, pw,
+                  prepare=None) -> dict:
+    """Replays the found steps in fresh browsers and checks the symptom each time.
+    prepare(page): what each fresh browser does first (signing in to the app)."""
     results = []
     browser = await pw.chromium.launch(headless=headless, executable_path=executable_path or None)
     try:
@@ -243,6 +245,8 @@ async def _reruns(plan: dict, symptom: dict, runs: int, headless: bool, executab
             signals = Signals()
             signals.attach(page)
             try:
+                if prepare:
+                    await prepare(page)
                 for step in plan["steps"]:
                     skipped = await run_step(page, step, plan.get("recorded_base"), plan.get("base_url"))
                     if skipped:

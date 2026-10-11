@@ -7,6 +7,7 @@ import { api, deletedText, Environment, Project, ProjectChanges } from '../api/c
 import { useProject } from '../project'
 import NotificationSettings from '../components/NotificationSettings'
 import AISettings from '../components/AISettings'
+import AppSignInSettings from '../components/AppSignInSettings'
 
 interface Form {
   name: string
@@ -185,6 +186,7 @@ export default function ProjectSettings() {
           </div>
           <ErrorLine message={error} />
         </form>
+        <AppSignInSettings projectId={project.id} hasAppUrl={!!project.app_url} />
         <NotificationSettings projectId={project.id} />
         <DangerZone />
       </main>

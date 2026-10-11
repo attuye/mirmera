@@ -177,6 +177,7 @@ class CharterContext:
     criteria: list[str] = field(default_factory=list)  # its acceptance criteria, one rule each
     earlier: list[str] = field(default_factory=list)  # what earlier runs on this charter or story found
     app_map: str | None = None  # the app's pages and forms, from the latest survey
+    signed_in_as: str | None = None  # Mirmera signed in to the app as this user before the run
 
     def has_rules(self) -> bool:
         return bool(self.criteria or self.risks)
@@ -345,7 +346,12 @@ def action_key(a: schemas.ExploreAction) -> str:
 
 def pointless(a: schemas.ExploreAction, url: str, before: FormState, tried: dict[tuple[str, str, str], int]) -> str | None:
     """Why a step would learn nothing, or None. A small model loops: it submits the same form
-    again and again, or fills a field with the value it already holds. Such a step isn't run."""
+    again and again, or fills a field with the value it already holds. Such a step isn't run.
+    Signing out isn't run either: the run is signed in on purpose."""
+    from app.sign_in import SIGN_OUT
+    target = " ".join([x for x in ([a.locator.name, a.locator.value] if a.locator else []) if x] + [a.url or ""])
+    if a.kind in ("click", "press", "goto") and SIGN_OUT.search(target.replace("-", " ").replace("_", " ")):
+        return "the run is signed in on purpose: stay signed in and test as this user"
     if a.kind == "fill" and a.locator:
         f = find_field(before, field_name(a))
         current = f["value"] if f else before.value_of(a.locator.value or a.locator.name)
@@ -711,6 +717,8 @@ def _user_message(ctx: CharterContext, history: list[dict], observation: str, st
         charter["earlier_runs"] = ctx.earlier
     if ctx.app_map:
         charter["app_map"] = ctx.app_map
+    if ctx.signed_in_as:
+        charter["signed_in"] = f"Mirmera signed you in as {ctx.signed_in_as}. Test as this user and stay signed in: never sign out."
     return (
         f"<charter>\n{defang(json.dumps(charter, indent=2, ensure_ascii=False))}\n</charter>\n\n"
         f"<history>\n{chr(10).join(lines) or '(no steps yet)'}\n</history>\n\n"
@@ -1202,34 +1210,37 @@ async def flow_tour(page, context, signals, form_url: str, answer_url: str, sent
     except Exception:
         pass
     # 4. The same form, sent with one double click. A text field carries a marker, so an entry
-    #    listed twice can be counted.
-    await page.goto(form_url, wait_until="domcontentloaded", timeout=30_000)
-    await signals.settle()
-    form = await form_state(page)
-    texts = [f for f in form.fields if f["type"] in ("text", "search", "textarea")]
-    marked = next((f for f in texts if "name" in f["label"].lower()), texts[0] if texts else None)
-    marker = _marker()
-    rec = to_here[:1] + [{"type": "goto", "url": form_url}]
-    for f in form.fields:
-        was = next((x["value"] for x in sent.fields if x["label"] == f["label"]), None)
-        if was is None or f["type"] in ("password", "file"):
-            continue
-        value = f"{was} {marker}".strip() if marked and f["idx"] == marked["idx"] else was
-        status, _, how = await set_field(page, f, "fill", value)
-        if status == "ok":
-            rec.append({"type": "action", "action": _rec(how, f, value), "url": form_url})
-    button = page.get_by_role("button", name=sent.submit, exact=True).first
-    f0, e0 = len(signals.failed), len(signals.page_errors)
-    await button.dblclick(timeout=5_000)
-    rec.append({"type": "action", "url": form_url,
-                "action": {"action": "dblclick", "locator": {"method": "role", "role": "button", "name": sent.submit}}})
-    await signals.settle(timeout_ms=10_000)
-    await check(page, signals, f0, e0, f"Clicking {sent.submit} twice quickly", rec)
-    done.append(f"clicked {sent.submit} twice quickly")
-    # Where submitted things are listed: a link the rules name next to "listed", or a "My …" link.
-    if marked:
+    #    listed twice can be counted. A double click is a race: listed once, it is tried once more.
+    place, rule, listed = None, None, 0
+    for attempt in range(2):
+        await page.goto(form_url, wait_until="domcontentloaded", timeout=30_000)
+        await signals.settle()
+        form = await form_state(page)
+        texts = [f for f in form.fields if f["type"] in ("text", "search", "textarea")]
+        marked = next((f for f in texts if "name" in f["label"].lower()), texts[0] if texts else None)
+        marker = _marker()
+        rec = to_here[:1] + [{"type": "goto", "url": form_url}]
+        for f in form.fields:
+            was = next((x["value"] for x in sent.fields if x["label"] == f["label"]), None)
+            if was is None or f["type"] in ("password", "file"):
+                continue
+            value = f"{was} {marker}".strip() if marked and f["idx"] == marked["idx"] else was
+            status, _, how = await set_field(page, f, "fill", value)
+            if status == "ok":
+                rec.append({"type": "action", "action": _rec(how, f, value), "url": form_url})
+        button = page.get_by_role("button", name=sent.submit, exact=True).first
+        f0, e0 = len(signals.failed), len(signals.page_errors)
+        await button.dblclick(timeout=5_000)
+        rec.append({"type": "action", "url": form_url,
+                    "action": {"action": "dblclick", "locator": {"method": "role", "role": "button", "name": sent.submit}}})
+        await signals.settle(timeout_ms=10_000)
+        await check(page, signals, f0, e0, f"Clicking {sent.submit} twice quickly", rec)
+        if attempt == 0:
+            done.append(f"clicked {sent.submit} twice quickly")
+        if not marked:
+            break
+        # Where submitted things are listed: a link the rules name next to "listed", or a "My …" link.
         links = form.links or (await form_state(page)).links
-        place, rule = None, None
         named = []  # (link, rule): a link a rule names as whole words, in a rule about listing or showing
         for rid, text in rules.items():
             t = f" {_norm(text)} "
@@ -1239,34 +1250,54 @@ async def flow_tour(page, context, signals, form_url: str, answer_url: str, sent
         if named:  # a rule that says "list" first, then the longest link ("My orders", not "Order")
             place, rule = max(named, key=lambda x: (bool(re.search(r"\blist", x[1][1].lower())), len(x[0]["text"])))
         place = place or next((l for l in links if l["text"].lower().startswith("my ")), None)
-        if place:
-            f0, e0 = len(signals.failed), len(signals.page_errors)
-            await page.goto(place["href"], wait_until="domcontentloaded", timeout=30_000)
-            await signals.settle()
-            listed = (await page.evaluate("() => document.body ? document.body.innerText : ''")).count(marker)
-            rec_list = rec + [{"type": "goto", "url": place["href"]}]
-            await check(page, signals, f0, e0, f"Opening {place['text']} after clicking {sent.submit} twice", rec_list)
-            if listed >= 2:
-                why = f" {rule[0]} says: \"{rule[1][:200]}\"" if rule else ""
-                if await keep(schemas.ExploreProblem(
-                        title=f"Clicking {sent.submit} twice quickly creates it twice"[:200], severity="high",
-                        expected=f"One entry per submit, even when the button is clicked twice (users double-click).{why}"[:600],
-                        actual=f"After one double click on {sent.submit}, {place['text']} lists it {listed} times "
-                               f"(marked \"{marker}\")."[:600],
-                        symptom=schemas.Symptom(kind="text_visible", value=marker,
-                                                explanation=f"Listed {listed} times after one double click on {sent.submit}"),
-                        same_as=f"double:{urlsplit(form_url).path}:{_norm(sent.submit)}"),
-                        ("double", form_url.split("?")[0]), (page, signals, rec_list)):
-                    found += 1
-            done.append(f"looked in {place['text']}: listed {listed} time{'s' if listed != 1 else ''}")
+        if not place:
+            break
+        f0, e0 = len(signals.failed), len(signals.page_errors)
+        await page.goto(place["href"], wait_until="domcontentloaded", timeout=30_000)
+        await signals.settle()
+        listed = (await page.evaluate("() => document.body ? document.body.innerText : ''")).count(marker)
+        rec_list = rec + [{"type": "goto", "url": place["href"]}]
+        await check(page, signals, f0, e0, f"Opening {place['text']} after clicking {sent.submit} twice", rec_list)
+        if listed != 1:
+            break
+    if place and marked:
+        if listed >= 2:
+            why = f" {rule[0]} says: \"{rule[1][:200]}\"" if rule else ""
+            if await keep(schemas.ExploreProblem(
+                    title=f"Clicking {sent.submit} twice quickly creates it twice"[:200], severity="high",
+                    expected=f"One entry per submit, even when the button is clicked twice (users double-click).{why}"[:600],
+                    actual=f"After one double click on {sent.submit}, {place['text']} lists it {listed} times "
+                           f"(marked \"{marker}\")."[:600],
+                    symptom=schemas.Symptom(kind="text_visible", value=marker,
+                                            explanation=f"Listed {listed} times after one double click on {sent.submit}"),
+                    same_as=f"double:{urlsplit(form_url).path}:{_norm(sent.submit)}"),
+                    ("double", form_url.split("?")[0]), (page, signals, rec_list)):
+                found += 1
+        done.append(f"looked in {place['text']}: listed {listed} time{'s' if listed != 1 else ''}"
+                    + (" (after a second try)" if attempt else ""))
     await page.goto(form_url, wait_until="domcontentloaded", timeout=30_000)
     await signals.settle()
     return ", ".join(done) + (f"; {found} problem{'s' if found != 1 else ''} drafted" if found else "; nothing broke")
 
 
+class SignInFailed(Exception):
+    """The app under test couldn't be signed in to: the run doesn't start signed out by mistake."""
+
+
+def signed_out(url: str, cfg: dict, base: str) -> bool:
+    from app.sign_in import signed_out as on_sign_in_page
+    return on_sign_in_page(url, cfg, base)
+
+
+def secrets_of(cfg: dict | None) -> list[str]:
+    from app.sign_in import secrets
+    return secrets(cfg)
+
+
 # ---------- confirming a draft before a tester reads it ----------
 
-async def confirm_drafts(pw, bug_ids: list[str], session_id: str, headless: bool, executable_path: str | None) -> str:
+async def confirm_drafts(pw, bug_ids: list[str], session_id: str, headless: bool, executable_path: str | None,
+                         prepare=None) -> str:
     """Replays each draft this session made (not sightings of older ones) from its steps, in fresh
     browsers, and checks its symptom each time: "always" (every time), "intermittent" (some
     times) or "once" (never again). Kept on the bug as its reproducibility and confirmation."""
@@ -1277,7 +1308,7 @@ async def confirm_drafts(pw, bug_ids: list[str], session_id: str, headless: bool
     out = []
     for bug_id, title, steps, symptom in todo:
         if steps:
-            result = await _reruns({"steps": steps}, symptom, CONFIRM_RUNS, headless, executable_path, pw)
+            result = await _reruns({"steps": steps}, symptom, CONFIRM_RUNS, headless, executable_path, pw, prepare=prepare)
         else:
             result = {"runs": 0, "reproduced": 0, "results": [], "note": "no steps to replay"}
         n, runs = result["reproduced"], result["runs"]
@@ -1295,7 +1326,8 @@ async def confirm_drafts(pw, bug_ids: list[str], session_id: str, headless: bool
 
 async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, session_id: str, charter_id: str,
                     start_url: str, origins: set[str], max_steps: int, headless: bool, executable_path: str | None,
-                    folder: Path, checker: LLMProvider | None = None, conditions: dict | None = None) -> None:
+                    folder: Path, checker: LLMProvider | None = None, conditions: dict | None = None,
+                    sign_in_cfg: dict | None = None) -> None:
     from playwright.async_api import async_playwright
 
     ACTIVE.add(run_id)
@@ -1340,9 +1372,17 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                 n_submits = 0
                 visited: set[str] = {start_url.split("#")[0]}
                 stuck = 0  # steps in a row that taught nothing (refused, failed, unusable)
+                if sign_in_cfg:
+                    # The app under test is signed in before anything else, as a user would be.
+                    from app.sign_in import sign_in
+                    ok, how = await sign_in(page, sign_in_cfg, start_url, signals)
+                    _note(session_id, "setup", f"Signed in to the app: {how}." if ok else f"Couldn't sign in to the app: {how}.")
+                    if not ok:
+                        raise SignInFailed(how)
                 await page.goto(start_url, wait_until="domcontentloaded", timeout=30_000)
                 await signals.settle()
                 _record(session_id, [Signal("navigation", f"Opened {start_url}", start_url, now())])
+                signed_again = 0
                 bad_replies = 0
 
                 def drain_signals() -> None:
@@ -1366,7 +1406,20 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     if time.monotonic() - started > run_timeout:
                         final = {"status": "finished", "detail": f"Stopped: the run took longer than {run_timeout // 60} minutes."}
                         break
+                    if sign_in_cfg and signed_again < 3 and signed_out(page.url, sign_in_cfg, start_url):
+                        # Back on the sign-in page: the session ended (or the app signed out). Sign in again.
+                        from app.sign_in import sign_in
+                        signed_again += 1
+                        back_to = history[-1]["url"] if history else start_url
+                        ok, how = await sign_in(page, sign_in_cfg, start_url, signals)
+                        _note(session_id, "issue", f"The app signed the run out (on {page.url}); signed in again: {how}." if ok
+                              else f"The app signed the run out and signing in again failed: {how}.")
+                        if ok and not signed_out(back_to, sign_in_cfg, start_url):
+                            await page.goto(back_to, wait_until="domcontentloaded", timeout=30_000)
+                            await signals.settle()
                     observation = await observe(page, signals, seen)
+                    for secret in secrets_of(sign_in_cfg):
+                        observation = observation.replace(secret, "•••")
                     before = await form_state(page)
                     if before.fields:
                         last_fields = before.fields
@@ -1796,12 +1849,21 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                            "a fresh browser, to tell a steady bug from a one-off.", "action": "confirm the drafts",
                            "kind": "confirm", "status": "ok", "detail": "", "url": start_url, "by": "Mirmera"}
                 try:
-                    confirm["detail"] = await confirm_drafts(pw, bug_ids, session_id, headless, executable_path)
+                    async def signed_in(fresh_page):  # each fresh browser signs in first, as the run did
+                        from app.sign_in import sign_in
+                        ok, how = await sign_in(fresh_page, sign_in_cfg, start_url)
+                        if not ok:
+                            raise RuntimeError(f"couldn't sign in: {how}")
+                    confirm["detail"] = await confirm_drafts(pw, bug_ids, session_id, headless, executable_path,
+                                                             prepare=signed_in if sign_in_cfg else None)
                 except Exception as err:  # confirming is extra: it never fails the run
                     confirm["detail"] = f"could not replay: {_first_line(err)}"
                 if confirm["detail"]:
                     history.append(confirm)
                     _save(run_id, steps=list(history))
+    except SignInFailed as err:
+        final = {"status": "error", "detail": f"Couldn't sign in to the app: {err}. Check the project's Settings → "
+                                               "Signing in to the app, and try it there."}
     except ProviderError as err:
         final = {"status": "error", "detail": f"The AI could not continue: {err}"}
     except Exception as err:

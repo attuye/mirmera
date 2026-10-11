@@ -137,6 +137,8 @@ class Project(Base):
     # the reproduction agent and regression runs; environments are other named addresses.
     app_url = Column(String, nullable=True)
     environments = Column(JSON, nullable=True)  # [{"name": "staging", "url": "https://..."}]
+    # How to sign in to the app under test (app/sign_in.py); the password is encrypted
+    sign_in = Column(JSON, nullable=True)
     default_tester = Column(String, nullable=True)  # prefilled when starting a session
     notify = Column(JSON, nullable=True)  # {"telegram_chat_id", "slack": bool, "events": [...]}
 
