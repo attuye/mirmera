@@ -65,6 +65,24 @@ http
       res.writeHead(200, { 'Content-Type': 'text/html' }).end(home)
     } else if (path === '/signup') {
       res.writeHead(200, { 'Content-Type': 'text/html' }).end(signup)
+    } else if (path === '/login') {  // for signing in to the app under test: tester@example.com / e2e-pass
+      const login = `<!doctype html><title>Sign in</title><h1>Sign in</h1><form method="post" action="/login">
+<label for="u">Email</label><input id="u" name="u"><label for="p">Password</label><input id="p" name="p" type="password">
+<button type="submit">Sign in</button></form>`
+      if (req.method !== 'POST') return res.writeHead(200, { 'Content-Type': 'text/html' }).end(login)
+      let body = ''
+      req.on('data', (c) => (body += c))
+      req.on('end', () => {
+        const form = new URLSearchParams(body)
+        if (form.get('u') === 'tester@example.com' && form.get('p') === 'e2e-pass') {
+          res.writeHead(302, { Location: '/account', 'Set-Cookie': 'e2e_session=1; Path=/' }).end()
+        } else {
+          res.writeHead(200, { 'Content-Type': 'text/html' }).end(login.replace('<form', '<p role="alert">Wrong email or password.</p><form'))
+        }
+      })
+    } else if (path === '/account') {
+      if (!(req.headers.cookie || '').includes('e2e_session=1')) return res.writeHead(302, { Location: '/login' }).end()
+      res.writeHead(200, { 'Content-Type': 'text/html' }).end('<!doctype html><title>Account</title><h1>Your account</h1><a href="/logout">Sign out</a>')
     } else if (path === '/api/slow') {
       setTimeout(() => res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}'), 2300)
     } else if (path === '/openapi.json') {  // for API exploration: the target describes itself

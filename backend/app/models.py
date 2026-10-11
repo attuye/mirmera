@@ -137,6 +137,8 @@ class Project(Base):
     # the reproduction agent and regression runs; environments are other named addresses.
     app_url = Column(String, nullable=True)
     environments = Column(JSON, nullable=True)  # [{"name": "staging", "url": "https://..."}]
+    # How to sign in to the app under test (app/sign_in.py); the password is encrypted
+    sign_in = Column(JSON, nullable=True)
     default_tester = Column(String, nullable=True)  # prefilled when starting a session
     notify = Column(JSON, nullable=True)  # {"telegram_chat_id", "slack": bool, "events": [...]}
 
@@ -406,6 +408,8 @@ class Bug(Base):
     # run) is added to this bug as a sighting instead of becoming a second draft.
     signature = Column(String, nullable=True, index=True)
     sightings = Column(JSON, nullable=True)  # [{"session_id", "charter_id", "mission", "at", "url"}]
+    symptom = Column(JSON, nullable=True)  # what shows it, as the agent's checks see it: {"kind", "value", "explanation"}
+    confirmation = Column(JSON, nullable=True)  # its steps replayed in fresh browsers: {"runs", "reproduced", "results", "at"}
 
     session = relationship("Session", back_populates="bugs")
     charter = relationship("Charter")

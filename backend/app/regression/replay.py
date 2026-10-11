@@ -59,6 +59,16 @@ async def _run_action(page, a: dict) -> str | None:
     act = a.get("action")
     if act == "click":
         await target.click(timeout=STEP_TIMEOUT)
+        try:  # a submit's request answered (and a redirect started) before the next step, as for a user
+            await page.wait_for_load_state("networkidle", timeout=3_000)
+        except Exception:
+            pass
+    elif act == "dblclick":  # a user's double click: two clicks before the page answers
+        await target.dblclick(timeout=STEP_TIMEOUT)
+        try:  # let both requests reach the app before the next step moves on
+            await page.wait_for_load_state("networkidle", timeout=5_000)
+        except Exception:
+            pass
     elif act == "fill" and a.get("masked"):
         secret = a.get("secret") or ""
         if secret not in os.environ:
@@ -162,7 +172,19 @@ async def run_step(page, step: dict, plan_base: str | None, base_url: str | None
     """Runs one resolved plan step. Returns a reason when it has to be skipped;
     raises when it fails."""
     if step["type"] == "goto":
-        await page.goto(_rebase(step["url"], plan_base, base_url), wait_until="domcontentloaded", timeout=30_000)
+        url = _rebase(step["url"], plan_base, base_url)
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+        except Exception as err:
+            # The page was still moving on by itself (a form that redirects once its request is
+            # answered): let it arrive, then open the address again.
+            if "ERR_ABORTED" not in str(err) and "interrupted by another navigation" not in str(err):
+                raise
+            try:
+                await page.wait_for_load_state("networkidle", timeout=5_000)
+            except Exception:
+                pass
+            await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
         return None
     return await _run_action(page, step["action"])
 

@@ -11,3 +11,15 @@ node practice-app/server.mjs        # http://localhost:4000
 - `ANSWERS.md`: the planted bugs. Read it after your sessions, not before.
 
 Data is kept in memory and resets when you restart the server.
+
+## A second app: AddisMart shop
+
+```bash
+node practice-app/shop.mjs          # http://localhost:4200
+```
+
+- `shop-spec.md`: its requirements.
+- `SHOP-ANSWERS.md`: its six planted bugs, for afterwards.
+
+Measure the exploration agent on it with
+`python -m app.evals.explore_eval --provider local --app shop` (from `backend/`).

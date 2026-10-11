@@ -47,6 +47,8 @@ MAX_BAD_REPLIES = 4  # unusable replies in a row before the run stops: the model
 STEP_IN_AFTER = 3  # steps in a row that taught nothing before Mirmera takes the next step itself
 REPLIES_PER_STEP = 2  # model replies per step of the budget, refused ones too: a model that is only ever refused still stops
 SUBMITS = ("click", "press", "try")
+TOURS = True  # after the first accepted submit on a form, Mirmera tours the flow itself
+CONFIRM_RUNS = 3  # each new draft's steps, replayed in this many fresh browsers when the run ends
 # A note that says the app accepted or refused something: only true after a submit.
 CLAIM = re.compile(r"\b(accepts|accepted|rejects|rejected|refuses|refused|works|succeeds|successful(?:ly)?|confirm(?:s|ed|ing)?)\b", re.I)
 
@@ -57,8 +59,9 @@ SLOW_NETWORK = {"offline": False, "latency": 400, "downloadThroughput": 50 * 102
 
 
 def steps_used(steps: list[dict]) -> int:
-    """The steps that count against the budget: a refused step was never run, so it costs none."""
-    return sum(1 for s in steps if s.get("status") != "refused")
+    """The steps that count against the budget: a refused step was never run, and a flow tour is
+    Mirmera's own, so they cost none."""
+    return sum(1 for s in steps if s.get("status") != "refused" and s.get("kind") not in ("tour", "confirm"))
 
 
 def context_options(conditions: dict | None) -> dict:
@@ -174,6 +177,7 @@ class CharterContext:
     criteria: list[str] = field(default_factory=list)  # its acceptance criteria, one rule each
     earlier: list[str] = field(default_factory=list)  # what earlier runs on this charter or story found
     app_map: str | None = None  # the app's pages and forms, from the latest survey
+    signed_in_as: str | None = None  # Mirmera signed in to the app as this user before the run
 
     def has_rules(self) -> bool:
         return bool(self.criteria or self.risks)
@@ -342,7 +346,12 @@ def action_key(a: schemas.ExploreAction) -> str:
 
 def pointless(a: schemas.ExploreAction, url: str, before: FormState, tried: dict[tuple[str, str, str], int]) -> str | None:
     """Why a step would learn nothing, or None. A small model loops: it submits the same form
-    again and again, or fills a field with the value it already holds. Such a step isn't run."""
+    again and again, or fills a field with the value it already holds. Such a step isn't run.
+    Signing out isn't run either: the run is signed in on purpose."""
+    from app.sign_in import SIGN_OUT
+    target = " ".join([x for x in ([a.locator.name, a.locator.value] if a.locator else []) if x] + [a.url or ""])
+    if a.kind in ("click", "press", "goto") and SIGN_OUT.search(target.replace("-", " ").replace("_", " ")):
+        return "the run is signed in on purpose: stay signed in and test as this user"
     if a.kind == "fill" and a.locator:
         f = find_field(before, field_name(a))
         current = f["value"] if f else before.value_of(a.locator.value or a.locator.name)
@@ -400,8 +409,22 @@ def option_of(f: dict, value: str) -> str | None:
     return hits[0] if hits else None
 
 
-def valid_value(f: dict, today) -> str | None:
-    """Ordinary valid data for a field, so a try changes only the fields it names. None: leave it."""
+def valid_value(f: dict, today, rules: dict[str, str] | None = None) -> str | None:
+    """Ordinary valid data for a field, so a try changes only the fields it names. None: leave it.
+    Within what the rules allow: a quantity of 1 to 10 gets 1, not 12345."""
+    v = _plain_valid(f, today)
+    for c in field_rules(f, rules) if rules else []:
+        if c["kind"] == "range":
+            lo, hi = c["lo"], c["hi"]
+            pick = lo if lo is not None else (min(1.0, hi) if hi is not None else None)
+            if pick is not None:
+                v = f"{pick:g}"
+        elif c["kind"] == "length" and v and c["hi"] is not None and len(v) > c["hi"]:
+            v = v[:int(c["hi"])]
+    return v
+
+
+def _plain_valid(f: dict, today) -> str | None:
     from datetime import timedelta
     label, kind = f["label"].lower(), f["type"]
     if kind.startswith("select"):
@@ -463,7 +486,8 @@ def field_changes(before: FormState, after: FormState) -> list[tuple[dict, str, 
             if (f["label"], f.get("idx")) in was and was[(f["label"], f.get("idx"))] != f["value"]]
 
 
-async def do_try(page, a: schemas.ExploreAction, before: FormState, today) -> tuple[str, str, list[dict], FormState | None]:
+async def do_try(page, a: schemas.ExploreAction, before: FormState, today,
+                 rules: dict[str, str] | None = None) -> tuple[str, str, list[dict], FormState | None]:
     """One experiment: the named fields get the given values, every other field ordinary valid
     data, then the form is sent. Returns (status, detail, recorded actions, the form as sent)."""
     done, notes, recorded = set(), [], []
@@ -479,7 +503,7 @@ async def do_try(page, a: schemas.ExploreAction, before: FormState, today) -> tu
     for f in before.fields:
         if f["idx"] in done:
             continue
-        v = valid_value(f, today)
+        v = valid_value(f, today, rules)
         if v is None or (f["type"] not in ("checkbox",) and f["value"] == v):
             continue
         if f["type"] == "checkbox" and f["value"] == "checked":
@@ -530,7 +554,7 @@ def suggest(ctx: "CharterContext", state: FormState, tried_values: dict[str, set
         return {"kind": "goto", "url": link["href"]}, f'the charter is about "{link["text"]}", not looked at yet'
     if state.submit:
         for f in fields:
-            for what, v in ideas_for(f, today):
+            for what, v in ideas_for(f, today, rules_of(ctx)):
                 if not is_tried(f, v, tried_values):
                     return {"kind": "try", "values": {f["label"]: v}}, f'the next test idea for {f["label"]}: {what}'
     if link:
@@ -547,9 +571,15 @@ def suggestion_text(s: tuple[dict, str] | None) -> str:
 GEEZ_NAME = "አበበ ከበደ"
 
 
-def ideas_for(f: dict, today) -> list[tuple[str, str]]:
-    """(what, value) ideas for one field, from its type and label: the variations an
-    experienced tester tries, so a small model doesn't have to invent them."""
+def ideas_for(f: dict, today, rules: dict[str, str] | None = None) -> list[tuple[str, str]]:
+    """(what, value) ideas for one field: the boundaries its rules give first, then the
+    variations an experienced tester tries for its type and label."""
+    first = boundary_ideas(f, rules) if rules else []
+    have = {v for _, v in first}
+    return first + [(w, v) for w, v in _type_ideas(f, today) if v not in have]
+
+
+def _type_ideas(f: dict, today) -> list[tuple[str, str]]:
     from datetime import timedelta
     label, kind = f["label"].lower(), f["type"]
     if kind == "date" or "date" in label:
@@ -596,11 +626,12 @@ def is_tried(f: dict, value: str, tried: dict[str, set[str]]) -> bool:
     return value in done or expand(value, f) in done
 
 
-def ideas_text(fields: list[dict], tried: dict[str, set[str]], today, limit_fields: int = 6) -> tuple[str, int, int]:
+def ideas_text(fields: list[dict], tried: dict[str, set[str]], today, limit_fields: int = 6,
+               rules: dict[str, str] | None = None) -> tuple[str, int, int]:
     """The ideas not tried yet for the fields on this page (a few per field), and the tally."""
     lines, total, done = [], 0, 0
     for f in fields[:limit_fields]:
-        ideas = ideas_for(f, today)
+        ideas = ideas_for(f, today, rules)
         total += len(ideas)
         left = [(w, v) for w, v in ideas if not is_tried(f, v, tried)]
         done += len(ideas) - len(left)
@@ -686,6 +717,8 @@ def _user_message(ctx: CharterContext, history: list[dict], observation: str, st
         charter["earlier_runs"] = ctx.earlier
     if ctx.app_map:
         charter["app_map"] = ctx.app_map
+    if ctx.signed_in_as:
+        charter["signed_in"] = f"Mirmera signed you in as {ctx.signed_in_as}. Test as this user and stay signed in: never sign out."
     return (
         f"<charter>\n{defang(json.dumps(charter, indent=2, ensure_ascii=False))}\n</charter>\n\n"
         f"<history>\n{chr(10).join(lines) or '(no steps yet)'}\n</history>\n\n"
@@ -772,7 +805,9 @@ def quoted(quote: str, said: list[str]) -> bool:
 
 GLITCH = re.compile(r"\bundefined\b|\bNaN\b|\[object Object\]|\{\{[^}]*\}\}|Traceback \(most recent call last\)"
                     r"|\b[a-z]+(?:_[a-z0-9]+){2,}\b")
-SUCCESS_WORDS = ("verified", "welcome", "success", "saved", "thank you", "thanks", "created", "confirmed", "done")
+SUCCESS_WORDS = ("verified", "welcome", "success", "saved", "thank you", "thanks", "created", "confirmed", "done",
+                 "placed", "added", "updated", "submitted", "registered", "booked", "received", "signed up",
+                 "subscribed", "joined", "completed", "ordered", "paid")
 REFUSAL_WORDS = ("please", "required", "must", "invalid", "not allowed", "only", "can't", "cannot", "not accepted", "rejected",
                  "not available", "unavailable", "sorry", "isn't possible", "not possible", "declined")
 LISTING_WORDS = ("list", "lists", "listed", "show", "shows", "shown", "display", "displays", "appear", "appears")
@@ -861,11 +896,12 @@ GAP_WORDS = ("required", "missing", "empty", "please enter", "please fill", "ple
 LABEL_NOISE = {"the", "your", "and", "for", "with", "enter", "create", "accept", "date", "number"}
 
 
-def refusal_about_a_gap(before: FormState, said: list[str]) -> bool:
+def refusal_about_a_gap(before: FormState, said: list[str], tested: str | None = None) -> bool:
     """Is a refusal about a field left empty or a box left unticked, rather than about what
     the rule is about? Yes if the answer names one of those fields, or says something is
-    required or missing. "Name must use letters only." with the phone left empty is not."""
-    gaps = [f for f in before.fields if f["type"] != "radio" and f["value"] in ("", "not checked")]
+    required or missing. "Name must use letters only." with the phone left empty is not.
+    `tested`: the field left empty on purpose (an optional one), which is the test, not a gap."""
+    gaps = [f for f in before.fields if f["type"] != "radio" and f["value"] in ("", "not checked") and f["label"] != tested]
     if not gaps:
         return False
     answer = _norm(" ".join(said))
@@ -879,12 +915,118 @@ ETHIOPIC = re.compile(r"[\u1200-\u137F]")
 NEGATIVE_RULE = re.compile(r"\b(reject(?:s|ed)?|refuse[sd]?|not allowed|not accepted|must not|cannot|can't|never|blocked|denied|declined)\b", re.I)
 
 
-def rule_cases(rules: dict[str, str], sent: FormState, today) -> list[tuple[str, str, str, str]]:
+NUM = r"(-?\d{1,7}(?:\.\d+)?)"
+RANGE_RE = re.compile(rf"\b(?:between\s+|from\s+)?{NUM}\s*(?:to|and|through|–)\s*{NUM}\b(.{{0,20}})")
+MAX_RE = re.compile(rf"\b(?:at most|maximum(?: of)?|max\.?|up to|no more than|not more than|less than or equal to)\s*{NUM}\b(.{{0,20}})")
+MIN_RE = re.compile(rf"\b(?:at least|minimum(?: of)?|min\.?|no less than|not less than)\s*{NUM}\b(.{{0,20}})")
+OPTIONAL_RE = re.compile(r"\b(optional|not required|not mandatory|(?:may|can) be (?:left )?(?:empty|blank))\b")
+REQUIRED_RE = re.compile(r"\b(required|mandatory|must be (?:given|entered|filled(?: in)?|provided))\b")
+EMAIL_OK = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
+LENGTH_UNIT = re.compile(r"^\s*(?:characters?|chars?|letters?|digits?|symbols?)\b")
+
+
+def field_rules(f: dict, rules: dict[str, str]) -> list[dict]:
+    """What the rules say about one field, read without AI: optional or required, a number range,
+    a length limit, a valid email or phone. Only rules that name the field count."""
+    def stems(text: str) -> set[str]:  # content words of 3+ letters, plural or not ("Age" counts)
+        return {w[:-1] if w.endswith("s") and len(w) > 4 else w for w in re.findall(r"\w+", text.lower()) if len(w) > 2}
+    words = {w for w in stems(f["label"]) if w not in LABEL_NOISE}
+    out = []
+    for rid, text in rules.items():
+        t = text.lower()
+        if not words or not (words & stems(t)):
+            continue
+        base = {"rid": rid, "text": text}
+        if OPTIONAL_RE.search(t):
+            out.append({**base, "kind": "optional"})
+        elif REQUIRED_RE.search(t):
+            out.append({**base, "kind": "required"})
+        for m in RANGE_RE.finditer(t):
+            lo, hi = sorted((float(m.group(1)), float(m.group(2))))
+            out.append({**base, "kind": "length" if LENGTH_UNIT.match(m.group(3)) else "range", "lo": lo, "hi": hi})
+        for m in MAX_RE.finditer(t):
+            out.append({**base, "kind": "length" if LENGTH_UNIT.match(m.group(2)) else "range", "lo": None, "hi": float(m.group(1))})
+        for m in MIN_RE.finditer(t):
+            out.append({**base, "kind": "length" if LENGTH_UNIT.match(m.group(2)) else "range", "lo": float(m.group(1)), "hi": None})
+        label = f["label"].lower()
+        if ("email" in t and (f["type"] == "email" or "mail" in label)) and re.search(r"\bvalid|\bformat|\baddress", t):
+            out.append({**base, "kind": "email"})
+        if ("phone" in t and (f["type"] == "tel" or "phone" in label or "mobile" in label)) and re.search(r"\bvalid|\bformat|\bdigits", t):
+            out.append({**base, "kind": "phone"})
+    return out
+
+
+def _bounds(c: dict) -> str:
+    n = lambda x: f"{x:g}"  # noqa: E731
+    if c["lo"] is not None and c["hi"] is not None:
+        return f"{n(c['lo'])} to {n(c['hi'])}"
+    return f"at most {n(c['hi'])}" if c["hi"] is not None else f"at least {n(c['lo'])}"
+
+
+def broken_by(c: dict, f: dict, v: str) -> tuple[str, str] | None:
+    """(accept | refuse, what kind of value) when this rule says what the app must do with v."""
+    empty = not (v or "").strip()
+    k = c["kind"]
+    if k == "optional" and empty:
+        return "accept", f'{f["label"]} left empty'
+    if k == "required" and empty:
+        return "refuse", f'{f["label"]} left empty'
+    if k == "range" and not empty:
+        try:
+            x = float(v.strip())
+        except ValueError:
+            return None
+        if (c["lo"] is not None and x < c["lo"]) or (c["hi"] is not None and x > c["hi"]):
+            return "refuse", f'{f["label"]} {v.strip()}, outside {_bounds(c)}'
+    if k == "length" and not empty:
+        n = len(v)
+        if (c["lo"] is not None and n < c["lo"]) or (c["hi"] is not None and n > c["hi"]):
+            return "refuse", f'{f["label"]} of {n} characters, outside {_bounds(c)}'
+    if k == "email" and not empty and not EMAIL_OK.match(v.strip()):
+        return "refuse", f'an email that isn\'t valid, "{v[:40]}",'
+    if k == "phone" and not empty and (re.search(r"[A-Za-z]", v) or len(re.sub(r"\D", "", v)) < 7):
+        return "refuse", f'a phone number that isn\'t valid, "{v[:40]}",'
+    return None
+
+
+def boundary_ideas(f: dict, rules: dict[str, str]) -> list[tuple[str, str]]:
+    """The values at and just past each limit the rules give for this field: boundary values,
+    the first thing an experienced tester tries."""
+    out = []
+    for c in field_rules(f, rules):
+        if c["kind"] == "range":
+            n = lambda x: f"{x:g}"  # noqa: E731
+            if c["lo"] is not None:
+                out += [(f"just under the minimum {n(c['lo'])}", n(c["lo"] - 1)), (f"the minimum {n(c['lo'])}", n(c["lo"]))]
+            if c["hi"] is not None:
+                out += [(f"the maximum {n(c['hi'])}", n(c["hi"])), (f"just over the maximum {n(c['hi'])}", n(c["hi"] + 1))]
+        elif c["kind"] == "length" and c["hi"] is not None:
+            out += [(f"{c['hi']:g} characters, the limit", f"@long{int(c['hi'])}"),
+                    (f"{c['hi'] + 1:g} characters, one over", f"@long{int(c['hi']) + 1}")]
+        elif c["kind"] == "optional":
+            out.append(("left empty (the rules say optional)", ""))
+        elif c["kind"] == "required":
+            out.append(("left empty (the rules say required)", ""))
+    seen, uniq = set(), []
+    for w, v in out:
+        if v not in seen:
+            seen.add(v)
+            uniq.append((w, v))
+    return uniq
+
+
+def rule_cases(rules: dict[str, str], sent: FormState, today) -> list[tuple[str, str, str, str, str, str]]:
     """The rules that speak about a kind of value in the form as sent, and what they expect:
-    (rule id, rule, accept | refuse, field = value (what kind)). A rule naming Ge'ez script and a
-    name in Ge'ez letters, a rule about expired documents and an expiry date in the past."""
+    (rule id, rule, accept | refuse, field = value, what kind of value, field label). A rule naming
+    Ge'ez script and a name in Ge'ez letters, an expired document and a past expiry date, an
+    optional field left empty, a quantity outside its range, an email that isn't valid."""
     out = []
     for f in sent.fields:
+        if f["type"] in ("checkbox", "radio", "password", "file"):
+            continue
+        for c in field_rules(f, rules):
+            if hit := broken_by(c, f, f["value"]):
+                out.append((c["rid"], c["text"], hit[0], f'{f["label"]} = "{f["value"][:60]}"', hit[1], f["label"]))
         v, label = f["value"], f["label"].lower()
         kinds = []
         if ETHIOPIC.search(v):
@@ -897,7 +1039,7 @@ def rule_cases(rules: dict[str, str], sent: FormState, today) -> list[tuple[str,
             for rid, text in rules.items():
                 if any(w in text.lower() for w in words):
                     out.append((rid, text, "refuse" if NEGATIVE_RULE.search(text) else "accept",
-                                f'{f["label"]} = "{v[:60]}" ({what})'))
+                                f'{f["label"]} = "{v[:60]}"', what, f["label"]))
                     break
     return out
 
@@ -945,6 +1087,8 @@ def signature(p: schemas.ExploreProblem) -> str:
     """The problem as a key, so the same one met again isn't drafted twice: a failing request
     by its path, a page error by its message, a wrong answer by the rule it breaks and the
     words on the page (the same "Order placed" can break two different rules)."""
+    if p.same_as:
+        return p.same_as
     sym = p.symptom
     value = _norm(sym.value)[:200]
     if sym.kind in ("text_visible", "text_absent"):
@@ -994,7 +1138,7 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
                                                                      else f"open {s['url']}" for s in (edited or [])],
             reproduction_trail=trail, edited_steps=edited,
             environment={"browser": "Chromium (headless)", "url": page_url, "found_by": TESTER},
-            signature=key, sightings=[],
+            signature=key, sightings=[], symptom=p.symptom.model_dump(),
         )
         db.add(bug)
         db.flush()
@@ -1012,11 +1156,178 @@ def _seen(entry: dict, new: bool) -> None:
         entry["detail"] = (entry.get("detail") or "") + " (seen before: added to that draft)"
 
 
+# ---------- flow tours: the ways users really move through a flow ----------
+
+def _marker() -> str:
+    import random
+    return "Tour" + "".join(random.choice("bcdfghjklmnpqrstvwxz") for _ in range(5)).capitalize()
+
+
+async def flow_tour(page, context, signals, form_url: str, answer_url: str, sent: FormState, to_here: list[dict],
+                    rules: dict[str, str], keep) -> str:
+    """After an accepted submit, what a tester does next: open the answer page by its address
+    (a bookmark, a shared link), refresh it, go back, and send the same form twice quickly. A
+    server error or a page error on the way is a draft; so is one double click listed twice.
+    keep(problem, key, (page, signals, steps)) drafts a checked bug. Returns what it did."""
+    from urllib.parse import urlsplit
+    from app.regression.replay import Signals
+    done: list[str] = []
+    found = 0
+
+    async def check(pg, sigs, f0: int, e0: int, how: str, rec: list[dict]) -> None:
+        nonlocal found
+        for c in crashes(sigs.failed[f0:], sigs.page_errors[e0:]):
+            c.actual = f"{how}: {c.actual}"[:600]
+            if await keep(c, (c.symptom.kind, c.symptom.value), (pg, sigs, rec)):
+                found += 1
+
+    answer_path = urlsplit(answer_url).path or "/"
+    # 1. The answer page opened by its address, in a new tab.
+    if answer_url.split("#")[0] != form_url.split("#")[0]:
+        tab = await context.new_page()
+        tab_signals = Signals()
+        tab_signals.attach(tab)
+        try:
+            await tab.goto(answer_url, wait_until="domcontentloaded", timeout=30_000)
+            await tab_signals.settle()
+            await check(tab, tab_signals, 0, 0, f"Opening {answer_path} directly (a bookmark or a shared link)",
+                        [{"type": "goto", "url": answer_url}])
+        finally:
+            await tab.close()
+        done.append(f"opened {answer_path} directly")
+    # 2. Refresh, 3. Back.
+    f0, e0 = len(signals.failed), len(signals.page_errors)
+    await page.reload(wait_until="domcontentloaded", timeout=30_000)
+    await signals.settle()
+    await check(page, signals, f0, e0, f"Refreshing {answer_path} after the submit", to_here + [{"type": "goto", "url": answer_url}])
+    done.append("refreshed")
+    f0, e0 = len(signals.failed), len(signals.page_errors)
+    try:
+        await page.go_back(wait_until="domcontentloaded", timeout=10_000)
+        await signals.settle()
+        await check(page, signals, f0, e0, f"Going back from {answer_path}", to_here)
+        done.append("went back")
+    except Exception:
+        pass
+    # 4. The same form, sent with one double click. A text field carries a marker, so an entry
+    #    listed twice can be counted. A double click is a race: listed once, it is tried once more.
+    place, rule, listed = None, None, 0
+    for attempt in range(2):
+        await page.goto(form_url, wait_until="domcontentloaded", timeout=30_000)
+        await signals.settle()
+        form = await form_state(page)
+        texts = [f for f in form.fields if f["type"] in ("text", "search", "textarea")]
+        marked = next((f for f in texts if "name" in f["label"].lower()), texts[0] if texts else None)
+        marker = _marker()
+        rec = to_here[:1] + [{"type": "goto", "url": form_url}]
+        for f in form.fields:
+            was = next((x["value"] for x in sent.fields if x["label"] == f["label"]), None)
+            if was is None or f["type"] in ("password", "file"):
+                continue
+            value = f"{was} {marker}".strip() if marked and f["idx"] == marked["idx"] else was
+            status, _, how = await set_field(page, f, "fill", value)
+            if status == "ok":
+                rec.append({"type": "action", "action": _rec(how, f, value), "url": form_url})
+        button = page.get_by_role("button", name=sent.submit, exact=True).first
+        f0, e0 = len(signals.failed), len(signals.page_errors)
+        await button.dblclick(timeout=5_000)
+        rec.append({"type": "action", "url": form_url,
+                    "action": {"action": "dblclick", "locator": {"method": "role", "role": "button", "name": sent.submit}}})
+        await signals.settle(timeout_ms=10_000)
+        await check(page, signals, f0, e0, f"Clicking {sent.submit} twice quickly", rec)
+        if attempt == 0:
+            done.append(f"clicked {sent.submit} twice quickly")
+        if not marked:
+            break
+        # Where submitted things are listed: a link the rules name next to "listed", or a "My …" link.
+        links = form.links or (await form_state(page)).links
+        named = []  # (link, rule): a link a rule names as whole words, in a rule about listing or showing
+        for rid, text in rules.items():
+            t = f" {_norm(text)} "
+            if any(w in t.split() for w in LISTING_WORDS):
+                named += [(l, (rid, text)) for l in links if len(l["text"]) >= 4
+                          and re.search(rf"(?<!\w){re.escape(_norm(l['text']))}(?!\w)", t)]
+        if named:  # a rule that says "list" first, then the longest link ("My orders", not "Order")
+            place, rule = max(named, key=lambda x: (bool(re.search(r"\blist", x[1][1].lower())), len(x[0]["text"])))
+        place = place or next((l for l in links if l["text"].lower().startswith("my ")), None)
+        if not place:
+            break
+        f0, e0 = len(signals.failed), len(signals.page_errors)
+        await page.goto(place["href"], wait_until="domcontentloaded", timeout=30_000)
+        await signals.settle()
+        listed = (await page.evaluate("() => document.body ? document.body.innerText : ''")).count(marker)
+        rec_list = rec + [{"type": "goto", "url": place["href"]}]
+        await check(page, signals, f0, e0, f"Opening {place['text']} after clicking {sent.submit} twice", rec_list)
+        if listed != 1:
+            break
+    if place and marked:
+        if listed >= 2:
+            why = f" {rule[0]} says: \"{rule[1][:200]}\"" if rule else ""
+            if await keep(schemas.ExploreProblem(
+                    title=f"Clicking {sent.submit} twice quickly creates it twice"[:200], severity="high",
+                    expected=f"One entry per submit, even when the button is clicked twice (users double-click).{why}"[:600],
+                    actual=f"After one double click on {sent.submit}, {place['text']} lists it {listed} times "
+                           f"(marked \"{marker}\")."[:600],
+                    symptom=schemas.Symptom(kind="text_visible", value=marker,
+                                            explanation=f"Listed {listed} times after one double click on {sent.submit}"),
+                    same_as=f"double:{urlsplit(form_url).path}:{_norm(sent.submit)}"),
+                    ("double", form_url.split("?")[0]), (page, signals, rec_list)):
+                found += 1
+        done.append(f"looked in {place['text']}: listed {listed} time{'s' if listed != 1 else ''}"
+                    + (" (after a second try)" if attempt else ""))
+    await page.goto(form_url, wait_until="domcontentloaded", timeout=30_000)
+    await signals.settle()
+    return ", ".join(done) + (f"; {found} problem{'s' if found != 1 else ''} drafted" if found else "; nothing broke")
+
+
+class SignInFailed(Exception):
+    """The app under test couldn't be signed in to: the run doesn't start signed out by mistake."""
+
+
+def signed_out(url: str, cfg: dict, base: str) -> bool:
+    from app.sign_in import signed_out as on_sign_in_page
+    return on_sign_in_page(url, cfg, base)
+
+
+def secrets_of(cfg: dict | None) -> list[str]:
+    from app.sign_in import secrets
+    return secrets(cfg)
+
+
+# ---------- confirming a draft before a tester reads it ----------
+
+async def confirm_drafts(pw, bug_ids: list[str], session_id: str, headless: bool, executable_path: str | None,
+                         prepare=None) -> str:
+    """Replays each draft this session made (not sightings of older ones) from its steps, in fresh
+    browsers, and checks its symptom each time: "always" (every time), "intermittent" (some
+    times) or "once" (never again). Kept on the bug as its reproducibility and confirmation."""
+    from app.agent.reproduce import _reruns
+    with SessionLocal() as db:
+        todo = [(b.id, b.title, b.edited_steps, b.symptom) for b in (db.get(models.Bug, i) for i in bug_ids)
+                if b and b.session_id == session_id and b.symptom and not b.confirmation]
+    out = []
+    for bug_id, title, steps, symptom in todo:
+        if steps:
+            result = await _reruns({"steps": steps}, symptom, CONFIRM_RUNS, headless, executable_path, pw, prepare=prepare)
+        else:
+            result = {"runs": 0, "reproduced": 0, "results": [], "note": "no steps to replay"}
+        n, runs = result["reproduced"], result["runs"]
+        with SessionLocal() as db:
+            bug = db.get(models.Bug, bug_id)
+            bug.confirmation = {**result, "at": utcnow().isoformat()}
+            if runs:
+                bug.reproducibility = "always" if n == runs else "intermittent" if n else "once"
+            db.commit()
+        out.append(f"\"{title[:80]}\" {n} of {runs}" if runs else f"\"{title[:80]}\": no steps to replay")
+    return ("Replayed each new draft in a fresh browser: " + "; ".join(out)) if out else ""
+
+
 # ---------- the run ----------
 
 async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, session_id: str, charter_id: str,
                     start_url: str, origins: set[str], max_steps: int, headless: bool, executable_path: str | None,
-                    folder: Path, checker: LLMProvider | None = None, conditions: dict | None = None) -> None:
+                    folder: Path, checker: LLMProvider | None = None, conditions: dict | None = None,
+                    sign_in_cfg: dict | None = None) -> None:
     from playwright.async_api import async_playwright
 
     ACTIVE.add(run_id)
@@ -1055,13 +1366,23 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                 asked: set[str] = set()  # questions already noted
                 tried_values: dict[str, set[str]] = {}  # field label -> values submitted (for the test ideas)
                 last_fields: list[dict] = []  # the last form seen, for the ideas tally at the end
+                toured: set[str] = set()  # forms whose flow was toured after an accepted submit
+                tour_due = None
                 dirty: dict[str, str] = {}  # fields changed since the last submit: nothing is tested until it is sent
                 n_submits = 0
                 visited: set[str] = {start_url.split("#")[0]}
                 stuck = 0  # steps in a row that taught nothing (refused, failed, unusable)
+                if sign_in_cfg:
+                    # The app under test is signed in before anything else, as a user would be.
+                    from app.sign_in import sign_in
+                    ok, how = await sign_in(page, sign_in_cfg, start_url, signals)
+                    _note(session_id, "setup", f"Signed in to the app: {how}." if ok else f"Couldn't sign in to the app: {how}.")
+                    if not ok:
+                        raise SignInFailed(how)
                 await page.goto(start_url, wait_until="domcontentloaded", timeout=30_000)
                 await signals.settle()
                 _record(session_id, [Signal("navigation", f"Opened {start_url}", start_url, now())])
+                signed_again = 0
                 bad_replies = 0
 
                 def drain_signals() -> None:
@@ -1085,7 +1406,20 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     if time.monotonic() - started > run_timeout:
                         final = {"status": "finished", "detail": f"Stopped: the run took longer than {run_timeout // 60} minutes."}
                         break
+                    if sign_in_cfg and signed_again < 3 and signed_out(page.url, sign_in_cfg, start_url):
+                        # Back on the sign-in page: the session ended (or the app signed out). Sign in again.
+                        from app.sign_in import sign_in
+                        signed_again += 1
+                        back_to = history[-1]["url"] if history else start_url
+                        ok, how = await sign_in(page, sign_in_cfg, start_url, signals)
+                        _note(session_id, "issue", f"The app signed the run out (on {page.url}); signed in again: {how}." if ok
+                              else f"The app signed the run out and signing in again failed: {how}.")
+                        if ok and not signed_out(back_to, sign_in_cfg, start_url):
+                            await page.goto(back_to, wait_until="domcontentloaded", timeout=30_000)
+                            await signals.settle()
                     observation = await observe(page, signals, seen)
+                    for secret in secrets_of(sign_in_cfg):
+                        observation = observation.replace(secret, "•••")
                     before = await form_state(page)
                     if before.fields:
                         last_fields = before.fields
@@ -1094,7 +1428,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     drain_signals()
                     hints = _pending_hints(run_id)
                     today = utcnow().date()
-                    ideas, _, _ = ideas_text(before.fields, tried_values, today)
+                    ideas, _, _ = ideas_text(before.fields, tried_values, today, rules=rules_of(ctx))
                     tip = suggest(ctx, before, tried_values, dirty, n_submits, visited, today)
                     stepped_in = False
                     if stuck >= STEP_IN_AFTER and tip and not hints:
@@ -1129,10 +1463,10 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     picked = ""
                     if a.pick:  # a fill without a value: the next test idea for that field
                         f = find_field(before, field_name(a))
-                        choice = next(((w, v) for w, v in ideas_for(f, today) if not is_tried(f, v, tried_values)),
+                        choice = next(((w, v) for w, v in ideas_for(f, today, rules_of(ctx)) if not is_tried(f, v, tried_values)),
                                       None) if f else None
-                        if f and (choice or valid_value(f, today) is not None):
-                            what, value = choice or ("ordinary valid data", valid_value(f, today))
+                        if f and (choice or valid_value(f, today, rules_of(ctx)) is not None):
+                            what, value = choice or ("ordinary valid data", valid_value(f, today, rules_of(ctx)))
                             a = a.model_copy(update={"value": value, "pick": False})
                             picked = f"no value given, so Mirmera used the next test idea ({what})"
                     entry = {"n": len(history) + 1, "thought": step.thought,
@@ -1178,6 +1512,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         _save(run_id, steps=list(history))
                         continue
                     if a.kind == "problem":
+                        a.problem.same_as = None  # Mirmera's own key, never the AI's
                         key = (a.problem.symptom.kind, a.problem.symptom.value)
                         if key in reported:
                             entry["status"], entry["detail"] = "refused", "already reported in this session"
@@ -1218,7 +1553,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     done_actions: list[dict] | None = None  # what was done, when Mirmera did it its own way
                     try:
                         if a.kind == "try":
-                            entry["status"], entry["detail"], done_actions, sent_form = await do_try(page, a, before, today)
+                            entry["status"], entry["detail"], done_actions, sent_form = await do_try(page, a, before, today, rules_of(ctx))
                             if sent_form:
                                 before = sent_form  # the form as it was sent: what the answer is read against
                         elif a.kind in ("fill", "select", "check", "uncheck") and (f := find_field(before, field_name(a))):
@@ -1332,25 +1667,27 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                     _note(session_id, "question", f"No rule says what should happen here. Sent: {sent_text(before)[:300]}. "
                                                                   f"The app said: \"{said[0][:160]}\". Is that what the team wants?")
                             _note(session_id, "test", note)
-                    async def keep(problem: schemas.ExploreProblem, key: tuple, extra: str = "") -> bool:
-                        """A checked bug draft for something Mirmera saw itself (no AI involved)."""
+                    async def keep(problem: schemas.ExploreProblem, key: tuple, extra: str = "", *, on=None) -> bool:
+                        """A checked bug draft for something Mirmera saw itself (no AI involved).
+                        on: (page, its signals, the steps to it, the history entry) for a flow tour."""
+                        pg, sigs, rec, ent = on or (page, signals, steps, entry)
                         if key in reported:
                             return False
-                        ok, evidence = await verify(page, problem.symptom, signals)
+                        ok, evidence = await verify(pg, problem.symptom, sigs)
                         if not ok:
                             return False
                         shot = folder / f"explore-{run_id[:8]}-{len(bug_ids) + 1}.png"
                         try:
-                            await page.screenshot(path=str(shot))
+                            await pg.screenshot(path=str(shot))
                         except Exception:
                             shot = None
-                        bid, new = _draft_bug(session_id, charter_id, problem, evidence + extra, steps, page.url, shot, provider)
+                        bid, new = _draft_bug(session_id, charter_id, problem, evidence + extra, rec, pg.url, shot, provider)
                         if bid not in bug_ids:
                             bug_ids.append(bid)
                         reported.add(key)
-                        entry["status"] = "drafted"
-                        entry["detail"] = (entry["detail"] + "; " if entry["detail"] else "") + problem.title
-                        _seen(entry, new)
+                        ent["status"] = "drafted"
+                        ent["detail"] = (ent["detail"] + "; " if ent["detail"] else "") + problem.title
+                        _seen(ent, new)
                         return True
 
                     submitted = is_submit and entry["status"] in ("ok", "drafted")
@@ -1370,13 +1707,13 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         did = outcome_of(said, broke)
                         cases = rule_cases(rules_of(ctx), before, today)
                         refusing = [c for c in cases if c[2] == "refuse"]
-                        for rid, rtext, expects, what in cases:
+                        for rid, rtext, expects, first, kind, tested in cases:
                             breaks = (did == "accepted" and expects == "refuse") or \
-                                     (did == "refused" and expects == "accept" and not refusing and not refusal_about_a_gap(before, said))
+                                     (did == "refused" and expects == "accept" and not refusing
+                                      and not refusal_about_a_gap(before, said, tested))
                             if not breaks or ("rule", rid) in reported:
                                 continue
                             should, got = ("refused", "accepted") if expects == "refuse" else ("accepted", "refused")
-                            first, kind = what.split(" (", 1)[0], what.split(" (", 1)[-1].rstrip(")")
                             await keep(schemas.ExploreProblem(
                                 title=f"{kind[:1].upper() + kind[1:]} is {got} although {rid} says it is {should}"[:200],
                                 severity="high" if expects == "refuse" else "medium",
@@ -1414,6 +1751,10 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         submits.append((values, outcome, entry["n"]))
                         if outcome == "accepted":
                             accepted_values += [v for v in kept_values(before) if v not in accepted_values]
+                            form_path = entry["url"].split("?")[0].split("#")[0]
+                            if TOURS and form_path not in toured and before.submit and not page.is_closed():
+                                toured.add(form_path)
+                                tour_due = (entry["url"], page.url, before, list(steps))
 
                     if entry["status"] in ("ok", "drafted") and not page.is_closed() and after.url:
                         new_page = after.url.split("#")[0] != (before.url or "").split("#")[0]
@@ -1468,6 +1809,23 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     history.append(entry)
                     stuck = stuck + 1 if entry["status"] in ("refused", "failed", "not verified") else 0
                     _save(run_id, steps=list(history), bug_ids=list(bug_ids))
+                    if tour_due:
+                        # An accepted submit: walk the flow the ways users do, not only forward (Mirmera's
+                        # own steps, no AI, outside the budget).
+                        form_url, answer_url, sent_form, to_here = tour_due
+                        tour_due = None
+                        tour = {"n": len(history) + 1, "thought": "Mirmera's flow tour after an accepted submit: open the "
+                                "answer page directly, refresh it, go back, and send the form twice quickly.",
+                                "action": "flow tour", "kind": "tour", "status": "ok", "detail": "", "url": answer_url,
+                                "by": "Mirmera", "t": round(time.monotonic() - filmed_from, 2)}
+                        try:
+                            tour["detail"] = await flow_tour(page, context, signals, form_url, answer_url, sent_form, to_here,
+                                                             rules_of(ctx), lambda prob, key, on: keep(prob, key, on=(*on, tour)))
+                        except Exception as err:  # a tour is extra: it never stops the run
+                            tour["detail"] = f"the tour stopped: {_first_line(err)}"
+                        history.append(tour)
+                        _save(run_id, steps=list(history), bug_ids=list(bug_ids))
+                        _note(session_id, "test", f"Flow tour after the submit on {form_url}: {tour['detail']}")
                 else:
                     used = steps_used(history)
                     final = {"status": "finished", "detail": f"Used all {max_steps} steps." if used >= max_steps else
@@ -1475,15 +1833,37 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                              f"{len(history) - used} of them refused: it kept repeating steps that teach nothing."}
                 drain_signals()
                 if last_fields:
-                    _, done, total = ideas_text(last_fields, tried_values, utcnow().date(), limit_fields=20)
+                    _, done, total = ideas_text(last_fields, tried_values, utcnow().date(), limit_fields=20, rules=rules_of(ctx))
                     if total:
-                        left = [f'{f["label"]}: {w}' for f in last_fields for w, v in ideas_for(f, utcnow().date())
+                        left = [f'{f["label"]}: {w}' for f in last_fields for w, v in ideas_for(f, utcnow().date(), rules_of(ctx))
                                 if not is_tried(f, v, tried_values)]
                         _note(session_id, "setup", f"Test ideas tried: {done} of {total}."
                               + (f" Not tried: {'; '.join(left[:8])}" + ("…" if len(left) > 8 else "") if left else ""))
             finally:
                 video = await _keep_recording(context, folder, run_id)
                 await browser.close()
+            if CONFIRM_RUNS and bug_ids and final.get("status") != "cancelled":
+                # Before a tester reads a draft: does it happen again from its steps alone, in a
+                # browser that saw nothing before? (No AI.)
+                confirm = {"n": len(history) + 1, "thought": f"Mirmera replays each new draft's steps {CONFIRM_RUNS} times in "
+                           "a fresh browser, to tell a steady bug from a one-off.", "action": "confirm the drafts",
+                           "kind": "confirm", "status": "ok", "detail": "", "url": start_url, "by": "Mirmera"}
+                try:
+                    async def signed_in(fresh_page):  # each fresh browser signs in first, as the run did
+                        from app.sign_in import sign_in
+                        ok, how = await sign_in(fresh_page, sign_in_cfg, start_url)
+                        if not ok:
+                            raise RuntimeError(f"couldn't sign in: {how}")
+                    confirm["detail"] = await confirm_drafts(pw, bug_ids, session_id, headless, executable_path,
+                                                             prepare=signed_in if sign_in_cfg else None)
+                except Exception as err:  # confirming is extra: it never fails the run
+                    confirm["detail"] = f"could not replay: {_first_line(err)}"
+                if confirm["detail"]:
+                    history.append(confirm)
+                    _save(run_id, steps=list(history))
+    except SignInFailed as err:
+        final = {"status": "error", "detail": f"Couldn't sign in to the app: {err}. Check the project's Settings → "
+                                               "Signing in to the app, and try it there."}
     except ProviderError as err:
         final = {"status": "error", "detail": f"The AI could not continue: {err}"}
     except Exception as err:

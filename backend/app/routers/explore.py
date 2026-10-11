@@ -69,6 +69,10 @@ def start_exploration(db: DBSession, charter: models.Charter, *, started_by: str
         earlier=agent.earlier_runs(db, charter),
         app_map=app_map_text(db, project.id),
     )
+    from app import sign_in
+    sign_cfg = sign_in.for_run(project)  # the password stays in memory, for this run only
+    if sign_cfg:
+        ctx.signed_in_as = sign_cfg.get("username") or "the project's test user"
     session = models.Session(charter_id=charter.id, tester_id=agent.TESTER)
     db.add(session)
     db.flush()
@@ -85,7 +89,7 @@ def start_exploration(db: DBSession, charter: models.Charter, *, started_by: str
         agent.run_agent(run.id, ctx, provider, session_id=session.id, charter_id=charter.id, start_url=run.start_url,
                         origins={origin(base)}, max_steps=max_steps, headless=True,
                         executable_path=settings.runner_chromium_path, folder=runner_api.session_folder(session.id),
-                        checker=checker, conditions=conditions),
+                        checker=checker, conditions=conditions, sign_in_cfg=sign_cfg),
         manager.loop._get(),
     )
     return run

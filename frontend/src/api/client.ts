@@ -167,6 +167,8 @@ export interface Bug {
   filings: BugFiling[]
   /** The exploration agent met the same problem again, in another charter or run */
   sightings?: BugSighting[]
+  /** Mirmera replayed the draft's steps in fresh browsers when its run ended */
+  confirmation?: { runs: number; reproduced: number; results: { run: number; reproduced: boolean; detail: string }[]; note?: string } | null
 }
 
 // ---- Issue trackers ----------------------------------------------------------
@@ -454,6 +456,15 @@ export interface DebriefListItem {
   coverage_summary: string | null
   created_at: string
 }
+
+/** How Mirmera signs in to the app under test. The password is never sent back: only whether it's set. */
+export interface AppSignIn {
+  url: string; username_field: string; username: string; password_field: string
+  password_set: boolean; submit: string; signed_in_text: string
+}
+/** password: undefined keeps the saved one, '' clears it */
+export type AppSignInChanges = Omit<AppSignIn, 'password_set'> & { password?: string }
+export interface AppSignInTry { ok: boolean; detail: string; url: string; screenshot: string | null }
 
 export interface BugSighting { session_id: string; charter_id: string; mission: string; at: string; url: string }
 
@@ -1015,6 +1026,11 @@ export const api = {
   newStoryRisk: (storyId: string, risk: RiskInput) =>
     request<StoryDetail>(`/stories/${storyId}/risks/new`, { method: 'POST', body: JSON.stringify(risk) }),
   storyArtifact: (storyId: string) => request<Artifact>(`/stories/${storyId}/artifact`, { method: 'POST' }),
+  getAppSignIn: (projectId: string) => request<AppSignIn | null>(`/projects/${projectId}/sign-in`),
+  saveAppSignIn: (projectId: string, body: AppSignInChanges) =>
+    request<AppSignIn>(`/projects/${projectId}/sign-in`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteAppSignIn: (projectId: string) => request<void>(`/projects/${projectId}/sign-in`, { method: 'DELETE' }),
+  tryAppSignIn: (projectId: string) => request<AppSignInTry>(`/projects/${projectId}/sign-in/try`, { method: 'POST' }),
   getNotifications: (projectId: string) => request<NotificationsOverview>(`/projects/${projectId}/notifications`),
   saveNotifications: (projectId: string, body: NotificationSettings) =>
     request<NotificationsOverview>(`/projects/${projectId}/notifications`, { method: 'PUT', body: JSON.stringify(body) }),

@@ -27,7 +27,7 @@ def summary(page: dict) -> str:
             + (f": form {fields}" if fields else "") + (f"; buttons {', '.join(page['buttons'][:4])}" if page["buttons"] else ""))
 
 
-async def crawl(base: str, max_pages: int = 25, executable_path: str | None = None) -> list[dict]:
+async def crawl(base: str, max_pages: int = 25, executable_path: str | None = None, sign_in_cfg: dict | None = None) -> list[dict]:
     from playwright.async_api import async_playwright
     home = origin(base)
     queue, seen, pages = [base.rstrip("/") + "/"], set(), []
@@ -36,6 +36,12 @@ async def crawl(base: str, max_pages: int = 25, executable_path: str | None = No
         try:
             page = await (await browser.new_context(viewport={"width": 1280, "height": 800})).new_page()
             page.on("dialog", lambda d: asyncio.ensure_future(d.dismiss()))
+            if sign_in_cfg:  # the pages behind the sign-in are the app too
+                from app.sign_in import address, sign_in
+                ok, how = await sign_in(page, sign_in_cfg, base)
+                if not ok:
+                    raise HTTPException(409, f"Couldn't sign in to survey the app: {how}")
+                seen.add(address(sign_in_cfg, base).split("#")[0].split("?")[0])  # not a page to map
             while queue and len(pages) < max_pages:
                 url = queue.pop(0)
                 key = url.split("#")[0].split("?")[0]
@@ -76,10 +82,12 @@ async def survey(project_id: str, payload: schemas.AppMapRequest, db) -> dict:
     base = (payload.base_url or project.app_url or "").strip().rstrip("/")
     if not base.startswith(("http://", "https://")):
         raise HTTPException(409, f"{project.name} has no app URL to survey. Set it in the project's Settings.")
+    from app import sign_in
+    sign_cfg = sign_in.for_run(project)
     db.commit()  # nothing is held open while the browser works
     # On the runner's own event loop, as the agents run: it can start browsers on every platform
     # (on Windows the web server's loop may not be able to start subprocesses).
     from app.runner import manager
     pages = await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(
-        crawl(base, payload.max_pages, settings.runner_chromium_path), manager.loop._get()))
+        crawl(base, payload.max_pages, settings.runner_chromium_path, sign_cfg), manager.loop._get()))
     return {"base_url": base, "pages": pages, "forms": sum(1 for p in pages if p["fields"])}

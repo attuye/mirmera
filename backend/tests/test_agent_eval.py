@@ -142,6 +142,8 @@ def run_with(monkeypatch, provider, app_url, **kw):
     return explore_eval.run_eval(app_url, "mock", on_progress=lambda *_: None, **kw)
 
 
+@pytest.mark.tours
+@pytest.mark.confirm
 def test_an_ideal_tester_finds_every_planted_bug_and_nothing_else(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
     """The ceiling: if the agent always does the right thing, Mirmera drafts all four
     planted bugs and no false alarm. A bug missing here is Mirmera's fault, not the model's."""
@@ -152,7 +154,19 @@ def test_an_ideal_tester_finds_every_planted_bug_and_nothing_else(client, practi
     assert all(s.status == "finished" and s.unusable == 0 and s.stepped_in == 0 for s in scores)  # all its own work
     assert "## Explore expiry dates" in explore_eval.steps_text()
     text = explore_eval.report(scores, "ideal", None)
-    assert "| Expired documents are accepted | 1 of 4 runs | 25% |" in text and "0 of 4 drafts matched no planted bug." in text
+    assert "| Expired documents are accepted | 1 of 4 runs | 25% |" in text and "0 of 5 drafts matched no planted bug." in text
+    # The flow tour after the first accepted submit opens My documents too: its page error shows up
+    # in the expiry run as well, without the agent going there.
+    assert "| My documents shows no documents (page error) | 2 of 4 runs | 50% |" in text
+    assert {s.charter: s.tours for s in scores} == {"documents": 0, "expiry": 1, "names": 0, "my-documents": 1}
+    # Every new draft was replayed 3 times in a fresh browser, and each planted bug shows every time.
+    from app import models
+    from app.database import SessionLocal
+    with SessionLocal() as db:
+        drafts = [b for b in db.query(models.Bug).all()]
+        assert drafts and all(b.confirmation and b.confirmation["runs"] == 3 for b in drafts)
+        assert {b.title: b.reproducibility for b in drafts} == {b.title: "always" for b in drafts}, \
+            [(b.title, b.confirmation) for b in drafts]
 
 
 # ---------- misbehaving models ----------
@@ -833,3 +847,331 @@ def test_explore_as_a_phone_on_a_slow_network_in_amharic(client, shop_app, monke
     assert "Seen as: 390 wide, am-ET, Africa/Addis_Ababa, slow network" in provider.users[-1]
     bad = client.post(f"/charters/{charter['id']}/explore", json={"conditions": {"device": "fridge"}})
     assert bad.status_code == 422
+
+
+# ---------- rules Mirmera reads itself ----------
+
+GENERAL_RULES = {"AC1": "Phone number is optional.", "AC2": "Quantity must be between 1 and 10.",
+                 "AC3": "The email must be a valid address.", "AC4": "A comment can be at most 200 characters.",
+                 "AC5": "Delivery date is required.", "AC6": "Age: at least 18.",
+                 "AC7": "Orders placed before 2020-01-01 are archived."}  # a date is not a range
+GENERAL_FIELDS = [("Phone number", "tel"), ("Quantity", "number"), ("Email", "email"), ("Comment", "text"),
+                  ("Delivery date", "date"), ("Age", "number")]
+
+
+def general_form(**values):
+    from app.agent.explore import FormState
+    ok = {"Phone number": "+251911223344", "Quantity": "2", "Email": "a@example.com", "Comment": "Fine",
+          "Delivery date": "2027-01-01", "Age": "30"}
+    return FormState(fields=[{"label": label, "type": t, "value": values.get(label, ok[label])} for label, t in GENERAL_FIELDS])
+
+
+@pytest.mark.parametrize("label,value,expected", [
+    ("Phone number", "", ("AC1", "accept")),
+    ("Quantity", "11", ("AC2", "refuse")), ("Quantity", "0", ("AC2", "refuse")), ("Quantity", "10", None),
+    ("Email", "name@", ("AC3", "refuse")), ("Email", "name.example.com", ("AC3", "refuse")),
+    ("Comment", "x" * 201, ("AC4", "refuse")), ("Comment", "x" * 200, None),
+    ("Delivery date", "", ("AC5", "refuse")),
+    ("Age", "17", ("AC6", "refuse")), ("Age", "18", None),
+])
+def test_the_rules_a_story_usually_has_are_read_without_ai(label, value, expected):
+    from datetime import date
+    from app.agent.explore import rule_cases
+    cases = rule_cases(GENERAL_RULES, general_form(**{label: value}), date(2026, 10, 11))
+    assert [(c[0], c[2]) for c in cases] == ([expected] if expected else [])
+    assert rule_cases(GENERAL_RULES, general_form(), date(2026, 10, 11)) == []  # a valid form: nothing singled out
+
+
+def test_boundary_ideas_come_first_from_the_rules():
+    from datetime import date
+    from app.agent.explore import ideas_for
+    def ideas(label, t):
+        return [v for _, v in ideas_for({"label": label, "type": t, "value": ""}, date(2026, 10, 11), GENERAL_RULES)]
+    assert ideas("Quantity", "number")[:4] == ["0", "1", "10", "11"]
+    assert ideas("Comment", "text")[:2] == ["@long200", "@long201"]
+    assert ideas("Phone number", "tel")[0] == "" and ideas("Age", "number")[:2] == ["17", "18"]
+    assert ideas("Quantity", "number").count("0") == 1  # the type's own "zero" idea isn't repeated
+
+
+SIGNUP = b"""<!doctype html><title>Sign up</title><h1>Sign up for the meetup</h1>
+<form id=f novalidate><label for=n>Name</label><input id=n>
+<label for=e>Email</label><input id=e type=email>
+<label for=p>Phone</label><input id=p type=tel>
+<label for=s>Seats</label><input id=s type=number>
+<button type=submit>Sign up</button></form><p role=status id=out></p>
+<script>
+document.getElementById('f').addEventListener('submit', (e) => {
+  e.preventDefault()
+  const v = (id) => document.getElementById(id).value.trim()
+  const out = document.getElementById('out')
+  if (!v('n')) { out.textContent = 'Please enter your name.'; return }
+  if (!v('p')) { out.textContent = 'Phone is required.'; return }
+  out.textContent = "You're signed up!"
+})
+</script>"""
+SIGNUP_STORY = """Acceptance criteria
+- The phone number is optional.
+- Seats: 1 to 4 per person.
+- The email must be a valid email address."""
+
+
+@pytest.fixture
+def signup_app():
+    """A sign-up form whose phone is required though optional, that takes 5 seats and any email."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class App(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(SIGNUP)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+def test_optional_ranges_and_formats_are_checked_without_the_ai(client, signup_app, monkeypatch, chromium_available):  # noqa: F811
+    """Three rules most stories have, broken: an optional field the app requires, a number outside
+    its range, an email that isn't valid. The check answers nonsense: Mirmera finds them itself."""
+    from app import models
+    from app.database import SessionLocal
+    from app.routers.explore import start_exploration
+    from app.agent import explore as agent
+    replies = [step("Open", kind="goto", url=signup_app),
+               step("Valid", kind="try", values={}),
+               step("No phone", kind="try", values={"Phone": ""}),
+               step("5 seats", kind="try", values={"Seats": "5"}),
+               step("Bad email", kind="try", values={"Email": "name@"}),
+               step("Done", kind="done", summary="Done.")]
+    provider = Scripted(replies, judge=lambda user: '{"answer_means": "other", "answer_quote": "", "rule": "", "rule_expects": "none"}')
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+    with SessionLocal() as db:
+        project = models.Project(org_id="eval", name="Meetup", app_url=signup_app, default_ai_provider="mock")
+        db.add(project)
+        db.flush()
+        story = models.Story(project_id=project.id, title="Sign up for the meetup", description=SIGNUP_STORY)
+        charter = models.Charter(project_id=project.id, mission_statement="Explore the sign-up form", source="eval")
+        charter.stories = [story]
+        db.add_all([story, charter])
+        db.commit()
+        r = start_exploration(db, charter, started_by="eval", max_steps=10)
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            db.expire_all()
+            r = db.get(models.ExplorationRun, r.id)
+            if r.status != "running" and r.id not in agent.ACTIVE:
+                break
+        titles = [db.get(models.Bug, b).title for b in r.bug_ids]
+        steps = list(r.steps)
+    assert titles == ["Phone left empty is refused although AC1 says it is accepted",
+                      "Seats 5, outside 1 to 4 is accepted although AC2 says it is refused",
+                      'An email that isn\'t valid, "name@", is accepted although AC3 says it is refused']
+    assert [s["status"] for s in steps[1:5]] == ["ok", "drafted", "drafted", "drafted"]
+    # and the ideas started from the rules: the boundaries of 1 to 4, the optional phone left empty
+    ideas = provider.users[1].split("<ideas>")[1].split("</ideas>")[0]
+    assert '- Seats: just under the minimum 1 ("0"); the minimum 1 ("1"); the maximum 4 ("4")' in ideas
+    assert '- Phone: left empty (the rules say optional) ("")' in ideas
+
+
+# ---------- flow tours ----------
+
+BOOKING = {
+    "/book": b"""<!doctype html><title>Book</title><h1>Book a table</h1><a href="/bookings">My bookings</a>
+<form id=f><label for=n>Your name</label><input id=n><button type=submit>Book</button></form><p role=status id=out></p>
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const name = document.getElementById('n').value.trim()
+  if (!name) { document.getElementById('out').textContent = 'Please enter your name.'; return }
+  const r = await fetch('/api/book', { method: 'POST', body: name })
+  sessionStorage.setItem('last', JSON.stringify({ name }))
+  location.href = '/booked'
+})
+</script>""",
+    "/booked": b"""<!doctype html><title>Booked</title><h1>Booked</h1><p role=status>Booking confirmed.</p>
+<p id=who></p><a href="/bookings">My bookings</a>
+<script>document.getElementById('who').textContent = 'For ' + JSON.parse(sessionStorage.getItem('last')).name</script>""",
+}
+
+
+@pytest.fixture
+def booking_app():
+    """A booking form whose confirmation page breaks when opened by its address (a bookmark), and
+    whose Book button books twice on a double click."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    booked = []
+
+    class App(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path.startswith("/bookings"):
+                body = ("<!doctype html><title>My bookings</title><h1>My bookings</h1><ul>"
+                        + "".join(f"<li>{n}</li>" for n in booked) + "</ul>").encode()
+            else:
+                body = BOOKING.get(self.path.split("?")[0], b"<!doctype html><title>Home</title><a href='/book'>Book</a>")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            booked.append(self.rfile.read(n).decode())
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+@pytest.mark.tours
+@pytest.mark.confirm
+def test_after_an_accepted_submit_mirmera_tours_the_flow(client, booking_app, monkeypatch, chromium_available):  # noqa: F811
+    """What no amount of form filling finds: the confirmation page opened by its address throws, and
+    a double click on Book books twice. Mirmera tours the flow itself after the first accepted submit,
+    outside the step budget."""
+    from app import models
+    from app.database import SessionLocal
+    from app.routers.explore import start_exploration
+    from app.agent import explore as agent
+    replies = [step("Open", kind="goto", url=f"{booking_app}/book"),
+               step("Book", kind="try", values={"Your name": "Abebe Kebede"}),
+               step("Done", kind="done", summary="Booked once.")]
+    provider = Scripted(replies)
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+    with SessionLocal() as db:
+        project = models.Project(org_id="eval", name="Tables", app_url=booking_app, default_ai_provider="mock")
+        db.add(project)
+        db.flush()
+        story = models.Story(project_id=project.id, title="Book a table",
+                             description="Acceptance criteria\n- Every booking is listed in My bookings, once.")
+        charter = models.Charter(project_id=project.id, mission_statement="Explore booking a table", source="eval")
+        charter.stories = [story]
+        db.add_all([story, charter])
+        db.commit()
+        r = start_exploration(db, charter, started_by="eval", max_steps=3)
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            db.expire_all()
+            r = db.get(models.ExplorationRun, r.id)
+            if r.status != "running" and r.id not in agent.ACTIVE:
+                break
+        bugs = [db.get(models.Bug, b) for b in r.bug_ids]
+        steps = list(r.steps)
+        notes = [n.content for n in db.get(models.Session, r.session_id).notes]
+    assert [s["kind"] for s in steps] == ["goto", "try", "tour", "done", "confirm"]  # the tour costs none of the 3 steps
+    assert [b.reproducibility for b in bugs] == ["always", "always"]  # both show again from their steps alone
+    tour = steps[2]
+    assert tour["by"] == "Mirmera" and tour["status"] == "drafted"
+    assert "opened /booked directly" in tour["detail"] and "clicked Book twice quickly" in tour["detail"]
+    assert "looked in My bookings: listed 2 times" in tour["detail"]
+    titles = [b.title for b in bugs]
+    assert titles == ["Page error: Cannot read properties of null (reading 'name')",
+                      "Clicking Book twice quickly creates it twice"]
+    assert bugs[0].actual.startswith("Opening /booked directly (a bookmark or a shared link): ")
+    assert bugs[0].steps_to_reproduce and bugs[0].steps_to_reproduce[0].startswith("open ") and bugs[0].steps_to_reproduce[0].endswith("/booked")
+    assert 'Every booking is listed in My bookings, once.' in bugs[1].expected
+    assert any(n.startswith(f"Flow tour after the submit on {booking_app}/book:") for n in notes)
+
+
+# ---------- confirming drafts ----------
+
+ONCE_FORM = b"""<!doctype html><title>Subscribe</title><h1>Subscribe</h1>
+<form id=f><label for=e>Your name</label><input id=e><button type=submit>Subscribe</button></form><p role=status id=out></p>
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const r = await fetch('/api/subscribe', { method: 'POST' })
+  document.getElementById('out').textContent = r.ok ? 'Subscribed.' : 'Something went wrong.'
+})
+</script>"""
+
+
+@pytest.fixture
+def once_app():
+    """A form whose server fails the first time only: a one-off, not a steady bug."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    calls = []
+
+    class App(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(ONCE_FORM)
+
+        def do_POST(self):
+            calls.append(1)
+            self.send_response(500 if len(calls) == 1 else 200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+@pytest.mark.confirm
+def test_each_new_draft_is_replayed_in_fresh_browsers_before_a_tester_reads_it(client, once_app, practice_app, monkeypatch, chromium_available):  # noqa: F811
+    """A steady bug shows every time from its steps alone; a one-off doesn't. The tester sees which."""
+    from app import models
+    from app.database import SessionLocal
+    from app.routers.explore import start_exploration
+    from app.agent import explore as agent
+
+    def run(app_url, replies):
+        monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: Scripted(replies))
+        with SessionLocal() as db:
+            project = models.Project(org_id="eval", name="Replay", app_url=app_url, default_ai_provider="mock")
+            db.add(project)
+            db.flush()
+            charter = models.Charter(project_id=project.id, mission_statement="Explore the form", source="eval")
+            db.add(charter)
+            db.commit()
+            r = start_exploration(db, charter, started_by="eval", max_steps=4)
+            deadline = time.monotonic() + 120
+            while time.monotonic() < deadline:
+                time.sleep(0.5)
+                db.expire_all()
+                r = db.get(models.ExplorationRun, r.id)
+                if r.status != "running" and r.id not in agent.ACTIVE:
+                    break
+            return list(r.steps), [db.get(models.Bug, b) for b in r.bug_ids]
+
+    steps, [bug] = run(once_app, [step("Open", kind="goto", url=once_app),
+                                  step("Send", kind="try", values={"Your name": "Abebe Kebede"}),
+                                  step("Done", kind="done", summary="Sent once.")])
+    assert bug.title == "POST /api/subscribe fails with 500"
+    assert bug.reproducibility == "once" and bug.confirmation["reproduced"] == 0 and bug.confirmation["runs"] == 3
+    assert steps[-1]["kind"] == "confirm" and steps[-1]["by"] == "Mirmera"
+    assert steps[-1]["detail"] == 'Replayed each new draft in a fresh browser: "POST /api/subscribe fails with 500" 0 of 3'
+
+    steps, [bug] = run(practice_app, [step("Open", kind="goto", url=f"{practice_app}/verify"),
+                                      step("Passport", kind="try", values={"Document type": "Passport"}),
+                                      step("Done", kind="done", summary="Passport tried.")])
+    assert bug.reproducibility == "always" and bug.confirmation["reproduced"] == 3
+    from app import schemas
+    with SessionLocal() as db:  # what the bug page gets
+        assert schemas.BugOut.model_validate(db.get(models.Bug, bug.id)).confirmation["reproduced"] == 3
