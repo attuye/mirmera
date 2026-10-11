@@ -400,8 +400,22 @@ def option_of(f: dict, value: str) -> str | None:
     return hits[0] if hits else None
 
 
-def valid_value(f: dict, today) -> str | None:
-    """Ordinary valid data for a field, so a try changes only the fields it names. None: leave it."""
+def valid_value(f: dict, today, rules: dict[str, str] | None = None) -> str | None:
+    """Ordinary valid data for a field, so a try changes only the fields it names. None: leave it.
+    Within what the rules allow: a quantity of 1 to 10 gets 1, not 12345."""
+    v = _plain_valid(f, today)
+    for c in field_rules(f, rules) if rules else []:
+        if c["kind"] == "range":
+            lo, hi = c["lo"], c["hi"]
+            pick = lo if lo is not None else (min(1.0, hi) if hi is not None else None)
+            if pick is not None:
+                v = f"{pick:g}"
+        elif c["kind"] == "length" and v and c["hi"] is not None and len(v) > c["hi"]:
+            v = v[:int(c["hi"])]
+    return v
+
+
+def _plain_valid(f: dict, today) -> str | None:
     from datetime import timedelta
     label, kind = f["label"].lower(), f["type"]
     if kind.startswith("select"):
@@ -463,7 +477,8 @@ def field_changes(before: FormState, after: FormState) -> list[tuple[dict, str, 
             if (f["label"], f.get("idx")) in was and was[(f["label"], f.get("idx"))] != f["value"]]
 
 
-async def do_try(page, a: schemas.ExploreAction, before: FormState, today) -> tuple[str, str, list[dict], FormState | None]:
+async def do_try(page, a: schemas.ExploreAction, before: FormState, today,
+                 rules: dict[str, str] | None = None) -> tuple[str, str, list[dict], FormState | None]:
     """One experiment: the named fields get the given values, every other field ordinary valid
     data, then the form is sent. Returns (status, detail, recorded actions, the form as sent)."""
     done, notes, recorded = set(), [], []
@@ -479,7 +494,7 @@ async def do_try(page, a: schemas.ExploreAction, before: FormState, today) -> tu
     for f in before.fields:
         if f["idx"] in done:
             continue
-        v = valid_value(f, today)
+        v = valid_value(f, today, rules)
         if v is None or (f["type"] not in ("checkbox",) and f["value"] == v):
             continue
         if f["type"] == "checkbox" and f["value"] == "checked":
@@ -530,7 +545,7 @@ def suggest(ctx: "CharterContext", state: FormState, tried_values: dict[str, set
         return {"kind": "goto", "url": link["href"]}, f'the charter is about "{link["text"]}", not looked at yet'
     if state.submit:
         for f in fields:
-            for what, v in ideas_for(f, today):
+            for what, v in ideas_for(f, today, rules_of(ctx)):
                 if not is_tried(f, v, tried_values):
                     return {"kind": "try", "values": {f["label"]: v}}, f'the next test idea for {f["label"]}: {what}'
     if link:
@@ -547,9 +562,15 @@ def suggestion_text(s: tuple[dict, str] | None) -> str:
 GEEZ_NAME = "አበበ ከበደ"
 
 
-def ideas_for(f: dict, today) -> list[tuple[str, str]]:
-    """(what, value) ideas for one field, from its type and label: the variations an
-    experienced tester tries, so a small model doesn't have to invent them."""
+def ideas_for(f: dict, today, rules: dict[str, str] | None = None) -> list[tuple[str, str]]:
+    """(what, value) ideas for one field: the boundaries its rules give first, then the
+    variations an experienced tester tries for its type and label."""
+    first = boundary_ideas(f, rules) if rules else []
+    have = {v for _, v in first}
+    return first + [(w, v) for w, v in _type_ideas(f, today) if v not in have]
+
+
+def _type_ideas(f: dict, today) -> list[tuple[str, str]]:
     from datetime import timedelta
     label, kind = f["label"].lower(), f["type"]
     if kind == "date" or "date" in label:
@@ -596,11 +617,12 @@ def is_tried(f: dict, value: str, tried: dict[str, set[str]]) -> bool:
     return value in done or expand(value, f) in done
 
 
-def ideas_text(fields: list[dict], tried: dict[str, set[str]], today, limit_fields: int = 6) -> tuple[str, int, int]:
+def ideas_text(fields: list[dict], tried: dict[str, set[str]], today, limit_fields: int = 6,
+               rules: dict[str, str] | None = None) -> tuple[str, int, int]:
     """The ideas not tried yet for the fields on this page (a few per field), and the tally."""
     lines, total, done = [], 0, 0
     for f in fields[:limit_fields]:
-        ideas = ideas_for(f, today)
+        ideas = ideas_for(f, today, rules)
         total += len(ideas)
         left = [(w, v) for w, v in ideas if not is_tried(f, v, tried)]
         done += len(ideas) - len(left)
@@ -772,7 +794,9 @@ def quoted(quote: str, said: list[str]) -> bool:
 
 GLITCH = re.compile(r"\bundefined\b|\bNaN\b|\[object Object\]|\{\{[^}]*\}\}|Traceback \(most recent call last\)"
                     r"|\b[a-z]+(?:_[a-z0-9]+){2,}\b")
-SUCCESS_WORDS = ("verified", "welcome", "success", "saved", "thank you", "thanks", "created", "confirmed", "done")
+SUCCESS_WORDS = ("verified", "welcome", "success", "saved", "thank you", "thanks", "created", "confirmed", "done",
+                 "placed", "added", "updated", "submitted", "registered", "booked", "received", "signed up",
+                 "subscribed", "joined", "completed", "ordered", "paid")
 REFUSAL_WORDS = ("please", "required", "must", "invalid", "not allowed", "only", "can't", "cannot", "not accepted", "rejected",
                  "not available", "unavailable", "sorry", "isn't possible", "not possible", "declined")
 LISTING_WORDS = ("list", "lists", "listed", "show", "shows", "shown", "display", "displays", "appear", "appears")
@@ -861,11 +885,12 @@ GAP_WORDS = ("required", "missing", "empty", "please enter", "please fill", "ple
 LABEL_NOISE = {"the", "your", "and", "for", "with", "enter", "create", "accept", "date", "number"}
 
 
-def refusal_about_a_gap(before: FormState, said: list[str]) -> bool:
+def refusal_about_a_gap(before: FormState, said: list[str], tested: str | None = None) -> bool:
     """Is a refusal about a field left empty or a box left unticked, rather than about what
     the rule is about? Yes if the answer names one of those fields, or says something is
-    required or missing. "Name must use letters only." with the phone left empty is not."""
-    gaps = [f for f in before.fields if f["type"] != "radio" and f["value"] in ("", "not checked")]
+    required or missing. "Name must use letters only." with the phone left empty is not.
+    `tested`: the field left empty on purpose (an optional one), which is the test, not a gap."""
+    gaps = [f for f in before.fields if f["type"] != "radio" and f["value"] in ("", "not checked") and f["label"] != tested]
     if not gaps:
         return False
     answer = _norm(" ".join(said))
@@ -879,12 +904,118 @@ ETHIOPIC = re.compile(r"[\u1200-\u137F]")
 NEGATIVE_RULE = re.compile(r"\b(reject(?:s|ed)?|refuse[sd]?|not allowed|not accepted|must not|cannot|can't|never|blocked|denied|declined)\b", re.I)
 
 
-def rule_cases(rules: dict[str, str], sent: FormState, today) -> list[tuple[str, str, str, str]]:
+NUM = r"(-?\d{1,7}(?:\.\d+)?)"
+RANGE_RE = re.compile(rf"\b(?:between\s+|from\s+)?{NUM}\s*(?:to|and|through|–)\s*{NUM}\b(.{{0,20}})")
+MAX_RE = re.compile(rf"\b(?:at most|maximum(?: of)?|max\.?|up to|no more than|not more than|less than or equal to)\s*{NUM}\b(.{{0,20}})")
+MIN_RE = re.compile(rf"\b(?:at least|minimum(?: of)?|min\.?|no less than|not less than)\s*{NUM}\b(.{{0,20}})")
+OPTIONAL_RE = re.compile(r"\b(optional|not required|not mandatory|(?:may|can) be (?:left )?(?:empty|blank))\b")
+REQUIRED_RE = re.compile(r"\b(required|mandatory|must be (?:given|entered|filled(?: in)?|provided))\b")
+EMAIL_OK = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
+LENGTH_UNIT = re.compile(r"^\s*(?:characters?|chars?|letters?|digits?|symbols?)\b")
+
+
+def field_rules(f: dict, rules: dict[str, str]) -> list[dict]:
+    """What the rules say about one field, read without AI: optional or required, a number range,
+    a length limit, a valid email or phone. Only rules that name the field count."""
+    def stems(text: str) -> set[str]:  # content words of 3+ letters, plural or not ("Age" counts)
+        return {w[:-1] if w.endswith("s") and len(w) > 4 else w for w in re.findall(r"\w+", text.lower()) if len(w) > 2}
+    words = {w for w in stems(f["label"]) if w not in LABEL_NOISE}
+    out = []
+    for rid, text in rules.items():
+        t = text.lower()
+        if not words or not (words & stems(t)):
+            continue
+        base = {"rid": rid, "text": text}
+        if OPTIONAL_RE.search(t):
+            out.append({**base, "kind": "optional"})
+        elif REQUIRED_RE.search(t):
+            out.append({**base, "kind": "required"})
+        for m in RANGE_RE.finditer(t):
+            lo, hi = sorted((float(m.group(1)), float(m.group(2))))
+            out.append({**base, "kind": "length" if LENGTH_UNIT.match(m.group(3)) else "range", "lo": lo, "hi": hi})
+        for m in MAX_RE.finditer(t):
+            out.append({**base, "kind": "length" if LENGTH_UNIT.match(m.group(2)) else "range", "lo": None, "hi": float(m.group(1))})
+        for m in MIN_RE.finditer(t):
+            out.append({**base, "kind": "length" if LENGTH_UNIT.match(m.group(2)) else "range", "lo": float(m.group(1)), "hi": None})
+        label = f["label"].lower()
+        if ("email" in t and (f["type"] == "email" or "mail" in label)) and re.search(r"\bvalid|\bformat|\baddress", t):
+            out.append({**base, "kind": "email"})
+        if ("phone" in t and (f["type"] == "tel" or "phone" in label or "mobile" in label)) and re.search(r"\bvalid|\bformat|\bdigits", t):
+            out.append({**base, "kind": "phone"})
+    return out
+
+
+def _bounds(c: dict) -> str:
+    n = lambda x: f"{x:g}"  # noqa: E731
+    if c["lo"] is not None and c["hi"] is not None:
+        return f"{n(c['lo'])} to {n(c['hi'])}"
+    return f"at most {n(c['hi'])}" if c["hi"] is not None else f"at least {n(c['lo'])}"
+
+
+def broken_by(c: dict, f: dict, v: str) -> tuple[str, str] | None:
+    """(accept | refuse, what kind of value) when this rule says what the app must do with v."""
+    empty = not (v or "").strip()
+    k = c["kind"]
+    if k == "optional" and empty:
+        return "accept", f'{f["label"]} left empty'
+    if k == "required" and empty:
+        return "refuse", f'{f["label"]} left empty'
+    if k == "range" and not empty:
+        try:
+            x = float(v.strip())
+        except ValueError:
+            return None
+        if (c["lo"] is not None and x < c["lo"]) or (c["hi"] is not None and x > c["hi"]):
+            return "refuse", f'{f["label"]} {v.strip()}, outside {_bounds(c)}'
+    if k == "length" and not empty:
+        n = len(v)
+        if (c["lo"] is not None and n < c["lo"]) or (c["hi"] is not None and n > c["hi"]):
+            return "refuse", f'{f["label"]} of {n} characters, outside {_bounds(c)}'
+    if k == "email" and not empty and not EMAIL_OK.match(v.strip()):
+        return "refuse", f'an email that isn\'t valid, "{v[:40]}",'
+    if k == "phone" and not empty and (re.search(r"[A-Za-z]", v) or len(re.sub(r"\D", "", v)) < 7):
+        return "refuse", f'a phone number that isn\'t valid, "{v[:40]}",'
+    return None
+
+
+def boundary_ideas(f: dict, rules: dict[str, str]) -> list[tuple[str, str]]:
+    """The values at and just past each limit the rules give for this field: boundary values,
+    the first thing an experienced tester tries."""
+    out = []
+    for c in field_rules(f, rules):
+        if c["kind"] == "range":
+            n = lambda x: f"{x:g}"  # noqa: E731
+            if c["lo"] is not None:
+                out += [(f"just under the minimum {n(c['lo'])}", n(c["lo"] - 1)), (f"the minimum {n(c['lo'])}", n(c["lo"]))]
+            if c["hi"] is not None:
+                out += [(f"the maximum {n(c['hi'])}", n(c["hi"])), (f"just over the maximum {n(c['hi'])}", n(c["hi"] + 1))]
+        elif c["kind"] == "length" and c["hi"] is not None:
+            out += [(f"{c['hi']:g} characters, the limit", f"@long{int(c['hi'])}"),
+                    (f"{c['hi'] + 1:g} characters, one over", f"@long{int(c['hi']) + 1}")]
+        elif c["kind"] == "optional":
+            out.append(("left empty (the rules say optional)", ""))
+        elif c["kind"] == "required":
+            out.append(("left empty (the rules say required)", ""))
+    seen, uniq = set(), []
+    for w, v in out:
+        if v not in seen:
+            seen.add(v)
+            uniq.append((w, v))
+    return uniq
+
+
+def rule_cases(rules: dict[str, str], sent: FormState, today) -> list[tuple[str, str, str, str, str, str]]:
     """The rules that speak about a kind of value in the form as sent, and what they expect:
-    (rule id, rule, accept | refuse, field = value (what kind)). A rule naming Ge'ez script and a
-    name in Ge'ez letters, a rule about expired documents and an expiry date in the past."""
+    (rule id, rule, accept | refuse, field = value, what kind of value, field label). A rule naming
+    Ge'ez script and a name in Ge'ez letters, an expired document and a past expiry date, an
+    optional field left empty, a quantity outside its range, an email that isn't valid."""
     out = []
     for f in sent.fields:
+        if f["type"] in ("checkbox", "radio", "password", "file"):
+            continue
+        for c in field_rules(f, rules):
+            if hit := broken_by(c, f, f["value"]):
+                out.append((c["rid"], c["text"], hit[0], f'{f["label"]} = "{f["value"][:60]}"', hit[1], f["label"]))
         v, label = f["value"], f["label"].lower()
         kinds = []
         if ETHIOPIC.search(v):
@@ -897,7 +1028,7 @@ def rule_cases(rules: dict[str, str], sent: FormState, today) -> list[tuple[str,
             for rid, text in rules.items():
                 if any(w in text.lower() for w in words):
                     out.append((rid, text, "refuse" if NEGATIVE_RULE.search(text) else "accept",
-                                f'{f["label"]} = "{v[:60]}" ({what})'))
+                                f'{f["label"]} = "{v[:60]}"', what, f["label"]))
                     break
     return out
 
@@ -1094,7 +1225,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     drain_signals()
                     hints = _pending_hints(run_id)
                     today = utcnow().date()
-                    ideas, _, _ = ideas_text(before.fields, tried_values, today)
+                    ideas, _, _ = ideas_text(before.fields, tried_values, today, rules=rules_of(ctx))
                     tip = suggest(ctx, before, tried_values, dirty, n_submits, visited, today)
                     stepped_in = False
                     if stuck >= STEP_IN_AFTER and tip and not hints:
@@ -1129,10 +1260,10 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     picked = ""
                     if a.pick:  # a fill without a value: the next test idea for that field
                         f = find_field(before, field_name(a))
-                        choice = next(((w, v) for w, v in ideas_for(f, today) if not is_tried(f, v, tried_values)),
+                        choice = next(((w, v) for w, v in ideas_for(f, today, rules_of(ctx)) if not is_tried(f, v, tried_values)),
                                       None) if f else None
-                        if f and (choice or valid_value(f, today) is not None):
-                            what, value = choice or ("ordinary valid data", valid_value(f, today))
+                        if f and (choice or valid_value(f, today, rules_of(ctx)) is not None):
+                            what, value = choice or ("ordinary valid data", valid_value(f, today, rules_of(ctx)))
                             a = a.model_copy(update={"value": value, "pick": False})
                             picked = f"no value given, so Mirmera used the next test idea ({what})"
                     entry = {"n": len(history) + 1, "thought": step.thought,
@@ -1218,7 +1349,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     done_actions: list[dict] | None = None  # what was done, when Mirmera did it its own way
                     try:
                         if a.kind == "try":
-                            entry["status"], entry["detail"], done_actions, sent_form = await do_try(page, a, before, today)
+                            entry["status"], entry["detail"], done_actions, sent_form = await do_try(page, a, before, today, rules_of(ctx))
                             if sent_form:
                                 before = sent_form  # the form as it was sent: what the answer is read against
                         elif a.kind in ("fill", "select", "check", "uncheck") and (f := find_field(before, field_name(a))):
@@ -1370,13 +1501,13 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         did = outcome_of(said, broke)
                         cases = rule_cases(rules_of(ctx), before, today)
                         refusing = [c for c in cases if c[2] == "refuse"]
-                        for rid, rtext, expects, what in cases:
+                        for rid, rtext, expects, first, kind, tested in cases:
                             breaks = (did == "accepted" and expects == "refuse") or \
-                                     (did == "refused" and expects == "accept" and not refusing and not refusal_about_a_gap(before, said))
+                                     (did == "refused" and expects == "accept" and not refusing
+                                      and not refusal_about_a_gap(before, said, tested))
                             if not breaks or ("rule", rid) in reported:
                                 continue
                             should, got = ("refused", "accepted") if expects == "refuse" else ("accepted", "refused")
-                            first, kind = what.split(" (", 1)[0], what.split(" (", 1)[-1].rstrip(")")
                             await keep(schemas.ExploreProblem(
                                 title=f"{kind[:1].upper() + kind[1:]} is {got} although {rid} says it is {should}"[:200],
                                 severity="high" if expects == "refuse" else "medium",
@@ -1475,9 +1606,9 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                              f"{len(history) - used} of them refused: it kept repeating steps that teach nothing."}
                 drain_signals()
                 if last_fields:
-                    _, done, total = ideas_text(last_fields, tried_values, utcnow().date(), limit_fields=20)
+                    _, done, total = ideas_text(last_fields, tried_values, utcnow().date(), limit_fields=20, rules=rules_of(ctx))
                     if total:
-                        left = [f'{f["label"]}: {w}' for f in last_fields for w, v in ideas_for(f, utcnow().date())
+                        left = [f'{f["label"]}: {w}' for f in last_fields for w, v in ideas_for(f, utcnow().date(), rules_of(ctx))
                                 if not is_tried(f, v, tried_values)]
                         _note(session_id, "setup", f"Test ideas tried: {done} of {total}."
                               + (f" Not tried: {'; '.join(left[:8])}" + ("…" if len(left) > 8 else "") if left else ""))
