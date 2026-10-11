@@ -7,7 +7,7 @@ import { EnvironmentChoice } from '../components/BrowserPanel'
 import ClosedIssues from '../components/ClosedIssues'
 import { utcDate } from '../components/Evidence'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
-import { api, projectUrls, suiteExportUrl, SuiteRun, SuiteTest } from '../api/client'
+import { api, projectUrls, suiteExportUrl, SuiteRun, SuiteTest, Triage } from '../api/client'
 import { useProject, useProjectPath } from '../project'
 
 const POLL_MS = 1500
@@ -33,6 +33,27 @@ function tone(outcome: string | null, knownFailing: boolean): { fg: string; bg: 
 function Badge({ outcome, knownFailing }: { outcome: string | null; knownFailing: boolean }) {
   const t = tone(outcome, knownFailing)
   return <span style={{ fontSize: 11, fontWeight: 600, color: t.fg, background: t.bg, padding: '2px 7px', borderRadius: 5, whiteSpace: 'nowrap', border: outcome ? 'none' : '1px solid var(--border)' }}>{t.label}</span>
+}
+
+const TRIAGE_COLOR: Record<Triage['kind'], { fg: string; bg: string }> = {
+  product: { fg: 'var(--danger)', bg: 'var(--danger-bg)' },
+  test: { fg: 'var(--warning)', bg: 'var(--warning-bg)' },
+  data: { fg: 'var(--warning)', bg: 'var(--warning-bg)' },
+  setup: { fg: 'var(--warning)', bg: 'var(--warning-bg)' },
+  environment: { fg: 'var(--info)', bg: 'var(--panel-alt)' },
+  flaky: { fg: 'var(--question)', bg: 'var(--panel-alt)' },
+}
+
+/** Why it went red: the kind, the evidence, and what to do next. */
+function TriageLine({ t }: { t: Triage }) {
+  const c = TRIAGE_COLOR[t.kind]
+  return (
+    <div aria-label="Why" style={{ marginTop: 4, fontSize: 12 }}>
+      <span style={{ fontSize: 10.5, fontWeight: 600, color: c.fg, background: c.bg, padding: '1px 6px', borderRadius: 5, marginRight: 6 }}>{t.label}</span>
+      <span style={{ color: 'var(--text-secondary)' }}>{t.why}</span>
+      <div style={{ color: 'var(--text-tertiary)', fontSize: 11.5, marginTop: 2 }}>Next: {t.next}</div>
+    </div>
+  )
 }
 
 function counts(run: SuiteRun): string {
@@ -140,6 +161,7 @@ export default function Regression() {
                         <td style={{ padding: '6px' }}>
                           <div>{r.bug_title}</div>
                           <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{r.meaning}{r.detail ? ` · ${r.detail}` : ''}</div>
+                          {r.triage && <TriageLine t={r.triage} />}
                         </td>
                         <td className="mono" style={{ padding: '6px', fontSize: 11, color: 'var(--text-quiet)', textAlign: 'right' }}>{(r.duration_ms / 1000).toFixed(1)}s</td>
                       </tr>
@@ -168,7 +190,15 @@ export default function Regression() {
                       <td style={{ padding: '6px' }}>{t.bug_title}</td>
                       <td className="mono" style={{ padding: '6px', fontSize: 11.5, color: 'var(--text-secondary)' }}>{t.filename}</td>
                       <td style={{ padding: '6px', color: 'var(--text-secondary)' }}>{t.known_failing ? 'yes (test.fail)' : 'no'}</td>
-                      <td style={{ padding: '6px' }} title={t.meaning ?? undefined}><Badge outcome={t.outcome} knownFailing={t.known_failing} /></td>
+                      <td style={{ padding: '6px' }} title={t.meaning ?? undefined}>
+                        <Badge outcome={t.outcome} knownFailing={t.known_failing} />
+                        {t.flaky && (
+                          <span title={`${t.flaky.summary}; newest first: ${t.flaky.pattern}`} style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 600,
+                            color: TRIAGE_COLOR.flaky.fg, background: TRIAGE_COLOR.flaky.bg, padding: '2px 6px', borderRadius: 5 }}>
+                            Flaky {t.flaky.pattern}
+                          </span>
+                        )}
+                      </td>
                       <td className="mono" style={{ padding: '6px', fontSize: 11, color: 'var(--text-quiet)' }}>{t.replayed_at ? when(t.replayed_at) : ''}</td>
                     </tr>
                   ))}

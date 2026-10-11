@@ -680,6 +680,13 @@ export interface SuiteTest {
   meaning: string | null
   replayed_at: string | null
   created_at: string
+  /** its result flips run to run */
+  flaky?: { flips: number; runs: number; pattern: string; summary: string } | null
+}
+/** Why a regression test went red: read from what the replay saw, without AI */
+export interface Triage {
+  kind: 'product' | 'test' | 'data' | 'environment' | 'setup' | 'flaky'
+  label: string; why: string; next: string
 }
 export interface SuiteRun {
   id: string
@@ -688,7 +695,8 @@ export interface SuiteRun {
   base_url: string | null
   total: number
   results: { bug_id: string; bug_title: string; test_id: string; known_failing: boolean
-    outcome: ReplayResult['outcome'] | 'error'; meaning: string; duration_ms: number; detail: string }[]
+    outcome: ReplayResult['outcome'] | 'error'; meaning: string; duration_ms: number; detail: string
+    retry_outcome?: ReplayResult['outcome']; triage?: Triage | null }[]
   detail: string | null
   created_at: string
   finished_at: string | null

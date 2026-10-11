@@ -20,6 +20,21 @@ logger = logging.getLogger(__name__)
 ACTIVE: set[str] = set()  # suite run ids being worked on in this process
 
 
+HISTORY = 10  # earlier runs of a test looked at for flakiness
+
+
+def histories(db: DBSession, project_id: str) -> dict[str, list[str]]:
+    """Each test's outcomes in the project's earlier suite runs, newest first."""
+    runs = (db.query(models.RegressionSuiteRun).filter(models.RegressionSuiteRun.project_id == project_id,
+                                                       models.RegressionSuiteRun.status != "running")
+            .order_by(models.RegressionSuiteRun.created_at.desc()).limit(HISTORY).all())
+    out: dict[str, list[str]] = {}
+    for run in runs:
+        for r in run.results or []:
+            out.setdefault(r["test_id"], []).append(r["outcome"])
+    return out
+
+
 def latest_tests(db: DBSession, project_id: str) -> list[tuple[models.Bug, models.RegressionTest]]:
     """(bug, its latest regression test) for every bug in the project that has one, oldest bug first."""
     rows = (db.query(models.Bug, models.RegressionTest)
@@ -60,7 +75,10 @@ def _cancelled(run_id: str) -> bool:
 
 async def run_suite(run_id: str, items: list[dict], *, base_url: str | None, headless: bool,
                     executable_path: str | None) -> None:
-    """items: [{"bug_id", "bug_title", "test_id", "known_failing", "plan", "base_url"}]"""
+    """items: [{"bug_id", "bug_title", "test_id", "known_failing", "plan", "base_url", "history"}]
+    An unexpected result is replayed once more straight away, then triaged: product, test, data,
+    environment, setup, or flaky."""
+    from app.regression.triage import classify, expected
     ACTIVE.add(run_id)
     results: list[dict] = []
     final: dict = {"status": "done"}
@@ -77,6 +95,13 @@ async def run_suite(run_id: str, items: list[dict], *, base_url: str | None, hea
                 row |= {"outcome": result["outcome"], "duration_ms": result["duration_ms"],
                         "meaning": meaning(result["outcome"], item["known_failing"]),
                         "detail": f"step {failed['n']}: {failed['detail']}" if failed else ""}
+                retry = None
+                if not expected(result["outcome"], item["known_failing"]) and result["outcome"] != "incomplete":
+                    # A second try straight away: a result that doesn't repeat is flaky, not news.
+                    retry = await replay(item["plan"], base_url=base_url or item["base_url"], headless=headless,
+                                         executable_path=executable_path)
+                    row["retry_outcome"] = retry["outcome"]
+                row["triage"] = classify(result, item["known_failing"], retry=retry, history=item.get("history"))
                 with SessionLocal() as db:
                     test = db.get(models.RegressionTest, item["test_id"])
                     if test:
@@ -100,24 +125,29 @@ async def run_suite(run_id: str, items: list[dict], *, base_url: str | None, hea
 
 
 def noteworthy(results: list[dict]) -> dict:
-    """What in a run is worth a message: tests that broke or fail, and known bugs that now pass."""
+    """What in a run is worth a message: tests that broke or fail, and known bugs that now pass.
+    A flaky result is neither: it is counted on its own."""
     expected = lambda r: (r["outcome"] == "reproduces") if r["known_failing"] else (r["outcome"] == "passes")  # noqa: E731
-    fixed = [r for r in results if r["known_failing"] and r["outcome"] == "passes"]
-    wrong = [r for r in results if not expected(r) and r not in fixed]
-    return {"fixed": fixed, "wrong": wrong, "as_expected": len(results) - len(fixed) - len(wrong)}
+    flaky = [r for r in results if (r.get("triage") or {}).get("kind") == "flaky"]
+    fixed = [r for r in results if r["known_failing"] and r["outcome"] == "passes" and r not in flaky]
+    wrong = [r for r in results if not expected(r) and r not in fixed and r not in flaky]
+    return {"fixed": fixed, "wrong": wrong, "flaky": flaky,
+            "as_expected": len(results) - len(fixed) - len(wrong) - len(flaky)}
 
 
 async def _tell(run_id: str, results: list[dict]) -> None:
     from app import notify
     n = noteworthy(results)
     if not (n["fixed"] or n["wrong"]):
-        return
+        return  # flaky results alone aren't worth a message
     with SessionLocal() as db:
         project_id = db.get(models.RegressionSuiteRun, run_id).project_id
     parts = ([f"{len(n['wrong'])} test{'s' if len(n['wrong']) != 1 else ''} failed or broke"] if n["wrong"] else []) + \
             ([f"{len(n['fixed'])} known bug{'s' if len(n['fixed']) != 1 else ''} now pass{'es' if len(n['fixed']) == 1 else ''}"] if n["fixed"] else []) + \
+            ([f"{len(n['flaky'])} flaky"] if n["flaky"] else []) + \
             [f"{n['as_expected']} as expected"]
-    detail = "\n".join(f"• {r['bug_title']}: {r['meaning']}" for r in (n["wrong"] + n["fixed"])[:5])
+    detail = "\n".join(f"• {r['bug_title']}: " + (f"{r['triage']['label']}: {r['triage']['why']}" if r.get("triage") else r["meaning"])
+                       for r in (n["wrong"] + n["fixed"])[:5])
     await notify.send_async(project_id, "suite_problem", "Regression run: " + ", ".join(parts), detail, "/regression")
 
 

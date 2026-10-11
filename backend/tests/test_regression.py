@@ -62,9 +62,12 @@ class App(BaseHTTPRequestHandler):
     flaky = False  # Passport fails on every other request only: an intermittent bug
     posts = 0
     delay = 0.0  # seconds before /api/verify answers: a slow backend, like a busy CI machine
+    renamed = False  # the form's "Full name" label is now "Your name": the app changed, the test didn't
 
     def do_GET(self):
         page = {"/": APP, "/plain": PLAIN, "/welcome": WELCOME}.get(self.path)
+        if page and App.renamed:
+            page = page.replace(b">Full name<", b">Your name<")
         self._send(200 if page else 404, page or b"", "text/html")
 
     def do_POST(self):
@@ -95,9 +98,9 @@ def app_url():
 
 @pytest.fixture(autouse=True)
 def bug_present():
-    App.fixed, App.flaky, App.posts, App.delay = False, False, 0, 0.0
+    App.fixed, App.flaky, App.posts, App.delay, App.renamed = False, False, 0, 0.0, False
     yield
-    App.fixed, App.flaky, App.posts, App.delay = False, False, 0, 0.0
+    App.fixed, App.flaky, App.posts, App.delay, App.renamed = False, False, 0, 0.0, False
 
 
 def wait_for(client, session, condition, timeout=10.0):
