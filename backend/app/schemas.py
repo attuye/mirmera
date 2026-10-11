@@ -356,6 +356,8 @@ class BugOut(BaseModel):
     filings: list["BugFilingOut"] = []
     # The exploration agent met the same problem again: where and when
     sightings: list[dict] = []
+    # Mirmera replayed the draft's steps in fresh browsers: {"runs", "reproduced", "results", "at"}
+    confirmation: Optional[dict] = None
 
     model_config = ConfigDict(from_attributes=True)
 

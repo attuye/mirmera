@@ -106,7 +106,7 @@ def score(db, run) -> RunScore:
     s.unusable = sum(1 for x in steps if x.get("kind") == "invalid")
     s.refused = sum(1 for x in steps if x.get("status") in ("refused", "not verified"))
     s.checked = sum(1 for x in steps if x.get("judged"))
-    s.stepped_in = sum(1 for x in steps if x.get("by") == "Mirmera" and x.get("kind") != "tour")
+    s.stepped_in = sum(1 for x in steps if x.get("by") == "Mirmera" and x.get("kind") not in ("tour", "confirm"))
     s.tours = sum(1 for x in steps if x.get("kind") == "tour")
     if run.finished_at and run.created_at:
         s.seconds = round((run.finished_at - run.created_at).total_seconds(), 1)
@@ -214,7 +214,7 @@ def steps_text() -> str:
         for run in db.query(models.ExplorationRun).order_by(models.ExplorationRun.created_at).all():
             out += ["", f"## {run.charter.mission_statement}", "", f"{run.status}: {run.detail or ''}", ""]
             for st in run.steps or []:
-                who = " (Mirmera's flow tour)" if st.get("kind") == "tour" else " (Mirmera stepped in)" if st.get("by") == "Mirmera" else ""
+                who = {"tour": " (Mirmera's flow tour)", "confirm": " (Mirmera's replay)"}.get(st.get("kind"), " (Mirmera stepped in)" if st.get("by") == "Mirmera" else "")
                 out.append(f"{st.get('n')}. [{st.get('kind')}] {st.get('action')} -> {st.get('status')}{who}"
                            + (f": {st['detail']}" if st.get("detail") else ""))
                 if st.get("judged"):

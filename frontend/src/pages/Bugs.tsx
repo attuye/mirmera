@@ -163,6 +163,7 @@ function BugDetail({ bug, onSaved, onDeleted, project, onProject }: {
   return (
     <div>
       <Trail bug={bug} />
+      <Confirmation bug={bug} />
       <Sightings bug={bug} />
       <BugEvidence bug={bug} />
       {editing ? (
@@ -218,6 +219,26 @@ function BugEvidence({ bug }: { bug: BugListItem }) {
           </div>
         )}
       </div>
+    </section>
+  )
+}
+
+/** Mirmera replayed the draft's steps in fresh browsers: a steady bug, or a one-off? */
+function Confirmation({ bug }: { bug: BugListItem }) {
+  const c = bug.confirmation
+  if (!c) return null
+  const all = c.runs > 0 && c.reproduced === c.runs
+  const color = !c.runs ? 'var(--text-tertiary)' : all ? 'var(--danger)' : c.reproduced ? 'var(--warning)' : 'var(--text-secondary)'
+  const why = c.results.find((r) => !r.reproduced)?.detail
+  return (
+    <section aria-label="Replayed by Mirmera" style={{ marginTop: 14, fontSize: 12.5 }}>
+      <span style={{ color: 'var(--text-tertiary)' }}>Replayed by Mirmera in a fresh browser: </span>
+      {c.runs ? (
+        <span style={{ color }}>
+          shown {c.reproduced} of {c.runs} {all ? '(every time)' : c.reproduced ? '(some times)' : '(not again: a one-off?)'}
+        </span>
+      ) : <span style={{ color }}>{c.note ?? 'no steps to replay'}</span>}
+      {why && !all && <div style={{ color: 'var(--text-quiet)', fontSize: 11.5, marginTop: 2 }}>When it didn't show: {why}</div>}
     </section>
   )
 }

@@ -74,7 +74,7 @@ def _without_query(url: str) -> str:
 
 def _seconds(ms: int) -> str:
     return f"{ms / 1000:g} s"
-ACTIONS = {"click", "fill", "select", "check", "uncheck", "press", "upload"}
+ACTIONS = {"click", "dblclick", "fill", "select", "check", "uncheck", "press", "upload"}
 LOCATOR_METHODS = {"testid", "label", "placeholder", "role", "text", "css"}
 
 
@@ -122,6 +122,8 @@ def describe_action(a: dict) -> str:
         return f"upload {', '.join(a.get('files') or []) or 'a file'} to {target}"
     if act == "press":
         return f"press {a.get('key', 'Enter')} in {target}"
+    if act == "dblclick":
+        return f"double-click {target}"
     return f"{act} {target}"
 
 

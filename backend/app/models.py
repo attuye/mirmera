@@ -406,6 +406,8 @@ class Bug(Base):
     # run) is added to this bug as a sighting instead of becoming a second draft.
     signature = Column(String, nullable=True, index=True)
     sightings = Column(JSON, nullable=True)  # [{"session_id", "charter_id", "mission", "at", "url"}]
+    symptom = Column(JSON, nullable=True)  # what shows it, as the agent's checks see it: {"kind", "value", "explanation"}
+    confirmation = Column(JSON, nullable=True)  # its steps replayed in fresh browsers: {"runs", "reproduced", "results", "at"}
 
     session = relationship("Session", back_populates="bugs")
     charter = relationship("Charter")

@@ -167,6 +167,8 @@ export interface Bug {
   filings: BugFiling[]
   /** The exploration agent met the same problem again, in another charter or run */
   sightings?: BugSighting[]
+  /** Mirmera replayed the draft's steps in fresh browsers when its run ended */
+  confirmation?: { runs: number; reproduced: number; results: { run: number; reproduced: boolean; detail: string }[]; note?: string } | null
 }
 
 // ---- Issue trackers ----------------------------------------------------------
