@@ -21,3 +21,12 @@ beyond the KYC form rather than what it was tuned to.
 6. **The total is wrong for 3 or more items.** The total charges one item less
    from 3 on (3 × 350 Birr shows 700). Oracle: claims (price times quantity).
    No check of Mirmera's is built for wrong numbers: the agent has to notice.
+
+## Found with the browser clock (not counted in the six)
+
+7. **Just after midnight, yesterday is accepted as a delivery date.** The form
+   takes "today" from UTC (`new Date().toISOString()`), which in Addis Ababa
+   is a day behind until 3 am. Explore with the clock "just after midnight"
+   (`--clock after-midnight` in the eval) and try yesterday's date: Mirmera
+   checks it against "The delivery date is today or later" by the user's own
+   clock. Oracle: claims. Nobody planted it: it's a common real bug.

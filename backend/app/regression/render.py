@@ -116,8 +116,13 @@ def render(plan: dict, *, bug_title: str, oracle: str, issue_links: list[str],
     out.append("")
     out.append(f"const BASE_URL = process.env.BASE_URL ?? {ts(base_url or 'http://localhost:3000')}")
     out.append("")
+    if plan.get("clock"):  # found with the browser's clock set: the user's time zone and moment
+        out.append(f"test.use({{ timezoneId: {ts(plan['clock']['timezone'])} }})")
+        out.append("")
     out.append(f"test({ts(plan.get('title') or bug_title)}, async ({{ page }}) => {{")
     body: list[str] = []
+    if plan.get("clock"):
+        body.append(f"await page.clock.setFixedTime(new Date({ts(plan['clock']['at'])}))")
     if known_failing:
         body.append(f"test.fail(true, {ts('Known bug: ' + comment(', '.join(issue_links) or bug_title) + '. Remove this line once it is fixed.')})")
         body.append("")

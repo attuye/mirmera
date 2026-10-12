@@ -1431,6 +1431,17 @@ class ExploreConditions(BaseModel):
     network: Literal["normal", "slow"] = "normal"
     locale: Optional[str] = Field(default=None, pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$")  # e.g. "am-ET"
     timezone: Optional[str] = Field(default=None, pattern=r"^[A-Za-z_]+(/[A-Za-z_+\-0-9]+)*$")  # e.g. "Africa/Addis_Ababa"
+    # The browser's clock: a moment at the calendar's edge ("after-midnight", "pagume", "ethiopian-new-year",
+    # "before-midnight", "year-end", "leap-day") or a local date and time ("2026-09-10T23:50").
+    clock: Optional[str] = Field(default=None, max_length=40)
+
+    @field_validator("clock")
+    @classmethod
+    def _known_clock(cls, v: Optional[str]) -> Optional[str]:
+        if v:
+            from app.agent.clock import resolve
+            resolve(v)  # raises with the presets listed
+        return v or None
 
 
 class ExploreRequest(BaseModel):

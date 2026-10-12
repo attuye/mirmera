@@ -162,6 +162,9 @@ async def generate(bug_id: str, payload: schemas.RegressionRequest, db: DBSessio
     resolved["assumptions"] = [*resolved["assumptions"], *dropped]
     if st.reach:
         resolved["reach"] = {"url_contains": st.reach, "recorded": st.anchor}
+    env = bug.environment or {}
+    if env.get("clock_at"):  # found with the browser's clock set: the test sets it too
+        resolved["clock"] = {"at": env["clock_at"], "timezone": env.get("timezone") or "Africa/Addis_Ababa"}
     base_url = resolved["base_url"]
     issue_links = [f"{f.issue_key} {f.issue_url}" for f in bug.filings]
     oracle = f"{ORACLE_NAMES.get(bug.oracle_heuristic, bug.oracle_heuristic)}. {bug.oracle_explanation or ''}".strip()

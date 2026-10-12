@@ -195,7 +195,8 @@ def setup(db, app_url: str, provider: str, checker: str | None, app: str = "kyc"
 
 
 def run_eval(app_url: str, provider: str, *, checker: str | None = None, runs: int = 1, max_steps: int = 25,
-             only: list[str] | None = None, timeout: float = 1800, on_progress=print, app: str = "kyc") -> list[RunScore]:
+             only: list[str] | None = None, timeout: float = 1800, on_progress=print, app: str = "kyc",
+             clock: str | None = None) -> list[RunScore]:
     """Explores each charter `runs` times, one run at a time, and scores every run."""
     from app import models
     from app.agent import explore as agent
@@ -209,7 +210,8 @@ def run_eval(app_url: str, provider: str, *, checker: str | None = None, runs: i
                 if only and key not in only:
                     continue
                 on_progress(f"Run {i + 1}/{runs} · {key}: exploring…")
-                run = start_exploration(db, charter, started_by="eval", max_steps=max_steps)
+                run = start_exploration(db, charter, started_by="eval", max_steps=max_steps,
+                                        conditions={"clock": clock} if clock else None)
                 deadline = time.monotonic() + timeout
                 while time.monotonic() < deadline:
                     time.sleep(1)
@@ -298,6 +300,9 @@ def main(argv: list[str] | None = None) -> int:
                                                     "started here if nothing answers)")
     ap.add_argument("--ai-only", action="store_true",
                     help="Mirmera never steps in when the AI is stuck: measures the model on its own")
+    ap.add_argument("--clock", default=None,
+                    help="the browser's clock, in Addis Ababa time: after-midnight, before-midnight, pagume, "
+                         "ethiopian-new-year, year-end, leap-day, or a moment like 2026-09-11T00:20")
     ap.add_argument("--out", default=None, help="folder for the database, evidence and report (default: a new temp folder)")
     args = ap.parse_args(argv)
     pa = APPS[args.app]
@@ -326,7 +331,7 @@ def main(argv: list[str] | None = None) -> int:
             from app.agent import explore as agent
             agent.STEP_IN_AFTER = 10 ** 6
         scores = run_eval(args.app_url, args.provider, checker=args.checker, runs=args.runs, max_steps=args.steps,
-                          only=args.only, app=args.app)
+                          only=args.only, app=args.app, clock=args.clock)
         text = report(scores, args.provider, args.checker, args.app)
         (folder / "report.md").write_text(text, encoding="utf-8")
         (folder / "steps.md").write_text(steps_text(), encoding="utf-8")

@@ -766,7 +766,13 @@ export interface WorkspaceKey {
   set: boolean; shown: string | null; unreadable: boolean; updated_at: string | null; updated_by: string | null; server_fallback: boolean
 }
 export interface WorkspaceKeys { keys: WorkspaceKey[]; server_keys_for_all: boolean }
-export interface ExploreConditions { device?: 'desktop' | 'phone'; network?: 'normal' | 'slow'; locale?: string; timezone?: string }
+export interface ExploreConditions {
+  device?: 'desktop' | 'phone'; network?: 'normal' | 'slow'; locale?: string; timezone?: string
+  /** The browser's clock: a preset ("after-midnight", "pagume", …) or a local "2026-09-10T23:50" */
+  clock?: string
+  /** Set by Mirmera when the run starts: the moment the clock was fixed at */
+  clock_at?: string
+}
 export interface ExplorationRun {
   id: string; project_id: string; charter_id: string; session_id: string | null
   status: 'running' | 'finished' | 'cancelled' | 'error'; start_url: string; max_steps: number

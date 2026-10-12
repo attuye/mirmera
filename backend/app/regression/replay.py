@@ -230,7 +230,12 @@ async def replay(plan: dict, *, base_url: str | None, headless: bool = True, exe
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=headless, executable_path=executable_path or None)
         try:
-            page = await (await browser.new_context()).new_page()
+            clock = plan.get("clock")  # the bug was found with the browser's clock set: set it the same
+            context = await browser.new_context(**({"timezone_id": clock["timezone"]} if clock else {}))
+            if clock:
+                from datetime import datetime
+                await context.clock.set_fixed_time(datetime.fromisoformat(clock["at"]))
+            page = await context.new_page()
             signals.attach(page)
 
             stopped = False
