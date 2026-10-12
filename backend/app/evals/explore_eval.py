@@ -166,7 +166,7 @@ def score(db, run, planted: list | None = None) -> RunScore:
     s.unusable = sum(1 for x in steps if x.get("kind") == "invalid")
     s.refused = sum(1 for x in steps if x.get("status") in ("refused", "not verified"))
     s.checked = sum(1 for x in steps if x.get("judged"))
-    s.stepped_in = sum(1 for x in steps if x.get("by") == "Mirmera" and x.get("kind") not in ("tour", "confirm"))
+    s.stepped_in = sum(1 for x in steps if x.get("by") == "Mirmera" and x.get("kind") not in ("tour", "confirm", "access"))
     s.tours = sum(1 for x in steps if x.get("kind") == "tour")
     if run.finished_at and run.created_at:
         s.seconds = round((run.finished_at - run.created_at).total_seconds(), 1)

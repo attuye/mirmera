@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { api, AppSignIn, AppSignInChanges, AppSignInTry } from '../api/client'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from './ui'
 
-const EMPTY: AppSignInChanges = { url: '', username_field: 'Email', username: '', password_field: 'Password', submit: '', signed_in_text: '' }
+const EMPTY: AppSignInChanges = { url: '', username_field: 'Email', username: '', password_field: 'Password', submit: '', signed_in_text: '', second_username: '' }
 const FIELDS: { key: keyof AppSignInChanges; label: string; hint?: string; placeholder?: string }[] = [
   { key: 'url', label: 'Sign-in page', placeholder: '/login', hint: 'A path on the app URL, or a full address.' },
   { key: 'submit', label: 'Button', placeholder: 'Sign in', hint: "Its text. Empty: the form's own button." },
@@ -19,6 +19,7 @@ export default function AppSignInSettings({ projectId, hasAppUrl }: { projectId:
   const [saved, setSaved] = useState<AppSignIn | null | undefined>(undefined)
   const [form, setForm] = useState<AppSignInChanges>(EMPTY)
   const [password, setPassword] = useState('')
+  const [password2, setPassword2] = useState('')
   const [busy, setBusy] = useState<'save' | 'try' | 'remove' | null>(null)
   const [tried, setTried] = useState<AppSignInTry | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -26,22 +27,23 @@ export default function AppSignInSettings({ projectId, hasAppUrl }: { projectId:
 
   const load = (s: AppSignIn | null) => {
     setSaved(s)
-    setForm(s ? { url: s.url, username_field: s.username_field, username: s.username, password_field: s.password_field, submit: s.submit, signed_in_text: s.signed_in_text } : EMPTY)
+    setForm(s ? { url: s.url, username_field: s.username_field, username: s.username, password_field: s.password_field, submit: s.submit, signed_in_text: s.signed_in_text, second_username: s.second_username } : EMPTY)
     setPassword('')
+    setPassword2('')
   }
   useEffect(() => { api.getAppSignIn(projectId).then(load).catch((e) => setError(errorText(e))) }, [projectId])
   if (saved === undefined) return <ErrorLine message={error} />
 
-  const dirty = !!password || JSON.stringify(form) !== JSON.stringify(saved ? {
+  const dirty = !!password || !!password2 || JSON.stringify(form) !== JSON.stringify(saved ? {
     url: saved.url, username_field: saved.username_field, username: saved.username, password_field: saved.password_field,
-    submit: saved.submit, signed_in_text: saved.signed_in_text } : EMPTY)
+    submit: saved.submit, signed_in_text: saved.signed_in_text, second_username: saved.second_username } : EMPTY)
 
   async function act(what: 'save' | 'try' | 'remove') {
     setBusy(what); setError(null); setStatus(null)
     try {
       if (what === 'save') {
         if (!form.url.trim()) throw new Error('Give the sign-in page, e.g. /login.')
-        load(await api.saveAppSignIn(projectId, { ...form, ...(password ? { password } : {}) }))
+        load(await api.saveAppSignIn(projectId, { ...form, ...(password ? { password } : {}), ...(password2 ? { second_password: password2 } : {}) }))
         setStatus('Saved. Try it to be sure.')
         setTried(null)
       } else if (what === 'try') {
@@ -78,6 +80,20 @@ export default function AppSignInSettings({ projectId, hasAppUrl }: { projectId:
             <label htmlFor="si-password" style={fieldLabel}>Password</label>
             <input id="si-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} style={input}
               placeholder={saved?.password_set ? 'Saved: type to replace' : ''} autoComplete="new-password" />
+          </div>
+          <div style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--text-tertiary)', marginTop: 4 }}>
+            Second user (optional): after a run, Mirmera opens the first user's own pages (an order, a document) as this
+            user and signed out. Seeing them there is a bug.
+          </div>
+          <div>
+            <label htmlFor="si-second_username" style={fieldLabel}>Second username</label>
+            <input id="si-second_username" value={form.second_username} onChange={(e) => setForm({ ...form, second_username: e.target.value })}
+              style={input} placeholder="another-tester@example.com" autoComplete="off" />
+          </div>
+          <div>
+            <label htmlFor="si-second_password" style={fieldLabel}>Second password</label>
+            <input id="si-second_password" type="password" value={password2} onChange={(e) => setPassword2(e.target.value)} style={input}
+              placeholder={saved?.second_password_set ? 'Saved: type to replace' : ''} autoComplete="new-password" />
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <label htmlFor={`si-${AFTER.key}`} style={fieldLabel}>{AFTER.label}</label>

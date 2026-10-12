@@ -1393,6 +1393,9 @@ class AppSignIn(BaseModel):
     password: Optional[str] = Field(default=None, max_length=500)
     submit: str = Field(default="", max_length=120)  # the button's text; empty: the form's own button, or Enter
     signed_in_text: str = Field(default="", max_length=200)  # words that show it worked, e.g. "Sign out"
+    # A second user, for checking who sees what (their own things, not the first user's)
+    second_username: str = Field(default="", max_length=200)
+    second_password: Optional[str] = Field(default=None, max_length=500)
 
     @field_validator("url")
     @classmethod
@@ -1411,6 +1414,8 @@ class AppSignInOut(BaseModel):
     password_set: bool
     submit: str
     signed_in_text: str
+    second_username: str = ""
+    second_password_set: bool = False
 
 
 class AppSignInTry(BaseModel):
