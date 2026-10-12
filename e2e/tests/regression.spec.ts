@@ -132,6 +132,18 @@ test('regression test: generate from the recording, read the code, replay it to 
     expect((await zip.body()).subarray(0, 2).toString()).toBe('PK')  // a zip file
   })
 
+  await test.step('a red run says why: against a server that is down, it is the environment, not a bug', async () => {
+    await page.getByLabel('Replay against').fill('http://localhost:5199')
+    await page.getByRole('button', { name: /^Run all/ }).click()
+    const latest = page.getByRole('region', { name: 'Latest run' })
+    await expect(latest.getByRole('status')).toContainText('Latest run', { timeout: 60_000 })
+    const why = latest.getByRole('row', { name: title }).getByLabel('Why')
+    await expect(why).toContainText('Environment')
+    await expect(why).toContainText("The app wasn't reachable")
+    await expect(why).toContainText('Next: Check the app is running at that address')
+    if (process.env.SHOTS) await latest.screenshot({ path: `${process.env.SHOTS}/triage.png` })
+  })
+
   await test.step('retest when the issue closes: the bug is still there, and the issue says so', async () => {
     // File the bug to the mock GitHub under its own repo, so the trackers spec's repo stays untouched.
     const [bug] = (await api.sessionBugs(session.id)).filter((b) => b.title === title)

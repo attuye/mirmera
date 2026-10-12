@@ -36,14 +36,17 @@ def _run_or_404(db: DBSession, run_id: str) -> models.RegressionSuiteRun:
 @router.get("/projects/{project_id}/regression-tests", response_model=list[schemas.SuiteTest])
 def list_tests(project_id: str, db: DBSession = Depends(get_db)):
     """Every bug's latest regression test with its last replay."""
+    from app.regression.triage import flakiness
     _project_or_404(db, project_id)
+    history = engine.histories(db, project_id)
     out = []
     for bug, test in engine.latest_tests(db, project_id):
         outcome = (test.replay or {}).get("outcome")
         out.append(schemas.SuiteTest(
             bug_id=bug.id, bug_title=bug.title, test_id=test.id, filename=test.filename, known_failing=test.known_failing,
             base_url=test.base_url, outcome=outcome, meaning=engine.meaning(outcome, test.known_failing) if outcome else None,
-            replayed_at=test.replayed_at, created_at=test.created_at))
+            replayed_at=test.replayed_at, created_at=test.created_at,
+            flaky=flakiness(history.get(test.id, []), test.known_failing)))
     return out
 
 
@@ -58,8 +61,9 @@ def run_all(project_id: str, payload: schemas.SuiteRequest, db: DBSession = Depe
     pairs = engine.latest_tests(db, project_id)
     if not pairs:
         raise HTTPException(409, "No regression tests yet. Generate one from a reviewed bug on the Bugs page.")
+    history = engine.histories(db, project_id)
     items = [{"bug_id": b.id, "bug_title": b.title, "test_id": t.id, "known_failing": t.known_failing,
-              "plan": t.plan, "base_url": t.base_url} for b, t in pairs]
+              "plan": t.plan, "base_url": t.base_url, "history": history.get(t.id, [])} for b, t in pairs]
     run = models.RegressionSuiteRun(project_id=project_id, status="running",
                                     base_url=(payload.base_url or "").rstrip("/") or None, total=len(items), results=[])
     db.add(run)

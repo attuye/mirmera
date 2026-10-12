@@ -66,6 +66,41 @@ def test_another_address_that_is_down_is_broken_and_says_which_step(client, proj
     assert run["base_url"] == "http://127.0.0.1:9"
     row = run["results"][0]
     assert row["outcome"] == "broken" and row["detail"].startswith("step 1:")
+    # triaged: not a bug in the app, the app isn't there (and a second try says the same)
+    assert row["retry_outcome"] == "broken"
+    assert row["triage"]["kind"] == "environment" and row["triage"]["why"].startswith("The app wasn't reachable: Page.goto: net::ERR_")
+
+
+def test_a_test_out_of_date_with_the_app_is_a_test_problem(client, project, recorded_bug, monkeypatch):
+    monkeypatch.setenv("MIRMERA_SECRET_PASSWORD", "s3cret-pass")
+    generate(client, recorded_bug)
+    App.renamed = True  # the app now says "Your name": the test still looks for "Full name"
+    row = run_all(client, project)["results"][0]
+    assert row["outcome"] == "broken"
+    t = row["triage"]
+    assert t["kind"] == "test" and 'fill label "Full name"' in t["why"] and "loaded fine" in t["why"]
+    assert t["next"].startswith("The page changed")
+
+
+def test_a_result_that_flips_on_a_second_try_is_flaky_not_fixed(client, project, recorded_bug, monkeypatch):
+    monkeypatch.setenv("MIRMERA_SECRET_PASSWORD", "s3cret-pass")
+    generate(client, recorded_bug)
+    App.flaky, App.posts = True, 1  # Passport fails on every other request: the next one passes
+    row = run_all(client, project)["results"][0]
+    assert (row["outcome"], row["retry_outcome"]) == ("passes", "reproduces")
+    assert row["triage"]["kind"] == "flaky" and "second try" in row["triage"]["why"]
+    from app.regression.suite import noteworthy
+    assert noteworthy([row])["fixed"] == []  # not reported as "may be fixed"
+
+
+def test_the_tests_list_marks_a_test_whose_result_flips(client, project, recorded_bug, monkeypatch):
+    monkeypatch.setenv("MIRMERA_SECRET_PASSWORD", "s3cret-pass")
+    generate(client, recorded_bug)
+    for fixed in (False, True, False):
+        App.fixed = fixed
+        run_all(client, project)
+    [listed] = client.get(f"/projects/{project['id']}/regression-tests").json()
+    assert listed["flaky"] == {"flips": 2, "runs": 3, "pattern": "✓✗✓", "summary": "the bug showed in 2 of its last 3 runs"}
 
 
 def test_one_run_at_a_time_and_it_can_be_cancelled(client, project, recorded_bug, monkeypatch):

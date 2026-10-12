@@ -1606,6 +1606,7 @@ class SuiteTest(BaseModel):
     meaning: Optional[str] = None
     replayed_at: Optional[datetime] = None
     created_at: datetime
+    flaky: Optional[dict] = None  # its result flips run to run: {"flips", "runs", "pattern", "summary"}
 
 
 class SuiteRunOut(BaseModel):

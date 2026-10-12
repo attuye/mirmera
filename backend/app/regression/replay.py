@@ -189,6 +189,17 @@ async def run_step(page, step: dict, plan_base: str | None, base_url: str | None
     return await _run_action(page, step["action"])
 
 
+async def _where(page) -> dict:
+    """The page's address, title and what it says (status and alert areas) right now."""
+    try:
+        return {"url": page.url, **await page.evaluate("""() => ({
+          title: document.title,
+          messages: [...document.querySelectorAll('[role=status], [role=alert], [aria-live]')]
+            .map((e) => e.innerText.trim()).filter(Boolean).slice(0, 5) })""")}
+    except Exception:
+        return {"url": page.url if not page.is_closed() else "", "title": "", "messages": []}
+
+
 async def replay(plan: dict, *, base_url: str | None, headless: bool = True, executable_path: str | None = None) -> dict:
     from playwright.async_api import async_playwright
 
@@ -201,6 +212,7 @@ async def replay(plan: dict, *, base_url: str | None, headless: bool = True, exe
     checks = [{"n": i + 1, "kind": a["kind"], "why": a.get("why", ""), "status": "not_run", "detail": ""}
               for i, a in enumerate(plan["assertions"])]
     signals = Signals()
+    seen: dict = {}
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=headless, executable_path=executable_path or None)
@@ -223,6 +235,7 @@ async def replay(plan: dict, *, base_url: str | None, headless: bool = True, exe
                 for a, result in zip(plan["assertions"], checks):
                     ok, detail = await _check(page, a, signals.console_errors, signals.failed, signals.page_errors)
                     result["status"], result["detail"] = ("passed" if ok else "failed"), detail
+            seen = await _where(page)  # what the page showed when it stopped: evidence for triage
         finally:
             await browser.close()
 
@@ -241,5 +254,7 @@ async def replay(plan: dict, *, base_url: str | None, headless: bool = True, exe
     else:
         outcome = "passes"
     return {"outcome": outcome, "base_url": base_url or plan_base, "steps": steps, "assertions": checks,
+            "signals": {"failed": signals.failed[:8], "page_errors": signals.page_errors[:5],
+                        "console_errors": signals.console_errors[:5]}, "page": seen,
             **({"reach": {**reach, "reached": reached}} if reach and reached is not None else {}),
             "duration_ms": int((time.monotonic() - started) * 1000)}
