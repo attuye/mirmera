@@ -178,3 +178,102 @@ def test_the_app_survey_maps_the_pages_behind_the_sign_in(client, members_app, c
     assert "/account" in paths and "/login" not in paths and "/logout" not in paths
     account = next(p for p in job["result"]["pages"] if p["path"] == "/account")
     assert [f["label"] for f in account["fields"]] == ["Display name"]
+
+
+# ---------- interruptions ----------
+
+@pytest.fixture
+def profile_app():
+    """A signed-in profile form. Its API never checks the session, and every save writes back the
+    whole profile the page loaded (so a second tab undoes the first)."""
+    sessions = set()
+    profile = {"name": "Abebe Kebede", "city": "Addis Ababa"}
+
+    class App(BaseHTTPRequestHandler):
+        def _signed_in(self):
+            return any(c.strip() in sessions for c in (self.headers.get("Cookie") or "").split(";"))
+
+        def _send(self, status, body=b"", headers=None):
+            self.send_response(status)
+            for k, v in (headers or {"Content-Type": "text/html; charset=utf-8"}).items():
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            path = self.path.split("?")[0]
+            if path == "/login":
+                return self._send(200, b"""<!doctype html><title>Sign in</title><h1>Sign in</h1>
+<form method=post action=/login><label for=e>Email</label><input id=e name=email>
+<label for=p>Password</label><input id=p name=password type=password><button type=submit>Sign in</button></form>""")
+            if not self._signed_in():
+                return self._send(302, headers={"Location": "/login"})
+            return self._send(200, page("Profile", f"""<h1>Your profile</h1>
+<form id=f><label for=n>Display name</label><input id=n value="{profile['name']}">
+<label for=c>City</label><input id=c value="{profile['city']}"><button type=submit>Save</button></form>
+<p role=status id=out></p>
+<script>document.getElementById('f').addEventListener('submit', async (e) => {{
+  e.preventDefault()
+  const r = await fetch('/api/profile', {{ method: 'PUT', body: JSON.stringify({{
+    name: document.getElementById('n').value, city: document.getElementById('c').value }}) }})
+  document.getElementById('out').textContent = r.ok ? 'Profile saved.' : 'Something went wrong.'
+}})</script>""".encode()))
+
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
+            if f"password={PASSWORD}" in body.replace("%2D", "-"):
+                sessions.add("session=abc123")
+                return self._send(302, headers={"Location": "/profile", "Set-Cookie": "session=abc123; Path=/"})
+            return self._send(200, b"<!doctype html><title>Sign in</title><p role=alert>Wrong email or password.</p>")
+
+        def do_PUT(self):
+            profile.update(json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0))))  # no session check
+            return self._send(200, b"{}", {"Content-Type": "application/json"})
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+@pytest.mark.tours
+def test_the_interruptions_tour_signs_out_halfway_and_saves_from_two_tabs(client, profile_app, monkeypatch, chromium_available):  # noqa: F811
+    from app.agent import explore as agent
+    for flag in ("FAULTS", "KEYBOARD", "SAVED_TEXT"):
+        monkeypatch.setattr(agent, flag, () if flag == "FAULTS" else False)
+    project = set_up(client, profile_app)
+    run, provider, bugs, notes = run_on(client, monkeypatch, project, [
+        step("A city", kind="try", values={"City": "Bahir Dar"}),
+        step("Done", kind="done", summary="Saved the profile.")])
+    assert run["status"] == "finished", run["detail"]
+    tour = next(s for s in run["steps"] if s["kind"] == "tour")
+    assert ("interruptions (signed out halfway: PUT /api/profile accepted without a session; "
+            "two tabs: the first change was lost)") in tour["detail"], tour["detail"]
+    assert [b[0] for b in bugs] == [
+        "PUT /api/profile is accepted without a session (signed out, it still answered 200)",
+        'Saving in a second tab undoes the change to "Display name" (a lost update)'], bugs
+    from app import models
+    from app.database import SessionLocal
+    with SessionLocal() as db:
+        drafted = [db.get(models.Bug, b) for b in run["bug_ids"]]
+        assert drafted[0].steps_to_reproduce[0].startswith("Sign out in another tab (or let the session expire)")
+        assert drafted[1].steps_to_reproduce[0].startswith('Open the form in two tabs. In the first, change "Display name"')
+        assert all(b.confirmation is None for b in drafted)  # one browser's steps can't make these happen: not replayed
+    assert any("Signed in to the app" in n for n in notes)  # and the run went on signed in afterwards
+
+
+@pytest.mark.tours
+def test_an_app_that_refuses_once_signed_out_gets_no_interruption_draft(client, members_app, monkeypatch, chromium_available):  # noqa: F811
+    from app.agent import explore as agent
+    for flag in ("FAULTS", "KEYBOARD", "SAVED_TEXT"):
+        monkeypatch.setattr(agent, flag, () if flag == "FAULTS" else False)
+    project = set_up(client, members_app)
+    run, provider, bugs, notes = run_on(client, monkeypatch, project, [
+        step("A name", kind="try", values={"Display name": "Abebe"}),
+        step("Done", kind="done", summary="Saved a name.")])
+    tour = next(s for s in run["steps"] if s["kind"] == "tour")
+    assert "interruptions (signed out halfway: said so)" in tour["detail"], tour["detail"]  # 401, "Something went wrong."
+    assert not any("session" in b[0] or "tab" in b[0] for b in bugs), bugs

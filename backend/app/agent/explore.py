@@ -49,6 +49,7 @@ STEP_IN_AFTER = 3  # steps in a row that taught nothing before Mirmera takes the
 REPLIES_PER_STEP = 2  # model replies per step of the budget, refused ones too: a model that is only ever refused still stops
 SUBMITS = ("click", "press", "try")
 TOURS = True  # after the first accepted submit on a form, Mirmera tours the flow itself
+INTERRUPTIONS = True  # the flow tour signs out halfway and saves the same record from two tabs
 SAVED_TEXT = True  # the flow tour sends Ge'ez and punctuation and checks they come back as typed
 KEYBOARD = True  # the flow tour ends with the form done with the keyboard only
 ACCESS_CHECK = True  # after a signed-in run, the user's own pages are opened signed out and as the second user
@@ -1249,6 +1250,8 @@ def first_step(fault: str) -> str:
     """What has to happen before the steps for a bug Mirmera made happen on purpose."""
     if fault.startswith(("open ", "sign in")):
         return fault[:1].upper() + fault[1:]
+    if fault.startswith(("Sign out ", "Open ")):  # already a step a person does (the interruptions tour)
+        return fault
     return f"Make {fault} (e.g. stop the API, or block the request in the browser's dev tools)"
 
 
@@ -1323,7 +1326,7 @@ def _marker() -> str:
 
 
 async def flow_tour(page, context, signals, form_url: str, answer_url: str, sent: FormState, to_here: list[dict],
-                    rules: dict[str, str], keep) -> str:
+                    rules: dict[str, str], keep, *, sign_in_cfg: dict | None = None, base: str | None = None) -> str:
     """After an accepted submit, what a tester does next: open the answer page by its address
     (a bookmark, a shared link), refresh it, go back, and send the same form twice quickly. A
     server error or a page error on the way is a draft; so is one double click listed twice.
@@ -1449,7 +1452,27 @@ async def flow_tour(page, context, signals, form_url: str, answer_url: str, sent
         if what:
             done.append(what)
         found += n
-    # 7. The keyboard only: Tab through the form, see focus, send it with Enter.
+    # 7. Interruptions: signed out halfway, and the same record saved from two tabs.
+    if INTERRUPTIONS:
+        from app.agent.interrupt import interruptions_tour
+
+        async def fill_sent(pg) -> list[dict]:
+            out = []
+            for f in (await form_state(pg)).fields:
+                was = next((x["value"] for x in sent.fields if x["label"] == f["label"]), None)
+                if was is None or f["type"] in ("password", "file"):
+                    continue
+                status, _, kind = await set_field(pg, f, "fill", was)
+                if status == "ok":
+                    out.append({"type": "action", "action": _rec(kind, f, was), "url": form_url})
+            return out
+        what, n = await interruptions_tour(
+            page, context, signals, form_url, sent, to_here, keep, fill=fill_sent, signed_in=bool(sign_in_cfg),
+            on_sign_in=lambda url: bool(sign_in_cfg) and signed_out(url, sign_in_cfg, base or form_url))
+        if what:
+            done.append(what)
+        found += n
+    # 8. The keyboard only: Tab through the form, see focus, send it with Enter.
     if KEYBOARD:
         from app.agent.keyboard import keyboard_tour
 
@@ -2168,7 +2191,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                 "by": "Mirmera", "t": round(time.monotonic() - filmed_from, 2)}
                         try:
                             tour["detail"] = await flow_tour(page, context, signals, form_url, answer_url, sent_form, to_here,
-                                                             rules_of(ctx), lambda prob, key, on: keep(prob, key, on=(*on, tour)))
+                                                             rules_of(ctx), lambda prob, key, on: keep(prob, key, on=(*on, tour)),
+                                                             sign_in_cfg=sign_in_cfg, base=start_url)
                         except Exception as err:  # a tour is extra: it never stops the run
                             tour["detail"] = f"the tour stopped: {_first_line(err)}"
                         history.append(tour)
