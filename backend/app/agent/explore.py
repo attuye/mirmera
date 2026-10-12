@@ -49,6 +49,7 @@ STEP_IN_AFTER = 3  # steps in a row that taught nothing before Mirmera takes the
 REPLIES_PER_STEP = 2  # model replies per step of the budget, refused ones too: a model that is only ever refused still stops
 SUBMITS = ("click", "press", "try")
 TOURS = True  # after the first accepted submit on a form, Mirmera tours the flow itself
+KEYBOARD = True  # the flow tour ends with the form done with the keyboard only
 ACCESS_CHECK = True  # after a signed-in run, the user's own pages are opened signed out and as the second user
 CONFIRM_RUNS = 3  # each new draft's steps, replayed in this many fresh browsers when the run ends
 # A note that says the app accepted or refused something: only true after a submit.
@@ -1404,6 +1405,24 @@ async def flow_tour(page, context, signals, form_url: str, answer_url: str, sent
         what, n = await failure_tour(page, signals, form_url, sent, to_here, keep)
         done.append(what)
         found += n
+    # 6. The keyboard only: Tab through the form, see focus, send it with Enter.
+    if KEYBOARD:
+        from app.agent.keyboard import keyboard_tour
+
+        async def fill_as_sent(pg) -> list[dict]:
+            out = []
+            for f in (await form_state(pg)).fields:
+                was = next((x["value"] for x in sent.fields if x["label"] == f["label"]), None)
+                if was is None or f["type"] in ("password", "file"):
+                    continue
+                status, _, kind = await set_field(pg, f, "fill", was)
+                if status == "ok":
+                    out.append({"type": "action", "action": _rec(kind, f, was), "url": form_url})
+            return out
+        what, n = await keyboard_tour(page, signals, form_url, sent, to_here,
+                                      keep, fill=fill_as_sent)
+        done.append(what)
+        found += n
     await page.goto(form_url, wait_until="domcontentloaded", timeout=30_000)
     await signals.settle()
     return ", ".join(done) + (f"; {found} problem{'s' if found != 1 else ''} drafted" if found else "; nothing broke")
@@ -2088,7 +2107,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         form_url, answer_url, sent_form, to_here = tour_due
                         tour_due = None
                         tour = {"n": len(history) + 1, "thought": "Mirmera's flow tour after an accepted submit: open the "
-                                "answer page directly, refresh it, go back, and send the form twice quickly.",
+                                "answer page directly, refresh it, go back, send the form twice quickly, make its request fail, "
+                                "and do it with the keyboard only.",
                                 "action": "flow tour", "kind": "tour", "status": "ok", "detail": "", "url": answer_url,
                                 "by": "Mirmera", "t": round(time.monotonic() - filmed_from, 2)}
                         try:

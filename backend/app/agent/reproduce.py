@@ -164,6 +164,9 @@ async def verify(page, symptom: schemas.Symptom | dict, signals: Signals) -> tup
         return (True, hits[0]) if hits else (False, f"no {kind.replace('_', ' ')} containing '{value}' was seen")
     if kind == "url":
         return (value in page.url, f"URL is {page.url}")
+    if kind == "keyboard":  # tab through the page again and check the claim
+        from app.agent.keyboard import check_symptom
+        return await check_symptom(page, value)
     try:
         visible = await page.get_by_text(value).first.is_visible(timeout=2_000)
     except Exception:
