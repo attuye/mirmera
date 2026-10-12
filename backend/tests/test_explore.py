@@ -530,3 +530,25 @@ def test_a_tester_sends_hints_while_it_runs_only(client, kyc, monkeypatch, chrom
     assert done["hints"][0]["step"] is not None  # the agent read it
     assert client.post(f"/exploration-runs/{run['id']}/hints", json={"text": "Too late"}).status_code == 409
     assert client.post(f"/exploration-runs/{run['id']}/hints", json={"text": ""}).status_code == 422
+
+
+def test_tricky_files_are_what_they_say(tmp_path, monkeypatch):
+    from app.agent import files
+    monkeypatch.setattr(files.settings, "evidence_dir", str(tmp_path))
+    read = lambda n: files.path_of(n).read_bytes()  # noqa: E731
+    assert read("id-photo.jpg")[:3] == b"\xff\xd8\xff" and read("sideways.jpg")[2:4] == b"\xff\xe1"
+    assert read("empty.jpg") == b"" and read("program.jpg")[:2] == b"MZ" and read("id-scan.pdf")[:5] == b"%PDF-"
+    assert 24 < files.path_of("big-photo.png").stat().st_size / 1_048_576 < 26
+    assert files.path_of("nothing.png") is None and files.name_of("@file:tiny.png") == "tiny.png"
+    assert [v for _, v in files.ideas()][:2] == ["@file:empty.jpg", "@file:big-photo.png"]
+    assert files.ideas()[-1][1] == "@file:id-scan.pdf"
+
+
+def test_a_file_size_in_a_rule_is_not_a_number_range():
+    from app.agent.explore import boundary_ideas, file_cases, field_rules
+    rule = {"AC1": "The ID photo must be a JPG or PNG, up to 5 MB."}
+    photo = {"label": "ID photo", "type": "file", "value": "id-photo.jpg"}
+    assert field_rules(photo, rule) == [] and boundary_ideas(photo, rule) == []
+    assert file_cases(rule, photo) == []  # the ordinary photo keeps the rule
+    assert [c[4] for c in file_cases(rule, {**photo, "value": "phone-photo.heic"})] == ["a .heic file, not JPG or PNG"]
+    assert [c[4] for c in file_cases(rule, {**photo, "value": "tiny.png"})] == []

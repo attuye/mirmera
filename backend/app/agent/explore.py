@@ -270,10 +270,11 @@ FORM_JS = """() => {
     if (['hidden', 'submit', 'button', 'reset', 'image'].includes(type) || !visible(el)) continue
     let value
     if (type === 'checkbox' || type === 'radio') value = el.checked ? 'checked' : 'not checked'
+    else if (type === 'file') value = el.files && el.files.length ? [...el.files].map((x) => x.name).join(', ') : ''
     else if (type === 'password') value = el.value ? '(filled)' : ''
     else if (el.tagName === 'SELECT') value = el.selectedOptions[0] ? el.selectedOptions[0].text : ''
     else value = el.value
-    fields.push({ label: labelOf(el), type, value, required: el.required, idx,
+    fields.push({ label: labelOf(el), type, value, required: el.required, idx, accept: el.getAttribute('accept') || '',
                   keys: [el.id, el.name, el.getAttribute('placeholder'), el.getAttribute('aria-label')].filter(Boolean),
                   ...(el.tagName === 'SELECT' ? { options: [...el.options].map((o) => o.text) } : {}) })
   }
@@ -433,7 +434,10 @@ def _plain_valid(f: dict, today) -> str | None:
         return opts[0] if opts else None  # the same baseline every time, whatever was chosen before
     if kind == "checkbox":
         return "checked" if f.get("required") or re.search(r"accept|agree|terms|consent|confirm", label) else None
-    if kind in ("radio", "file", "range", "color"):
+    if kind == "file":  # an ordinary photo, or a PDF when that's all the field takes
+        accept = (f.get("accept") or "").lower()
+        return "@file:id-scan.pdf" if "pdf" in accept and "image" not in accept and "jp" not in accept else "@file:id-photo.jpg"
+    if kind in ("radio", "range", "color"):
         return None
     if kind == "date" or "date" in label:
         if "birth" in label or "dob" in label:
@@ -469,6 +473,14 @@ async def set_field(page, f: dict, kind: str, value: str | None) -> tuple[str, s
             return "failed", f'"{f["label"]}" has no option "{value}". Its options: ' + ", ".join(f'"{o}"' for o in f.get("options") or []), kind
         await el.select_option(label=opt, timeout=5_000)
         return "ok", (f'"{f["label"]}" is a dropdown, so Mirmera chose "{opt}"' if kind != "select" else ""), "select"
+    if t == "file":
+        from app.agent import files
+        name = files.name_of(value)
+        if not name:
+            return "failed", (f'"{f["label"]}" takes a file: give one of Mirmera\'s, e.g. "@file:{files.VALID}" or '
+                              '"@file:big-photo.png" (see the test ideas)'), kind
+        await el.set_input_files(str(files.path_of(name)), timeout=10_000)
+        return "ok", f'Mirmera put {files.FILES[name]["what"]} ({name}) in "{f["label"]}"', "upload"
     if t in ("checkbox", "radio"):
         on = kind == "check" or (kind != "uncheck" and (value or "").strip().lower() in TRUTHY)
         await (el.check if on else el.uncheck)(timeout=5_000)
@@ -526,6 +538,8 @@ def _rec(how: str, f: dict, value: str) -> dict:
     out = {"action": how, "locator": {"method": "label", "value": f["label"]}}
     if how in ("fill", "select"):
         out["value"] = value
+    if how == "upload":
+        out["files"] = [value.removeprefix("@file:")]
     return out
 
 
@@ -589,7 +603,10 @@ def _type_ideas(f: dict, today) -> list[tuple[str, str]]:
                 ("far in the future", "2099-12-31")]
     if kind.startswith("select"):
         return [(f"option {o}", o) for o in f.get("options") or []]
-    if kind in ("checkbox", "radio") or kind == "password" or kind == "file":
+    if kind == "file":
+        from app.agent import files
+        return files.ideas()
+    if kind in ("checkbox", "radio") or kind == "password":
         return []
     if kind == "email" or "mail" in label:
         return [("a valid address", "name@example.com"), ("no @", "name.example.com"), ("no domain", "name@"),
@@ -613,6 +630,8 @@ LONG = re.compile(r"@long(\d{1,5})")
 def expand(value: str | None, f: dict | None = None) -> str:
     """"@long300" is 300 characters of filler. A small model asked to copy a long value repeats
     it until its reply runs out (an unusable reply), so ideas name long values by this code."""
+    if value and value.startswith("@file:"):
+        return value[6:]  # a file field holds the file's name
     if not value or "@long" not in value:
         return value or ""
     name = f is not None and "name" in f["label"].lower()
@@ -808,7 +827,7 @@ GLITCH = re.compile(r"\bundefined\b|\bNaN\b|\[object Object\]|\{\{[^}]*\}\}|Trac
                     r"|\b[a-z]+(?:_[a-z0-9]+){2,}\b")
 SUCCESS_WORDS = ("verified", "welcome", "success", "saved", "thank you", "thanks", "created", "confirmed", "done",
                  "placed", "added", "updated", "submitted", "registered", "booked", "received", "signed up",
-                 "subscribed", "joined", "completed", "ordered", "paid")
+                 "subscribed", "joined", "completed", "ordered", "paid", "uploaded", "accepted")
 REFUSAL_WORDS = ("please", "required", "must", "invalid", "not allowed", "only", "can't", "cannot", "not accepted", "rejected",
                  "not available", "unavailable", "sorry", "isn't possible", "not possible", "declined")
 LISTING_WORDS = ("list", "lists", "listed", "show", "shows", "shown", "display", "displays", "appear", "appears")
@@ -942,6 +961,8 @@ def field_rules(f: dict, rules: dict[str, str]) -> list[dict]:
             out.append({**base, "kind": "optional"})
         elif REQUIRED_RE.search(t):
             out.append({**base, "kind": "required"})
+        if f["type"] == "file":  # "up to 5 MB" is a file size, checked by file_cases, not a number range
+            continue
         for m in RANGE_RE.finditer(t):
             lo, hi = sorted((float(m.group(1)), float(m.group(2))))
             out.append({**base, "kind": "length" if LENGTH_UNIT.match(m.group(3)) else "range", "lo": lo, "hi": hi})
@@ -1016,6 +1037,41 @@ def boundary_ideas(f: dict, rules: dict[str, str]) -> list[tuple[str, str]]:
     return uniq
 
 
+FILE_TYPES = re.compile(r"\b(jpe?g|png|pdf|heic|gif|webp|svg)\b")
+MB = re.compile(r"(\d+(?:\.\d+)?)\s*(mb|megabytes?)\b")
+
+
+def file_cases(rules: dict[str, str], f: dict) -> list[tuple]:
+    """A rule about a file field ("JPG or PNG, up to 5 MB") and one of Mirmera's files that breaks it:
+    empty, not what its name says, a type the rule doesn't name, or too big. (Refusals only.)"""
+    from app.agent import files
+    name = f["value"]
+    if name not in files.FILES:
+        return []
+    words = {w for w in re.findall(r"\w+", f["label"].lower()) if len(w) > 2 and w not in LABEL_NOISE}
+    out = []
+    for rid, text in rules.items():
+        t = text.lower()
+        types = {x.replace("jpeg", "jpg") for x in FILE_TYPES.findall(t)}
+        mb = MB.search(t)
+        if not (words & set(re.findall(r"\w+", t))) or not (types or mb or re.search(r"\b(upload|photo|image|file|scan)\b", t)):
+            continue
+        real, ext = files.FILES[name]["real"], name.rsplit(".", 1)[-1].lower().replace("jpeg", "jpg")
+        if real == "empty":
+            why = "an empty file (0 bytes)"
+        elif real in ("exe", "txt"):
+            why = files.FILES[name]["what"]
+        elif types and ext not in types:
+            why = f"a .{ext} file, not {' or '.join(sorted(x.upper() for x in types))}"
+        elif mb and files.size_mb(name) > float(mb.group(1)):
+            why = f"a {files.size_mb(name):.0f} MB file, over {mb.group(1)} MB"
+        else:
+            continue
+        out.append((rid, text, "refuse", f'{f["label"]} = "{name}"', why, f["label"]))
+        break
+    return out
+
+
 def rule_cases(rules: dict[str, str], sent: FormState, today) -> list[tuple[str, str, str, str, str, str]]:
     """The rules that speak about a kind of value in the form as sent, and what they expect:
     (rule id, rule, accept | refuse, field = value, what kind of value, field label). A rule naming
@@ -1023,7 +1079,10 @@ def rule_cases(rules: dict[str, str], sent: FormState, today) -> list[tuple[str,
     optional field left empty, a quantity outside its range, an email that isn't valid."""
     out = []
     for f in sent.fields:
-        if f["type"] in ("checkbox", "radio", "password", "file"):
+        if f["type"] == "file":
+            out += file_cases(rules, f)
+            continue
+        if f["type"] in ("checkbox", "radio", "password"):
             continue
         for c in field_rules(f, rules):
             if hit := broken_by(c, f, f["value"]):
@@ -1839,7 +1898,9 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             breaks = (did == "accepted" and expects == "refuse") or \
                                      (did == "refused" and expects == "accept" and not refusing
                                       and not refusal_about_a_gap(before, said, tested))
-                            if not breaks or ("rule", rid) in reported:
+                            ruled = ("rule", rid, kind) if tested in {x["label"] for x in before.fields if x["type"] == "file"} \
+                                else ("rule", rid)  # each way a file breaks the rule is its own bug
+                            if not breaks or ruled in reported:
                                 continue
                             should, got = ("refused", "accepted") if expects == "refuse" else ("accepted", "refused")
                             await keep(schemas.ExploreProblem(
@@ -1849,7 +1910,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                 actual=f"With {sent_text(before)[:300]}, the app answered: \"{said[0][:200]}\"."[:600],
                                 symptom=schemas.Symptom(kind="text_visible", value=said[0][:300],
                                                         explanation=f"Breaks {rid}: {rtext}"[:600])),
-                                ("rule", rid), f". Breaks {rid}: {rtext}")
+                                ruled, f". Breaks {rid}: {rtext}")
                             entry["judged"] = "breaks"
                             break
 
