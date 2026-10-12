@@ -782,6 +782,7 @@ class ExplorationRun(Base):
     video = Column(String, nullable=True)  # its browser's recording (WebM), in the session's folder
     conditions = Column(JSON, nullable=True)  # {"device": "phone", "network": "slow", "locale", "timezone"}: how it browsed
     hints = Column(JSON, nullable=True)  # [{"id", "text", "by", "at", "step"}]: what a tester (or Mirmera) asked it to try next
+    journey = Column(JSON, nullable=True)  # its steps as a replay does them ({"type": "goto" | "action", ...}): to compare environments
     ai_provider = Column(String, nullable=True)
     ai_model = Column(String, nullable=True)
     prompt_version = Column(String, nullable=True)
@@ -790,3 +791,21 @@ class ExplorationRun(Base):
 
     charter = relationship("Charter")
     session = relationship("Session")
+
+
+class Comparison(Base):
+    """A session's journey done again on two versions or environments, side by side, step by step,
+    with what differed. Nothing is judged by AI: a difference is something both browsers saw."""
+    __tablename__ = "comparisons"
+    id = Column(String, primary_key=True, default=gen_id)
+    session_id = Column(String, ForeignKey("sessions.id"), nullable=False, index=True)
+    env_a = Column(JSON, nullable=False)  # {"name", "url"}
+    env_b = Column(JSON, nullable=False)
+    steps = Column(JSON, default=list)  # [{"n", "description", "a", "b", "differences", "shots"}]
+    journey = Column(JSON, default=list)  # the steps done, as a replay does them
+    summary = Column(Text, nullable=True)
+    status = Column(String, default="done")  # done | error
+    detail = Column(Text, nullable=True)
+    started_by = Column(String, nullable=True)
+    bug_ids = Column(JSON, default=list)  # drafts made from its differences
+    created_at = Column(DateTime, default=utcnow)

@@ -2425,3 +2425,37 @@ class AppMapRequest(BaseModel):
     """Survey the app: follow its links (same site), read its pages and forms, change nothing."""
     base_url: Optional[str] = Field(default=None, pattern=r"^https?://")
     max_pages: int = Field(default=25, ge=1, le=60)
+
+
+class CompareRequest(BaseModel):
+    """Do a session's journey on two versions or environments and list what differs."""
+    a: Environment
+    b: Environment
+
+    @model_validator(mode="after")
+    def _two(self):
+        if self.a.url.rstrip("/") == self.b.url.rstrip("/"):
+            raise ValueError("Pick two different addresses to compare.")
+        if self.a.name == self.b.name:
+            raise ValueError("Give the two environments different names.")
+        return self
+
+
+class ComparisonOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    session_id: str
+    env_a: dict
+    env_b: dict
+    steps: list[dict] = []
+    summary: Optional[str] = None
+    status: str
+    detail: Optional[str] = None
+    started_by: Optional[str] = None
+    bug_ids: list[str] = []
+    created_at: datetime
+
+
+class CompareBugRequest(BaseModel):
+    """Draft a bug from one differing step: the environment that is right is the oracle."""
+    right: Literal["a", "b"] = "a"

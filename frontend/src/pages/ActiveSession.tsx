@@ -9,6 +9,7 @@ import ApiPanel from '../components/ApiPanel'
 import { Screenshot, clock } from '../components/Evidence'
 import TestIdeas from '../components/TestIdeas'
 import AgentBrowser from '../components/AgentBrowser'
+import ComparePanel from '../components/ComparePanel'
 import HeuristicChips from '../components/HeuristicChips'
 import { useProject, useProjectPath, useSessionProject } from '../project'
 
@@ -113,7 +114,7 @@ export default function ActiveSession() {
   const [ending, setEnding] = useState(false)
   const [saving, setSaving] = useState(false)
   const [logError, setLogError] = useState<string | null>(null)
-  const [tool, setTool] = useState<'browser' | 'api'>('browser')
+  const [tool, setTool] = useState<'browser' | 'api' | 'compare'>('browser')
   const [paused, setPaused] = useState(false)
   const [endError, setEndError] = useState<string | null>(null)
   const [pausedAt, setPausedAt] = useState<string | null>(null)
@@ -324,16 +325,17 @@ export default function ActiveSession() {
           {sessionId && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
               <div role="tablist" aria-label="Tools" style={{ display: 'inline-flex', alignSelf: 'flex-start', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-                {(['browser', 'api'] as const).map((t) => (
+                {(['browser', 'api', 'compare'] as const).map((t) => (
                   <button key={t} role="tab" aria-selected={tool === t} onClick={() => setTool(t)} style={{
                     border: 'none', padding: '6px 14px', fontSize: 12.5, cursor: 'pointer', fontFamily: 'var(--font-ui)',
                     background: tool === t ? 'var(--accent-bg)' : 'transparent', color: tool === t ? 'var(--accent)' : 'var(--text-secondary)',
-                  }}>{t === 'browser' ? 'Browser' : 'API'}</button>
+                  }}>{t === 'browser' ? 'Browser' : t === 'api' ? 'API' : 'Compare'}</button>
                 ))}
               </div>
               <div hidden={tool !== 'browser'}><BrowserPanel sessionId={sessionId} runner={runner} disabled={ending} project={project} /></div>
               {tool === 'api' && <ApiPanel sessionId={sessionId} project={project} disabled={ending}
                 onNote={(note) => setNotes((prev) => [...prev, note])} />}
+              {tool === 'compare' && <ComparePanel sessionId={sessionId} project={project} />}
               {agentRun && <div style={{ width: 360 }}><AgentBrowser run={agentRun} /></div>}
             </div>
           )}
