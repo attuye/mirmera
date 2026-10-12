@@ -76,6 +76,7 @@ const ORDER = page('Order', `
       out.className = ''; out.textContent = 'Placing your order…'
       const order = { product: v('product'), qty, name: v('name'), email: v('email'), phone: v('phone'), date: v('date'), total: total() }
       const r = await fetch('/api/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(order) })
+        .catch(() => ({ ok: false }))  // no connection: said like any other failure
       if (!r.ok) return bad('Something went wrong. Please try again.')
       sessionStorage.setItem('order', JSON.stringify({ ...order, id: (await r.json()).id }))
       location.href = '/order/confirmation'

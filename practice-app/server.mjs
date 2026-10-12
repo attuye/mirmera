@@ -57,6 +57,7 @@ const VERIFY = page('Verify identity', `
       out.className = ''; out.textContent = 'Checking…'
       const r = await fetch('/api/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: v('name'), docType: v('doctype'), number: v('docnum'), expiry: v('expiry') }) })
+        .catch(() => ({ ok: false }))  // no connection: said like any other failure
       if (r.ok) { out.className = 'ok'; out.textContent = 'Verified. Welcome to AddisVerify!' }
       else { out.className = 'bad'; out.textContent = 'Something went wrong. Please try again later.' }
     })

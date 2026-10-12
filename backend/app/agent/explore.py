@@ -1134,10 +1134,13 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
             description=(f"{p.actual}\n\nExpected: {p.expected}\n\nWhat Mirmera checked: {evidence}\n\n"
                          f"Found by the Mirmera exploration agent ({provider.name}/{provider.model}). "
                          "A draft: review it before filing."),
-            expected=p.expected, actual=p.actual, steps_to_reproduce=[s["action"]["summary"] if s["type"] == "action"
-                                                                     else f"open {s['url']}" for s in (edited or [])],
+            expected=p.expected, actual=p.actual,
+            steps_to_reproduce=([f"Make {p.fault} (e.g. stop the API, or block the request in the browser's dev tools)"]
+                                if p.fault else []) + [s["action"]["summary"] if s["type"] == "action"
+                                                       else f"open {s['url']}" for s in (edited or [])],
             reproduction_trail=trail, edited_steps=edited,
-            environment={"browser": "Chromium (headless)", "url": page_url, "found_by": TESTER},
+            environment={"browser": "Chromium (headless)", "url": page_url, "found_by": TESTER,
+                         **({"injected_failure": p.fault} if p.fault else {})},
             signature=key, sightings=[], symptom=p.symptom.model_dump(),
         )
         db.add(bug)
@@ -1275,9 +1278,126 @@ async def flow_tour(page, context, signals, form_url: str, answer_url: str, sent
                 found += 1
         done.append(f"looked in {place['text']}: listed {listed} time{'s' if listed != 1 else ''}"
                     + (" (after a second try)" if attempt else ""))
+    # 5. The server failing: the same form sent while its request fails, as a user meets it one day.
+    if FAULTS:
+        what, n = await failure_tour(page, signals, form_url, sent, to_here, keep)
+        done.append(what)
+        found += n
     await page.goto(form_url, wait_until="domcontentloaded", timeout=30_000)
     await signals.settle()
     return ", ".join(done) + (f"; {found} problem{'s' if found != 1 else ''} drafted" if found else "; nothing broke")
+
+
+FAULTS = (("500", "the server answers 500"), ("offline", "the network drops"))
+BUSY = re.compile(r"…|\.\.\.$|\b(loading|please wait|checking|placing|processing|saving|sending|submitting|verifying)\b", re.I)
+FAILURE_WORDS = ("went wrong", "error", "failed", "try again", "couldn't", "could not", "unable", "unavailable",
+                 "no connection", "offline", "network", "problem", "sorry")
+
+
+def _failing(mode: str, home: str, hit: list[str]):
+    """A route handler that fails the app's own fetch/XHR calls that change something (not GETs).
+    (One argument only: Playwright passes the request too to a handler that takes two.)"""
+    from urllib.parse import urlsplit
+
+    async def fail(route):
+        req = route.request
+        if req.method != "GET" and req.resource_type in ("fetch", "xhr") and origin(req.url) == home:
+            hit.append(f"{req.method} {urlsplit(req.url).path or '/'}")
+            if mode == "500":
+                await route.fulfill(status=500, content_type="application/json",
+                                    body='{"error": "Internal Server Error (made by Mirmera\'s failure tour)"}')
+            else:
+                await route.abort("internetdisconnected")
+        else:
+            await route.continue_()
+    return fail
+
+
+async def failure_tour(page, signals, form_url: str, sent: FormState, to_here: list[dict], keep) -> tuple[str, int]:
+    """The form sent again while the request it makes fails: first the server answers 500, then
+    the network drops. A user meets both one day; a tester can rarely make them happen. What the
+    page should do: say so, keep what was typed, and never claim success. Drafted when it throws,
+    stays on "Checking…", says nothing, says it worked, or loses what was typed. (No AI.)
+    Returns (what it did, drafts made)."""
+    from urllib.parse import urlsplit
+    home = origin(form_url)
+    found, broke = 0, []
+    for mode, how in FAULTS:
+        await page.goto(form_url, wait_until="domcontentloaded", timeout=30_000)
+        await signals.settle()
+        form = await form_state(page)
+        rec = to_here[:1] + [{"type": "goto", "url": form_url}]
+        for f in form.fields:
+            was = next((x["value"] for x in sent.fields if x["label"] == f["label"]), None)
+            if was is None or f["type"] in ("password", "file"):
+                continue
+            status, _, kind = await set_field(page, f, "fill", was)
+            if status == "ok":
+                rec.append({"type": "action", "action": _rec(kind, f, was), "url": form_url})
+        hit: list[str] = []
+        fail = _failing(mode, home, hit)
+
+        before = await form_state(page)
+        e0 = len(signals.page_errors)
+        await page.route("**/*", fail)
+        try:
+            await page.get_by_role("button", name=sent.submit, exact=True).first.click(timeout=5_000)
+            await signals.settle(timeout_ms=5_000)
+            await page.wait_for_timeout(3_000)  # what still says "Checking…" after this is stuck
+            after = await form_state(page)
+        finally:
+            await page.unroute("**/*", fail)
+        if not hit:
+            return "the form sent no request Mirmera could fail", found
+        request = hit[0]
+        rec.append({"type": "action", "url": form_url,
+                    "action": {"action": "click", "locator": {"method": "role", "role": "button", "name": sent.submit}}})
+        fault = f"{request} {'answering 500' if mode == '500' else 'with the network down'}"
+        said, _ = answer_of(schemas.ExploreAction(kind="click", locator=schemas.PlanLocator(method="role", role="button",
+                                                                                         name=sent.submit)), before, after)
+        text = " ".join(said).lower()
+        left = [f for f in before.fields if f["type"] in ("text", "email", "tel", "number", "textarea") and f["value"]
+                and next((a["value"] for a in after.fields if a["label"] == f["label"]), f["value"]) == ""]
+        problems = []
+        for c in crashes([], signals.page_errors[e0:]):
+            c.title = f"When {how}, {sent.submit} throws: {c.symptom.value}"[:200]
+            c.actual = f"With {fault} (Mirmera's failure tour), the page threw: {c.symptom.value}."[:600]
+            problems.append(c)
+        busy = next((l for l in after.lines if BUSY.search(l) and l not in before.lines), None) or \
+            next((m for m in after.messages if BUSY.search(m)), None)
+        moved = after.url.split("#")[0] != before.url.split("#")[0]
+        if said and outcome_of(said, []) == "accepted" or (moved and not any(w in text for w in FAILURE_WORDS)):
+            claim = said[0] if said else after.heading or after.title
+            problems.append(schemas.ExploreProblem(
+                title=f"Says \"{claim[:60]}\" although {how}"[:200], severity="high",
+                expected="When the request fails, the page says it didn't work, so the user doesn't think it did.",
+                actual=f"With {fault} (Mirmera's failure tour), the page answered: \"{claim[:200]}\"."[:600],
+                symptom=schemas.Symptom(kind="text_visible", value=claim[:300], explanation=f"Success shown while {how}")))
+        elif busy:
+            problems.append(schemas.ExploreProblem(
+                title=f"When {how}, the page stays on \"{busy[:60]}\""[:200], severity="medium",
+                expected="When the request fails, the page stops waiting and says what happened.",
+                actual=f"With {fault} (Mirmera's failure tour), the page still says \"{busy[:200]}\" seconds later."[:600],
+                symptom=schemas.Symptom(kind="text_visible", value=busy[:300], explanation=f"Stuck waiting while {how}")))
+        elif not any(w in text for w in FAILURE_WORDS) and not problems:
+            problems.append(schemas.ExploreProblem(
+                title=f"No message when {how}"[:200], severity="medium",
+                expected="When the request fails, the page says it didn't work and what to do.",
+                actual=f"With {fault} (Mirmera's failure tour), nothing on the page changed or said so."[:600],
+                symptom=schemas.Symptom(kind="text_absent", value="went wrong", explanation=f"Silent while {how}")))
+        if left and not moved:
+            problems.append(schemas.ExploreProblem(
+                title=f"What was typed is lost when {how}"[:200], severity="low",
+                expected="After a failed submit the form keeps what the user typed, so they can try again.",
+                actual=f"With {fault}, {', '.join(f['label'] for f in left[:3])} came back empty."[:600],
+                symptom=schemas.Symptom(kind="text_absent", value=left[0]["value"][:300], explanation="Typed value gone")))
+        for prob in problems:
+            prob.same_as = f"fault:{mode}:{urlsplit(form_url).path}:{_norm(prob.title)[:80]}"
+            prob.fault = fault
+            if await keep(prob, ("fault", mode, prob.title), (page, signals, rec)):
+                found += 1
+        broke.append(f"{how}: " + ("; ".join(p.title for p in problems) if problems else "it said so"))
+    return "made the request fail (" + " · ".join(broke) + ")", found
 
 
 class SignInFailed(Exception):
@@ -1304,7 +1424,8 @@ async def confirm_drafts(pw, bug_ids: list[str], session_id: str, headless: bool
     from app.agent.reproduce import _reruns
     with SessionLocal() as db:
         todo = [(b.id, b.title, b.edited_steps, b.symptom) for b in (db.get(models.Bug, i) for i in bug_ids)
-                if b and b.session_id == session_id and b.symptom and not b.confirmation]
+                if b and b.session_id == session_id and b.symptom and not b.confirmation
+                and not (b.environment or {}).get("injected_failure")]  # its steps alone can't make the failure happen
     out = []
     for bug_id, title, steps, symptom in todo:
         if steps:
@@ -1512,7 +1633,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         _save(run_id, steps=list(history))
                         continue
                     if a.kind == "problem":
-                        a.problem.same_as = None  # Mirmera's own key, never the AI's
+                        a.problem.same_as = a.problem.fault = None  # Mirmera's own, never the AI's
                         key = (a.problem.symptom.kind, a.problem.symptom.value)
                         if key in reported:
                             entry["status"], entry["detail"] = "refused", "already reported in this session"

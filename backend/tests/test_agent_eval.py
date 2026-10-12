@@ -1076,14 +1076,17 @@ def test_after_an_accepted_submit_mirmera_tours_the_flow(client, booking_app, mo
         steps = list(r.steps)
         notes = [n.content for n in db.get(models.Session, r.session_id).notes]
     assert [s["kind"] for s in steps] == ["goto", "try", "tour", "done", "confirm"]  # the tour costs none of the 3 steps
-    assert [b.reproducibility for b in bugs] == ["always", "always"]  # both show again from their steps alone
+    assert [b.reproducibility for b in bugs[:2]] == ["always", "always"]  # both show again from their steps alone
     tour = steps[2]
     assert tour["by"] == "Mirmera" and tour["status"] == "drafted"
     assert "opened /booked directly" in tour["detail"] and "clicked Book twice quickly" in tour["detail"]
     assert "looked in My bookings: listed 2 times" in tour["detail"]
     titles = [b.title for b in bugs]
     assert titles == ["Page error: Cannot read properties of null (reading 'name')",
-                      "Clicking Book twice quickly creates it twice"]
+                      "Clicking Book twice quickly creates it twice",
+                      # and this page doesn't check what its server answers: the failure tour sees it
+                      'Says "Booking confirmed." although the server answers 500',
+                      "When the network drops, Book throws: Failed to fetch"]
     assert bugs[0].actual.startswith("Opening /booked directly (a bookmark or a shared link): ")
     assert bugs[0].steps_to_reproduce and bugs[0].steps_to_reproduce[0].startswith("open ") and bugs[0].steps_to_reproduce[0].endswith("/booked")
     assert 'Every booking is listed in My bookings, once.' in bugs[1].expected
@@ -1175,3 +1178,105 @@ def test_each_new_draft_is_replayed_in_fresh_browsers_before_a_tester_reads_it(c
     from app import schemas
     with SessionLocal() as db:  # what the bug page gets
         assert schemas.BugOut.model_validate(db.get(models.Bug, bug.id)).confirmation["reproduced"] == 3
+
+
+# ---------- making the server fail ----------
+
+FRAGILE = b"""<!doctype html><title>Profile</title><h1>Your profile</h1>
+<form id=f><label for=n>Display name</label><input id=n><button type=submit>Save</button></form><p role=status id=out></p>
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const out = document.getElementById('out')
+  out.textContent = 'Saving\\u2026'
+  const r = await fetch('/api/save', { method: 'POST', body: document.getElementById('n').value })  // no catch
+  document.getElementById('n').value = ''
+  out.textContent = 'Saved!'  // whatever the server answered
+})
+</script>"""
+
+
+@pytest.fixture
+def fragile_app():
+    """A form that ignores what its server answers and doesn't handle a dropped network."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class App(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(FRAGILE)
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+def explore_once(monkeypatch, app_url, replies, steps=4):
+    from app import models
+    from app.database import SessionLocal
+    from app.routers.explore import start_exploration
+    from app.agent import explore as agent
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: Scripted(replies))
+    with SessionLocal() as db:
+        project = models.Project(org_id="eval", name="Fragile", app_url=app_url, default_ai_provider="mock")
+        db.add(project)
+        db.flush()
+        charter = models.Charter(project_id=project.id, mission_statement="Explore the profile form", source="eval")
+        db.add(charter)
+        db.commit()
+        r = start_exploration(db, charter, started_by="eval", max_steps=steps)
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            db.expire_all()
+            r = db.get(models.ExplorationRun, r.id)
+            if r.status != "running" and r.id not in agent.ACTIVE:
+                break
+        return list(r.steps), [db.get(models.Bug, b) for b in r.bug_ids]
+
+
+@pytest.mark.tours
+@pytest.mark.confirm
+def test_the_failure_tour_makes_the_server_fail_and_checks_what_the_page_does(client, fragile_app, monkeypatch, chromium_available):  # noqa: F811
+    """Error paths a tester can rarely reach: the same form sent while its request answers 500,
+    then with the network down. This page claims success, loses what was typed, throws, and keeps
+    saying "Saving…"."""
+    steps, bugs = explore_once(monkeypatch, fragile_app, [
+        step("Open", kind="goto", url=fragile_app),
+        step("Save", kind="try", values={"Display name": "Abebe Kebede"}),
+        step("Done", kind="done", summary="Saved a name.")])
+    tour = next(s for s in steps if s["kind"] == "tour")
+    assert "made the request fail" in tour["detail"], tour["detail"]
+    titles = [b.title for b in bugs]
+    assert titles == ['Says "Saved!" although the server answers 500',
+                      "What was typed is lost when the server answers 500",
+                      "When the network drops, Save throws: Failed to fetch",
+                      'When the network drops, the page stays on "Saving…"'], titles
+    assert bugs[0].environment["injected_failure"] == "POST /api/save answering 500"
+    assert bugs[0].steps_to_reproduce[0].startswith("Make POST /api/save answering 500")
+    assert all(b.confirmation is None for b in bugs)  # its steps alone can't make the server fail: not replayed
+
+
+@pytest.mark.tours
+def test_a_page_that_handles_failures_gets_no_draft(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
+    steps, bugs = explore_once(monkeypatch, practice_app, [
+        step("Open", kind="goto", url=f"{practice_app}/verify"),
+        step("Valid", kind="try", values={}),
+        step("Done", kind="done", summary="Verified once.")])
+    tour = next(s for s in steps if s["kind"] == "tour")
+    assert "the server answers 500: it said so · the network drops: it said so" in tour["detail"], tour["detail"]
+    assert not any("server" in b.title or "network" in b.title for b in bugs)
