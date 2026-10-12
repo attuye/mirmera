@@ -169,6 +169,8 @@ export interface Bug {
   sightings?: BugSighting[]
   /** Mirmera replayed the draft's steps in fresh browsers when its run ended */
   confirmation?: { runs: number; reproduced: number; results: { run: number; reproduced: boolean; detail: string }[]; note?: string } | null
+  /** A tester said it isn't a bug, and why: Mirmera won't draft the same problem again here */
+  dismissal?: { reason: DismissReason; note: string | null; by: string | null; at: string } | null
 }
 
 // ---- Issue trackers ----------------------------------------------------------
@@ -479,6 +481,16 @@ export type AppSignInChanges = Omit<AppSignIn, 'password_set' | 'second_password
 export interface AppSignInTry { ok: boolean; detail: string; url: string; screenshot: string | null }
 
 export interface BugSighting { session_id: string; charter_id: string; mission: string; at: string; url: string }
+
+export type DismissReason = 'by_design' | 'not_a_problem' | 'not_important' | 'duplicate' | 'cant_reproduce'
+export const DISMISS_REASONS: Record<DismissReason, string> = {
+  by_design: 'Works as intended', not_a_problem: 'Not a problem', not_important: 'Not worth fixing',
+  duplicate: 'Already reported', cant_reproduce: "Can't reproduce",
+}
+export interface Dismissal {
+  id: string; bug_id: string | null; fingerprint: string; title: string; reason: DismissReason; note: string | null
+  by: string | null; created_at: string
+}
 
 export interface BugListItem extends Bug {
   charter_mission: string
@@ -1123,6 +1135,11 @@ export const api = {
     request<Deleted>(`/projects/${projectId}?confirm=${encodeURIComponent(confirm)}`, { method: 'DELETE' }),
   deleteSession: (sessionId: string) => request<Deleted>(`/sessions/${sessionId}`, { method: 'DELETE' }),
   deleteBug: (bugId: string) => request<Deleted>(`/bugs/${bugId}`, { method: 'DELETE' }),
+  dismissBug: (bugId: string, reason: DismissReason, note?: string) =>
+    request<Bug>(`/bugs/${bugId}/dismiss`, { method: 'POST', body: JSON.stringify({ reason, note: note || null }) }),
+  undoDismissal: (bugId: string) => request<Bug>(`/bugs/${bugId}/dismiss`, { method: 'DELETE' }),
+  dismissals: (projectId: string) => request<Dismissal[]>(`/projects/${projectId}/dismissals`),
+  forgetDismissal: (id: string) => request<void>(`/dismissals/${id}`, { method: 'DELETE' }),
   getProject: (projectId: string) => request<Project>(`/projects/${projectId}`),
   authConfig: () => request<AuthConfig>('/auth/config'),
   me: () => request<Me>('/auth/me'),

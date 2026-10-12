@@ -38,7 +38,7 @@ from app.timeutil import utcnow
 logger = logging.getLogger(__name__)
 
 PROMPT = (Path(__file__).resolve().parents[1] / "ai" / "prompts" / "explore_step.md").read_text(encoding="utf-8")
-PROMPT_VERSION = "explore-step-v3"
+PROMPT_VERSION = "explore-step-v4"  # v4: dismissed_by_the_team
 JUDGE_PROMPT = (Path(__file__).resolve().parents[1] / "ai" / "prompts" / "explore_judge.md").read_text(encoding="utf-8")
 TESTER = "Mirmera agent"
 HISTORY_LIMIT = 20
@@ -226,6 +226,7 @@ class CharterContext:
     earlier: list[str] = field(default_factory=list)  # what earlier runs on this charter or story found
     app_map: str | None = None  # the app's pages and forms, from the latest survey
     signed_in_as: str | None = None  # Mirmera signed in to the app as this user before the run
+    dismissed: list[str] = field(default_factory=list)  # what the team said isn't a bug here, and why
 
     def has_rules(self) -> bool:
         return bool(self.criteria or self.risks)
@@ -787,6 +788,8 @@ def _user_message(ctx: CharterContext, history: list[dict], observation: str, st
         charter["story"] = ctx.story
     if ctx.earlier:
         charter["earlier_runs"] = ctx.earlier
+    if ctx.dismissed:
+        charter["dismissed_by_the_team"] = ctx.dismissed
     if ctx.app_map:
         charter["app_map"] = ctx.app_map
     if ctx.signed_in_as:
@@ -1260,9 +1263,21 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
     """(bug id, new?): a bug draft, or, when the project already has a draft of the same problem, a sighting
     added to it: the tester reviews each problem once, and sees everywhere it showed up."""
     key = signature(p)
+    before = ""
     with SessionLocal() as db:
         session = db.get(models.Session, session_id)
         project_id = session.charter.project_id if session and session.charter else None
+        if project_id:  # a tester dismissed this problem before: not drafted again (see app/dismissals.py)
+            from app import dismissals
+            from app.trackers.fingerprint import fingerprint_of
+            d = dismissals.for_problem(db, project_id, fingerprint_of(key, p.symptom.model_dump(), p.title))
+            if d and d.reason not in dismissals.STILL_DRAFTED:
+                db.add(models.Note(session_id=session_id, tag="test",
+                                   content=f"Not drafted again: {p.title} ({dismissals.describe(d)})."[:4000]))
+                db.commit()
+                return None, False
+            if d:
+                before = f"\n\nSeen again after it was {dismissals.describe(d)}: it may be intermittent."
         same = (db.query(models.Bug).join(models.Charter, models.Bug.charter_id == models.Charter.id)
                 .filter(models.Charter.project_id == project_id, models.Bug.signature == key)
                 .order_by(models.Bug.created_at).first()) if project_id else None
@@ -1274,6 +1289,11 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
             if screenshot and screenshot.is_file():
                 db.add(models.Evidence(session_id=session_id, bug_id=same.id, kind="screenshot",
                                        summary=f"Seen again: {p.title}"[:300], url=page_url, file_path=str(screenshot)))
+            if (same.dismissal or {}).get("reason") == "cant_reproduce":  # it showed again: reproducible after all
+                for d in db.query(models.Dismissal).filter(models.Dismissal.bug_id == same.id).all():
+                    db.delete(d)
+                same.dismissal = None
+                same.last_change = "Seen again after it was dismissed as can't reproduce: a draft again"
             db.add(models.Note(session_id=session_id, tag="bug",
                                content=f"Seen again: {same.title} (already drafted, so added to that bug)"[:4000]))
             db.commit()
@@ -1289,7 +1309,7 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
             session_id=session_id, charter_id=charter_id, title=p.title[:200], severity=p.severity,
             description=(f"{p.actual}\n\nExpected: {p.expected}\n\nWhat Mirmera checked: {evidence}\n\n"
                          f"Found by the Mirmera exploration agent ({provider.name}/{provider.model}). "
-                         "A draft: review it before filing."),
+                         "A draft: review it before filing." + before),
             expected=p.expected, actual=p.actual,
             steps_to_reproduce=([clock_line()] if CLOCK_AT.get() else []) + ([first_step(p.fault)] if p.fault else []) + [s["action"]["summary"] if s["type"] == "action"
                                                        else f"open {s['url']}" for s in (edited or [])],
@@ -1870,11 +1890,14 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                 except Exception:
                                     shot = None
                                 bid, new = _draft_bug(session_id, charter_id, a.problem, detail, steps, page.url, shot, provider)
-                                if bid not in bug_ids:
-                                    bug_ids.append(bid)
                                 reported.add(key)
-                                entry["status"], entry["detail"] = "drafted", detail
-                                _seen(entry, new)
+                                if bid is None:
+                                    entry["status"], entry["detail"] = "dismissed before", "the team dismissed this problem before"
+                                else:
+                                    if bid not in bug_ids:
+                                        bug_ids.append(bid)
+                                    entry["status"], entry["detail"] = "drafted", detail
+                                    _seen(entry, new)
                         if entry["status"] != "drafted":
                             entry["detail"] += "." + suggestion_text(tip)
                         stuck = 0 if entry["status"] == "drafted" else stuck + 1
@@ -1991,12 +2014,13 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                             shot = None
                                         bid, new = _draft_bug(session_id, charter_id, problem,
                                                               f"{evidence}. Breaks {rule_id}: {rule_text}", steps, page.url, shot, provider)
-                                        if bid not in bug_ids:
-                                            bug_ids.append(bid)
                                         reported.add(key)
-                                        entry["status"] = "drafted"
-                                        _seen(entry, new)
-                                        if g := generalize_hint(before, problem.title):
+                                        if bid is not None:
+                                            if bid not in bug_ids:
+                                                bug_ids.append(bid)
+                                            entry["status"] = "drafted"
+                                            _seen(entry, new)
+                                        if bid is not None and (g := generalize_hint(before, problem.title)):
                                             _mirmera_hint(run_id, g)
                                 entry["detail"] += f"; breaks {rule_id}"
                             elif verdict == "consistent":
@@ -2024,6 +2048,9 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         except Exception:
                             shot = None
                         bid, new = _draft_bug(session_id, charter_id, problem, evidence + extra, rec, pg.url, shot, provider)
+                        if bid is None:  # dismissed before by the team
+                            reported.add(key)
+                            return False
                         if bid not in bug_ids:
                             bug_ids.append(bid)
                         reported.add(key)
@@ -2234,6 +2261,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     except Exception:
                         shot = None
                     bid, new = _draft_bug(session_id, charter_id, problem, evidence, rec, pg.url, shot, provider)
+                    if bid is None:
+                        return False
                     if bid not in bug_ids:
                         bug_ids.append(bid)
                     access["status"] = "drafted"

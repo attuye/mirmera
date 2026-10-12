@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import Sidebar from '../components/Sidebar'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton, ConfirmDelete } from '../components/ui'
-import { api, BugFiling, BugListItem, BugReview, Evidence, ORACLES, OracleHeuristic, Project, Reproducibility } from '../api/client'
+import { api, BugFiling, BugListItem, BugReview, DISMISS_REASONS, DismissReason, Evidence, ORACLES, OracleHeuristic, Project, Reproducibility } from '../api/client'
 import FileToTracker, { FilingLinks } from '../components/FileToTracker'
 import RegressionTestPanel from '../components/RegressionTestPanel'
 import ReproductionPanel from '../components/ReproductionPanel'
@@ -16,10 +16,11 @@ const KIND_STYLE = {
   unreviewed: { label: 'Needs review', fg: 'var(--warning)', bg: 'var(--warning-bg)' },
   bug: { label: 'Bug', fg: 'var(--danger)', bg: 'var(--danger-bg)' },
   question: { label: 'Question', fg: 'var(--question)', bg: '#221C2B' },
+  dismissed: { label: 'Dismissed', fg: 'var(--text-tertiary)', bg: 'var(--panel-alt)' },
 }
-type Filter = 'all' | 'unreviewed' | 'bug' | 'question'
+type Filter = 'all' | 'unreviewed' | 'bug' | 'question' | 'dismissed'
 
-const kindOf = (b: BugListItem): keyof typeof KIND_STYLE => b.kind ?? 'unreviewed'
+const kindOf = (b: BugListItem): keyof typeof KIND_STYLE => b.dismissal ? 'dismissed' : b.kind ?? 'unreviewed'
 const lines = (text: string) => text.split('\n').map((l) => l.trim()).filter(Boolean)
 
 export default function Bugs() {
@@ -47,13 +48,15 @@ export default function Bugs() {
     setBugs((prev) => prev.map((b) => (b.id === updated.id ? updated : b)))
   }
 
+  const live = bugs.filter((b) => !b.dismissal)  // dismissed ones only under Dismissed
   const counts: Record<Filter, number> = {
-    all: bugs.length,
-    unreviewed: bugs.filter((b) => !b.kind).length,
-    bug: bugs.filter((b) => b.kind === 'bug').length,
-    question: bugs.filter((b) => b.kind === 'question').length,
+    all: live.length,
+    unreviewed: bugs.filter((b) => kindOf(b) === 'unreviewed').length,
+    bug: bugs.filter((b) => kindOf(b) === 'bug').length,
+    question: bugs.filter((b) => kindOf(b) === 'question').length,
+    dismissed: bugs.filter((b) => kindOf(b) === 'dismissed').length,
   }
-  const shown = filter === 'all' ? bugs : bugs.filter((b) => kindOf(b) === filter)
+  const shown = filter === 'all' ? live : bugs.filter((b) => kindOf(b) === filter)
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
@@ -66,13 +69,13 @@ export default function Bugs() {
         </p>
 
         <div role="tablist" aria-label="Filter bugs" style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
-          {(['all', 'unreviewed', 'bug', 'question'] as Filter[]).map((f) => (
+          {(['all', 'unreviewed', 'bug', 'question', 'dismissed'] as Filter[]).map((f) => (
             <button key={f} role="tab" aria-selected={filter === f} onClick={() => setFilter(f)} style={{
               ...quietButton,
               color: filter === f ? 'var(--text)' : 'var(--text-secondary)',
               borderColor: filter === f ? 'var(--text-secondary)' : 'var(--border)',
             }}>
-              {{ all: 'All', unreviewed: 'Needs review', bug: 'Bugs', question: 'Questions' }[f]} ({counts[f]})
+              {{ all: 'All', unreviewed: 'Needs review', bug: 'Bugs', question: 'Questions', dismissed: 'Dismissed' }[f]} ({counts[f]})
             </button>
           ))}
         </div>
@@ -160,6 +163,7 @@ function BugDetail({ bug, onSaved, onDeleted, project, onProject }: {
     }
   }
 
+  if (bug.dismissal) return <Dismissed bug={bug} onSaved={onSaved} />
   return (
     <div>
       <Trail bug={bug} />
@@ -190,11 +194,68 @@ function BugDetail({ bug, onSaved, onDeleted, project, onProject }: {
       {!editing && <ReproductionPanel bug={bug} onTestCreated={() => setTestVersion((v) => v + 1)} />}
       <ErrorLine message={error} />
       {!editing && (
-        <div style={{ marginTop: 18, paddingTop: 12, borderTop: '1px solid var(--border-soft)' }}>
+        <div style={{ marginTop: 18, paddingTop: 12, borderTop: '1px solid var(--border-soft)', display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          {bug.filings.length === 0 && <DismissForm bug={bug} onSaved={onSaved} />}
           <ConfirmDelete label="Delete bug" question="Delete this bug with its tests and runs? Filed issues stay in the tracker."
             onConfirm={async () => { await api.deleteBug(bug.id); onDeleted() }} />
         </div>
       )}
+    </div>
+  )
+}
+
+/** Not a bug, and why: Mirmera won't draft the same problem again in this project. */
+function DismissForm({ bug, onSaved }: { bug: BugListItem; onSaved: (b: BugListItem) => void }) {
+  const [open, setOpen] = useState(false)
+  const [reason, setReason] = useState<DismissReason>('by_design')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  if (!open) return <button onClick={() => setOpen(true)} style={quietButton}>Dismiss…</button>
+  async function save() {
+    setBusy(true); setError(null)
+    try {
+      const updated = await api.dismissBug(bug.id, reason, note.trim())
+      onSaved({ ...updated, charter_mission: bug.charter_mission, filings: bug.filings })
+    } catch (e) { setError(errorText(e)) } finally { setBusy(false) }
+  }
+  return (
+    <form aria-label="Dismiss" onSubmit={(e) => { e.preventDefault(); save() }}
+      style={{ flex: 1, minWidth: 280, border: '1px solid var(--border)', borderRadius: 8, padding: 12 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 8, lineHeight: 1.45 }}>
+        Not a bug? Say why. Mirmera won't draft this problem again in {'this project'}
+        {reason === 'cant_reproduce' ? ' (unless it shows again: then it comes back as a draft)' : ''}, and its AI is told why.
+      </div>
+      <label style={fieldLabel} htmlFor={`why-${bug.id}`}>Why</label>
+      <select id={`why-${bug.id}`} value={reason} onChange={(e) => setReason(e.target.value as DismissReason)} style={{ ...input, marginBottom: 8 }}>
+        {(Object.keys(DISMISS_REASONS) as DismissReason[]).map((r) => <option key={r} value={r}>{DISMISS_REASONS[r]}</option>)}
+      </select>
+      <label style={fieldLabel} htmlFor={`note-${bug.id}`}>Note for the team and Mirmera (optional)</label>
+      <input id={`note-${bug.id}`} value={note} onChange={(e) => setNote(e.target.value)} style={input}
+        placeholder="e.g. The confirmation is shown once, on purpose" />
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        <button type="submit" disabled={busy} style={primaryButton(busy)}>{busy ? 'Dismissing…' : 'Dismiss'}</button>
+        <button type="button" onClick={() => setOpen(false)} style={quietButton}>Cancel</button>
+      </div>
+      <ErrorLine message={error} />
+    </form>
+  )
+}
+
+function Dismissed({ bug, onSaved }: { bug: BugListItem; onSaved: (b: BugListItem) => void }) {
+  const d = bug.dismissal!
+  const [error, setError] = useState<string | null>(null)
+  return (
+    <div role="status" style={{ marginTop: 14, fontSize: 13, lineHeight: 1.5 }}>
+      <div><strong>{DISMISS_REASONS[d.reason]}</strong>{d.by ? `, said ${d.by}` : ''} on {new Date(d.at).toLocaleDateString()}.
+        {d.note && <> "{d.note}"</>}</div>
+      <div style={{ color: 'var(--text-secondary)', fontSize: 12.5 }}>
+        {d.reason === 'cant_reproduce' ? 'If Mirmera meets it again, it comes back as a draft.' : "Mirmera won't draft this problem again in this project."}
+      </div>
+      <button style={{ ...quietButton, marginTop: 8 }} onClick={async () => {
+        try { const b = await api.undoDismissal(bug.id); onSaved({ ...b, charter_mission: bug.charter_mission, filings: bug.filings }) } catch (e) { setError(errorText(e)) }
+      }}>Undo: a draft again</button>
+      <ErrorLine message={error} />
     </div>
   )
 }
