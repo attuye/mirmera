@@ -15,6 +15,7 @@ from the tester's recorded browser."""
 import asyncio
 import os
 import time
+import weakref
 from urllib.parse import urlsplit
 
 from app.regression.plan import describe, is_same_origin
@@ -51,6 +52,9 @@ def _first_line(err: Exception) -> str:
     return text[0][:300] if text else type(err).__name__
 
 
+UPLOADED: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()  # pages a file was put on: their clicks may send it
+
+
 async def _run_action(page, a: dict) -> str | None:
     """Performs one recorded action. Returns a reason if it has to be skipped."""
     if a.get("in_frame"):
@@ -63,6 +67,8 @@ async def _run_action(page, a: dict) -> str | None:
             await page.wait_for_load_state("networkidle", timeout=3_000)
         except Exception:
             pass
+        if page in UPLOADED:  # a file is on its way: a big one takes a while, and its late answer
+            await UPLOADED[page].settle(timeout_ms=30_000)  # must not land on the next step's page
     elif act == "dblclick":  # a user's double click: two clicks before the page answers
         await target.dblclick(timeout=STEP_TIMEOUT)
         try:  # let both requests reach the app before the next step moves on
@@ -85,7 +91,14 @@ async def _run_action(page, a: dict) -> str | None:
     elif act == "press":
         await target.press(a.get("key") or "Enter", timeout=STEP_TIMEOUT)
     elif act == "upload":
-        return "uploads a file; the rendered test reads it from a fixtures/ folder"
+        from app.agent import files
+        paths = [files.path_of(n) for n in a.get("files") or []]
+        if not paths or not all(paths):  # a tester's own file: not here to upload
+            return "uploads a file; the rendered test reads it from a fixtures/ folder"
+        await target.set_input_files([str(x) for x in paths], timeout=STEP_TIMEOUT)
+        if page not in UPLOADED:
+            UPLOADED[page] = Signals()
+            UPLOADED[page].attach(page)
     return None
 
 

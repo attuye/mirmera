@@ -1280,3 +1280,97 @@ def test_a_page_that_handles_failures_gets_no_draft(client, practice_app, monkey
     tour = next(s for s in steps if s["kind"] == "tour")
     assert "the server answers 500: it said so · the network drops: it said so" in tour["detail"], tour["detail"]
     assert not any("server" in b.title or "network" in b.title for b in bugs)
+
+
+# ---------- tricky files ----------
+
+UPLOAD = b"""<!doctype html><title>Upload your ID</title><h1>Upload your ID</h1>
+<form id=f><label for=n>Full name</label><input id=n>
+<label for=photo>ID photo</label><input id=photo type=file accept="image/jpeg,image/png">
+<button type=submit>Upload</button></form><p role=status id=out></p>
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const file = document.getElementById('photo').files[0]
+  const out = document.getElementById('out')
+  if (!file) { out.textContent = 'Please choose a photo.'; return }
+  const data = new FormData(); data.append('photo', file)
+  const r = await fetch('/api/upload', { method: 'POST', body: data }).catch(() => ({ ok: false }))
+  out.textContent = r.ok ? 'Uploaded ' + file.name : 'Something went wrong.'
+})
+</script>"""
+
+
+@pytest.fixture
+def upload_app():
+    """An ID upload that checks nothing about the file: not its type, not its size, not if it's empty."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class App(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(UPLOAD)
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+@pytest.mark.confirm
+def test_tricky_files_are_offered_uploaded_and_checked_against_the_rule(client, upload_app, monkeypatch, chromium_available):  # noqa: F811
+    from app import models
+    from app.database import SessionLocal
+    from app.routers.explore import start_exploration
+    from app.agent import explore as agent
+    provider = Scripted([step("Open", kind="goto", url=upload_app),
+                         step("A normal photo", kind="try", values={}),
+                         step("Too big", kind="try", values={"ID photo": "@file:big-photo.png"}),
+                         step("Not a photo", kind="try", values={"ID photo": "@file:program.jpg"}),
+                         step("Empty", kind="try", values={"ID photo": "@file:empty.jpg"}),
+                         step("Ge'ez name", kind="try", values={"ID photo": "@file:መታወቂያ.png"}),
+                         step("Done", kind="done", summary="Uploaded five files.")])
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+    with SessionLocal() as db:
+        project = models.Project(org_id="eval", name="Uploads", app_url=upload_app, default_ai_provider="mock")
+        db.add(project)
+        db.flush()
+        story = models.Story(project_id=project.id, title="Upload an ID",
+                             description="Acceptance criteria\n- The ID photo must be a JPG or PNG, up to 5 MB.")
+        charter = models.Charter(project_id=project.id, mission_statement="Explore uploading the ID photo", source="eval")
+        charter.stories = [story]
+        db.add_all([story, charter])
+        db.commit()
+        r = start_exploration(db, charter, started_by="eval", max_steps=8)
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            db.expire_all()
+            r = db.get(models.ExplorationRun, r.id)
+            if r.status != "running" and r.id not in agent.ACTIVE:
+                break
+        steps = list(r.steps)
+        bugs = [db.get(models.Bug, b) for b in r.bug_ids]
+    ideas = provider.users[1].split("<ideas>")[1].split("</ideas>")[0]
+    assert '- ID photo: an empty file (0 bytes) ("@file:empty.jpg"); a 25 MB photo ("@file:big-photo.png")' in ideas
+    assert [s["status"] for s in steps[1:6]] == ["ok", "drafted", "drafted", "drafted", "ok"], [(s["action"], s["detail"]) for s in steps]
+    assert "Uploaded id-photo.jpg" in steps[1]["detail"]  # the baseline: an ordinary photo
+    assert [b.title for b in bugs] == [
+        "A 25 MB file, over 5 MB is accepted although AC1 says it is refused",
+        "A program (.exe) renamed .jpg is accepted although AC1 says it is refused",
+        "An empty file (0 bytes) is accepted although AC1 says it is refused"]
+    # the uploads are steps a replay can do too: every draft shows again from its steps alone
+    assert [b.reproducibility for b in bugs] == ["always", "always", "always"], [b.confirmation for b in bugs]
