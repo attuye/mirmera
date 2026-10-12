@@ -58,6 +58,10 @@ def start_exploration(db: DBSession, charter: models.Charter, *, started_by: str
     if any(r.id in agent.ACTIVE for r in running):
         raise ExploreProblem("Mirmera is already exploring this charter.")
 
+    if conditions and conditions.get("browser") not in (None, "chromium"):
+        from app import browsers
+        if not browsers.installed(conditions["browser"]):
+            raise ExploreProblem(browsers.install_hint(conditions["browser"]))
     if conditions and conditions.get("clock"):  # fixed now, so the run, its drafts and their replays share one moment
         from app.agent import clock
         conditions = {**conditions, "timezone": conditions.get("timezone") or clock.DEFAULT_TZ}

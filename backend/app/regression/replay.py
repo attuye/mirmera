@@ -213,7 +213,9 @@ async def _where(page) -> dict:
         return {"url": page.url if not page.is_closed() else "", "title": "", "messages": []}
 
 
-async def replay(plan: dict, *, base_url: str | None, headless: bool = True, executable_path: str | None = None) -> dict:
+async def replay(plan: dict, *, base_url: str | None, headless: bool = True, executable_path: str | None = None,
+                 browser: str | None = None) -> dict:
+    """browser: the engine to replay in; None: the plan's (the browser its bug was found in), else Chromium."""
     from playwright.async_api import async_playwright
 
     started = time.monotonic()
@@ -228,7 +230,9 @@ async def replay(plan: dict, *, base_url: str | None, headless: bool = True, exe
     seen: dict = {}
 
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=headless, executable_path=executable_path or None)
+        from app.browsers import launch
+        engine = browser or plan.get("browser") or "chromium"
+        browser = await launch(pw, engine, headless=headless, executable_path=executable_path)
         try:
             clock = plan.get("clock")  # the bug was found with the browser's clock set: set it the same
             context = await browser.new_context(**({"timezone_id": clock["timezone"]} if clock else {}))
@@ -271,7 +275,7 @@ async def replay(plan: dict, *, base_url: str | None, headless: bool = True, exe
         outcome = "reproduces"
     else:
         outcome = "passes"
-    return {"outcome": outcome, "base_url": base_url or plan_base, "steps": steps, "assertions": checks,
+    return {"outcome": outcome, "base_url": base_url or plan_base, "browser": engine, "steps": steps, "assertions": checks,
             "signals": {"failed": signals.failed[:8], "page_errors": signals.page_errors[:5],
                         "console_errors": signals.console_errors[:5]}, "page": seen,
             **({"reach": {**reach, "reached": reached}} if reach and reached is not None else {}),

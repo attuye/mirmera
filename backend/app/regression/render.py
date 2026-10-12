@@ -116,8 +116,11 @@ def render(plan: dict, *, bug_title: str, oracle: str, issue_links: list[str],
     out.append("")
     out.append(f"const BASE_URL = process.env.BASE_URL ?? {ts(base_url or 'http://localhost:3000')}")
     out.append("")
+    if plan.get("browser") and plan["browser"] != "chromium":  # the bug was found in this engine
+        out.append(f"test.use({{ browserName: {ts(plan['browser'])} }})")
     if plan.get("clock"):  # found with the browser's clock set: the user's time zone and moment
         out.append(f"test.use({{ timezoneId: {ts(plan['clock']['timezone'])} }})")
+    if plan.get("browser") and plan["browser"] != "chromium" or plan.get("clock"):
         out.append("")
     out.append(f"test({ts(plan.get('title') or bug_title)}, async ({{ page }}) => {{")
     body: list[str] = []

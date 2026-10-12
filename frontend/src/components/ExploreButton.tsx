@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Bot } from 'lucide-react'
-import { api, ExplorationRun } from '../api/client'
+import { api, BROWSER_LABEL, BrowserEngine, ExplorationRun } from '../api/client'
 import { useProjectPath } from '../project'
 import { errorText, quietButton } from './ui'
 
@@ -45,10 +45,12 @@ export default function ExploreButton({ charterId, onStarted, onFinished }: { ch
 
   const [as, setAs] = useState<'desktop' | 'phone' | 'phone-slow'>('desktop')
   const [clock, setClock] = useState('')
+  const [engine, setEngine] = useState<BrowserEngine>('chromium')
   async function start() {
     setBusy(true); setError(null)
     const device = as === 'desktop' ? {} : { device: 'phone' as const, network: as === 'phone-slow' ? 'slow' as const : 'normal' as const }
-    const conditions = as === 'desktop' && !clock ? undefined : { ...device, ...(clock ? { clock } : {}) }
+    const conditions = as === 'desktop' && !clock && engine === 'chromium' ? undefined
+      : { ...device, ...(clock ? { clock } : {}), ...(engine !== 'chromium' ? { browser: engine } : {}) }
     try { setRun(await api.exploreCharter(charterId, conditions ? { conditions } : {})); onStarted?.() } catch (e) { setError(errorText(e)) } finally { setBusy(false) }
   }
 
@@ -79,6 +81,11 @@ export default function ExploreButton({ charterId, onStarted, onFinished }: { ch
             title="The day and time Mirmera's browser thinks it is, in Addis Ababa time: date bugs hide at the calendar's edges"
             style={{ fontSize: 11.5, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)' }}>
             {CLOCKS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+          <select aria-label="Browser" value={engine} onChange={(e) => setEngine(e.target.value as BrowserEngine)}
+            title="The browser engine: users don't all use Chrome (Firefox and WebKit need: python -m playwright install firefox webkit)"
+            style={{ fontSize: 11.5, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)' }}>
+            {(Object.keys(BROWSER_LABEL) as BrowserEngine[]).map((b) => <option key={b} value={b}>in {BROWSER_LABEL[b]}</option>)}
           </select>
           {run && (
             <span role="status">

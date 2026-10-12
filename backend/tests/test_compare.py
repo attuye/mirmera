@@ -103,7 +103,7 @@ def test_the_same_journey_on_two_versions_shows_what_differs(client, session, tw
     bug = client.get(f"/bugs/{r.json()['bug_ids'][0]}").json()
     assert bug["title"] == 'On v2, POST /api/orders -> 500 after click button "Place order"'
     assert bug["oracle_heuristic"] == "comparable_products"
-    assert bug["steps_to_reproduce"][0] == f"Use v2 ({v2})" and bug["steps_to_reproduce"][1] == f"open {v2}/"
+    assert bug["steps_to_reproduce"][0] == f"Use v2 ({v2}) in Chromium" and bug["steps_to_reproduce"][1] == f"open {v2}/"
     from app import models
     from app.database import SessionLocal
     with SessionLocal() as db:

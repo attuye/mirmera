@@ -138,11 +138,15 @@ async def compare(steps: list[dict], envs: list[dict], *, recorded_base: str | N
     names = (envs[0]["name"], envs[1]["name"])
     results = []
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=headless, executable_path=executable_path or None)
+        from app.browsers import launch
+        engines = {}  # each side's browser engine, launched once
         try:
             sides = []
             for env in envs:
-                page = await (await browser.new_context(viewport={"width": 1280, "height": 800})).new_page()
+                name = env.get("browser") or "chromium"
+                if name not in engines:
+                    engines[name] = await launch(pw, name, headless=headless, executable_path=executable_path)
+                page = await (await engines[name].new_context(viewport={"width": 1280, "height": 800})).new_page()
                 signals = Signals()
                 signals.attach(page)
                 sides.append({"env": env, "page": page, "signals": signals, "since": {}, "stopped": False})
@@ -186,7 +190,8 @@ async def compare(steps: list[dict], envs: list[dict], *, recorded_base: str | N
                 if sides[0]["stopped"] and sides[1]["stopped"]:
                     break
         finally:
-            await browser.close()
+            for b in engines.values():
+                await b.close()
     differing = [r for r in results if r["differences"]]
     summary = (f"The same {len(results)} steps on {names[0]} and {names[1]}: "
                + (f"{len(differing)} step{'s differ' if len(differing) != 1 else ' differs'} (step "

@@ -3,14 +3,16 @@
  *  can become a bug draft with the other environment as its oracle. */
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, Comparison, comparisonShotUrl, Environment, Project, projectUrls } from '../api/client'
+import { api, BROWSER_LABEL, BrowserEngine, Comparison, comparisonShotUrl, Environment, Project, projectUrls } from '../api/client'
+
+type Side = Environment & { browser: BrowserEngine }
 import { useProjectPath } from '../project'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from './ui'
 
 const box: React.CSSProperties = { border: '1px solid var(--border)', borderRadius: 8, padding: 12, background: 'var(--panel)' }
 
 function EnvPicker({ label, value, onChange, environments }: {
-  label: string; value: Environment; onChange: (e: Environment) => void; environments: Environment[]
+  label: string; value: Side; onChange: (e: Side) => void; environments: Environment[]
 }) {
   return (
     <fieldset style={{ border: 'none', padding: 0, margin: 0, flex: 1, minWidth: 0 }}>
@@ -18,12 +20,15 @@ function EnvPicker({ label, value, onChange, environments }: {
       <input aria-label={`${label} name`} value={value.name} placeholder="name, e.g. production"
         onChange={(e) => onChange({ ...value, name: e.target.value })} style={{ ...input, marginBottom: 6 }} />
       <input aria-label={`${label} address`} value={value.url} placeholder="https://…"
-        onChange={(e) => onChange({ ...value, url: e.target.value })} style={input} />
+        onChange={(e) => onChange({ ...value, url: e.target.value })} style={{ ...input, marginBottom: 6 }} />
+      <select aria-label={`${label} browser`} value={value.browser} onChange={(e) => onChange({ ...value, browser: e.target.value as BrowserEngine })} style={input}>
+        {(Object.keys(BROWSER_LABEL) as BrowserEngine[]).map((b) => <option key={b} value={b}>{BROWSER_LABEL[b]}</option>)}
+      </select>
       {environments.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
           {environments.map((e) => (
             <button key={e.url} type="button" title={e.url} aria-pressed={value.url === e.url}
-              onClick={() => onChange({ name: e.name === 'default' ? 'app' : e.name, url: e.url })}
+              onClick={() => onChange({ ...value, name: e.name === 'default' ? 'app' : e.name, url: e.url })}
               style={{ ...quietButton, fontSize: 11, padding: '3px 8px' }}>{e.name}</button>
           ))}
         </div>
@@ -35,8 +40,8 @@ function EnvPicker({ label, value, onChange, environments }: {
 export default function ComparePanel({ sessionId, project }: { sessionId: string; project: Project | null }) {
   const path = useProjectPath()
   const environments = project ? projectUrls(project) : []
-  const [a, setA] = useState<Environment>(() => environments[0] ? { name: environments[0].name === 'default' ? 'app' : environments[0].name, url: environments[0].url } : { name: '', url: '' })
-  const [b, setB] = useState<Environment>(() => environments[1] ?? { name: '', url: '' })
+  const [a, setA] = useState<Side>(() => environments[0] ? { name: environments[0].name === 'default' ? 'app' : environments[0].name, url: environments[0].url, browser: 'chromium' } : { name: '', url: '', browser: 'chromium' })
+  const [b, setB] = useState<Side>(() => environments[1] ? { ...environments[1], browser: 'chromium' } : { name: '', url: '', browser: 'chromium' })
   const [result, setResult] = useState<Comparison | null>(null)
   const [busy, setBusy] = useState(false)
   const [drafting, setDrafting] = useState<number | null>(null)
@@ -44,8 +49,8 @@ export default function ComparePanel({ sessionId, project }: { sessionId: string
   const [onlyDiff, setOnlyDiff] = useState(true)
 
   useEffect(() => {  // the project loads after the page: start from its first two addresses
-    if (!a.url && environments[0]) setA({ name: environments[0].name === 'default' ? 'app' : environments[0].name, url: environments[0].url })
-    if (!b.url && environments[1]) setB(environments[1])
+    if (!a.url && environments[0]) setA({ name: environments[0].name === 'default' ? 'app' : environments[0].name, url: environments[0].url, browser: a.browser })
+    if (!b.url && environments[1]) setB({ ...environments[1], browser: b.browser })
   }, [project?.id])  // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { api.comparisons(sessionId).then((list) => setResult(list[0] ?? null)).catch(() => {}) }, [sessionId])
 
@@ -64,7 +69,7 @@ export default function ComparePanel({ sessionId, project }: { sessionId: string
     <section aria-label="Compare environments" style={{ width: 360, display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={box}>
         <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-          Do this session's steps again on two versions or environments, side by side, and see what differs.
+          Do this session's steps again on two versions or environments (or one address in two browsers), side by side, and see what differs.
         </p>
         <div style={{ display: 'flex', gap: 10 }}>
           <EnvPicker label="A" value={a} onChange={setA} environments={environments} />
@@ -83,7 +88,8 @@ export default function ComparePanel({ sessionId, project }: { sessionId: string
             {result.status === 'error' ? `Couldn't finish: ${result.detail}` : result.summary}
           </div>
           <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 8 }}>
-            A = {result.env_a.name} ({result.env_a.url}) · B = {result.env_b.name} ({result.env_b.url})
+            A = {result.env_a.name} ({result.env_a.url}{result.env_a.browser && result.env_a.browser !== 'chromium' ? `, ${BROWSER_LABEL[result.env_a.browser]}` : ''}) ·
+            B = {result.env_b.name} ({result.env_b.url}{result.env_b.browser && result.env_b.browser !== 'chromium' ? `, ${BROWSER_LABEL[result.env_b.browser]}` : ''})
           </div>
           {result.bug_ids.length > 0 && (
             <div style={{ fontSize: 12, marginBottom: 8 }}>

@@ -41,7 +41,10 @@ def compare(session_id: str, payload: schemas.CompareRequest, request: Request, 
         raise HTTPException(409, "Nothing to compare yet: this session has no recorded steps. Explore in the "
                                  "session's browser (or let Mirmera explore), then compare.")
     project = session.charter.project
-    from app import sign_in
+    from app import browsers, sign_in
+    for side in (payload.a, payload.b):
+        if side.browser != "chromium" and not browsers.installed(side.browser):
+            raise HTTPException(409, browsers.install_hint(side.browser))
     envs = [payload.a.model_dump(), payload.b.model_dump()]
     row = models.Comparison(session_id=session.id, env_a=envs[0], env_b=envs[1], journey=journey,
                             started_by=current_user(request, db).name)
@@ -97,6 +100,8 @@ def draft_bug(comparison_id: str, n: int, payload: schemas.CompareBugRequest, db
     base = cmp.recorded_base_of(c.journey)
     steps = [{**s, "url": _rebase(s["url"], base, wrong["url"])} if s.get("url") and s["type"] == "goto" else s
              for s in c.journey[:n]]
+    from app.browsers import label
+    engine = wrong.get("browser") or "chromium"
     try:
         edited = clean_steps(steps)
     except StepError:
@@ -119,10 +124,13 @@ def draft_bug(comparison_id: str, n: int, payload: schemas.CompareBugRequest, db
                      f"step {n} ({step['description']}):\n" + "\n".join(f"- {d}" for d in step["differences"])
                      + "\n\nFound by comparing the two with Mirmera. A draft: review it before filing."),
         expected=f"As on {right['name']}: {seen(rs)}."[:2000], actual=f"On {wrong['name']}: {seen(ws)}."[:2000],
-        steps_to_reproduce=[f"Use {wrong['name']} ({wrong['url']})"] + [describe_step(s) for s in (edited or steps)],
+        steps_to_reproduce=[f"Use {wrong['name']} ({wrong['url']}) in {label(engine)}"] + [describe_step(s) for s in (edited or steps)],
         edited_steps=edited, oracle_heuristic="comparable_products",
         oracle_explanation=f"{right['name']}, doing the same steps, behaves differently: {right['url']}",
-        environment={"url": wrong["url"], "compared_with": f"{right['name']} {right['url']}", "found_by": "Mirmera comparison"},
+        environment={"url": wrong["url"], "browser": f"{label(engine)} (headless)",
+                     **({"engine": engine} if engine != "chromium" else {}),
+                     "compared_with": f"{right['name']} {right['url']} in {label(right.get('browser'))}",
+                     "found_by": "Mirmera comparison"},
         symptom=symptom, reproduction_trail=[{"tag": "test", "content": c.summary or ""}], sightings=[],
     )
     db.add(bug)
