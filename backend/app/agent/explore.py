@@ -49,6 +49,7 @@ STEP_IN_AFTER = 3  # steps in a row that taught nothing before Mirmera takes the
 REPLIES_PER_STEP = 2  # model replies per step of the budget, refused ones too: a model that is only ever refused still stops
 SUBMITS = ("click", "press", "try")
 TOURS = True  # after the first accepted submit on a form, Mirmera tours the flow itself
+SAVED_TEXT = True  # the flow tour sends Ge'ez and punctuation and checks they come back as typed
 KEYBOARD = True  # the flow tour ends with the form done with the keyboard only
 ACCESS_CHECK = True  # after a signed-in run, the user's own pages are opened signed out and as the second user
 CONFIRM_RUNS = 3  # each new draft's steps, replayed in this many fresh browsers when the run ends
@@ -929,6 +930,20 @@ def place_rule(rules: dict[str, str], after: FormState) -> tuple[str, str] | Non
     return None
 
 
+def listing_place(links: list[dict], rules: dict[str, str]) -> tuple[dict | None, tuple[str, str] | None]:
+    """Where submitted things are listed: a link a rule names next to "list" or "show" (the longest,
+    "My orders" not "Order"), else a "My …" link. (link, the rule) or (None, None)."""
+    named = []  # (link, rule): a link a rule names as whole words, in a rule about listing or showing
+    for rid, text in rules.items():
+        t = f" {_norm(text)} "
+        if any(w in t.split() for w in LISTING_WORDS):
+            named += [(l, (rid, text)) for l in links if len(l["text"]) >= 4
+                      and re.search(rf"(?<!\w){re.escape(_norm(l['text']))}(?!\w)", t)]
+    if named:  # a rule that says "list" first, then the longest link
+        return max(named, key=lambda x: (bool(re.search(r"\blist", x[1][1].lower())), len(x[0]["text"])))
+    return next((l for l in links if l["text"].lower().startswith("my ")), None), None
+
+
 def kept_values(before: FormState) -> list[str]:
     """What a submit sent that should be findable later: text values, not secrets or choices."""
     return [f["value"] for f in before.fields
@@ -1385,15 +1400,7 @@ async def flow_tour(page, context, signals, form_url: str, answer_url: str, sent
             break
         # Where submitted things are listed: a link the rules name next to "listed", or a "My …" link.
         links = form.links or (await form_state(page)).links
-        named = []  # (link, rule): a link a rule names as whole words, in a rule about listing or showing
-        for rid, text in rules.items():
-            t = f" {_norm(text)} "
-            if any(w in t.split() for w in LISTING_WORDS):
-                named += [(l, (rid, text)) for l in links if len(l["text"]) >= 4
-                          and re.search(rf"(?<!\w){re.escape(_norm(l['text']))}(?!\w)", t)]
-        if named:  # a rule that says "list" first, then the longest link ("My orders", not "Order")
-            place, rule = max(named, key=lambda x: (bool(re.search(r"\blist", x[1][1].lower())), len(x[0]["text"])))
-        place = place or next((l for l in links if l["text"].lower().startswith("my ")), None)
+        place, rule = listing_place(links, rules)
         if not place:
             break
         f0, e0 = len(signals.failed), len(signals.page_errors)
@@ -1424,7 +1431,25 @@ async def flow_tour(page, context, signals, form_url: str, answer_url: str, sent
         what, n = await failure_tour(page, signals, form_url, sent, to_here, keep)
         done.append(what)
         found += n
-    # 6. The keyboard only: Tab through the form, see focus, send it with Enter.
+    # 6. Saved text: Ge'ez, an apostrophe and an ampersand sent, then looked for as typed.
+    if SAVED_TEXT:
+        from app.agent.saved import saved_text_tour
+
+        async def fill_with(pg, overrides: dict) -> list[dict]:
+            out = []
+            for f in (await form_state(pg)).fields:
+                was = overrides.get(f["label"], next((x["value"] for x in sent.fields if x["label"] == f["label"]), None))
+                if was is None or f["type"] in ("password", "file"):
+                    continue
+                status, _, kind = await set_field(pg, f, "fill", was)
+                if status == "ok":
+                    out.append({"type": "action", "action": _rec(kind, f, was), "url": form_url})
+            return out
+        what, n = await saved_text_tour(page, signals, form_url, sent, to_here, rules, keep, fill=fill_with)
+        if what:
+            done.append(what)
+        found += n
+    # 7. The keyboard only: Tab through the form, see focus, send it with Enter.
     if KEYBOARD:
         from app.agent.keyboard import keyboard_tour
 
@@ -2068,6 +2093,11 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         submits.append((values, outcome, entry["n"]))
                         if outcome == "accepted":
                             accepted_values += [v for v in kept_values(before) if v not in accepted_values]
+                            # What was typed, as typed: a mangled copy on the answer page is a draft (no AI).
+                            from app.agent.saved import free_text, garbled, problem as saved_problem
+                            for g in garbled({f["label"]: f["value"] for f in free_text(before.fields)}, after.lines):
+                                await keep(saved_problem(g, f"The answer to {entry['url'].split('?')[0]}"),
+                                           ("saved", g["field"], g["why"]))
                             form_path = entry["url"].split("?")[0].split("#")[0]
                             if TOURS and form_path not in toured and before.submit and not page.is_closed():
                                 toured.add(form_path)

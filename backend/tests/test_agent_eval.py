@@ -1086,7 +1086,9 @@ def test_after_an_accepted_submit_mirmera_tours_the_flow(client, booking_app, mo
                       "Clicking Book twice quickly creates it twice",
                       # and this page doesn't check what its server answers: the failure tour sees it
                       'Says "Booking confirmed." although the server answers 500',
-                      "When the network drops, Book throws: Failed to fetch"]
+                      "When the network drops, Book throws: Failed to fetch",
+                      # its listing page has no charset: the browser reads UTF-8 as Windows-1252
+                      'Your name "አበበ ከበደ ተሰማ" comes back as "áŠ á‰ á‰ áŠ¨á‰ á‹° á‰°áˆ°áˆ›" (garbled)']
     assert bugs[0].actual.startswith("Opening /booked directly (a bookmark or a shared link): ")
     assert bugs[0].steps_to_reproduce and bugs[0].steps_to_reproduce[0].startswith("open ") and bugs[0].steps_to_reproduce[0].endswith("/booked")
     assert 'Every booking is listed in My bookings, once.' in bugs[1].expected
@@ -1546,3 +1548,73 @@ def test_the_keyboard_tour_tabs_through_the_form_and_sends_it_with_enter(client,
     assert bugs[0].symptom == {"kind": "keyboard", "value": "unreachable:Weekly digest", "explanation": "Not in the Tab order"}
     # Each one checked again in a fresh browser, by tabbing again (or pressing Enter again).
     assert [b.reproducibility for b in bugs] == ["always"] * 4, [b.confirmation for b in bugs]
+
+
+# ---------- saved text ----------
+
+GUESTBOOK = """<!doctype html><title>Guestbook</title><nav><a href="/">Sign</a> <a href="/entries">My entries</a></nav>
+<h1>Sign the guestbook</h1>
+<form id=f><label for=n>Full name</label><input id=n><label for=e>Email</label><input id=e type=email>
+<button type=submit>Sign</button></form><p role=status id=out></p>
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const name = document.getElementById('n').value
+  const r = await fetch('/api/sign', { method: 'POST', headers: { 'Content-Type': 'text/plain; charset=utf-8' }, body: name })
+  document.getElementById('out').textContent = r.ok ? 'Thanks for signing, ' + name + '!' : 'Something went wrong.'
+})
+</script>"""
+
+
+@pytest.fixture
+def guestbook_app():
+    """Keeps names the old way: reads the request as Latin-1 and keeps 17 characters."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    names: list[str] = []
+
+    class App(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = GUESTBOOK if self.path == "/" else (
+                '<!doctype html><title>My entries</title><nav><a href="/">Sign</a> <a href="/entries">My entries</a></nav>'
+                "<h1>My entries</h1><ul>" + "".join(f"<li>{n}</li>" for n in names) + "</ul>")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(body.encode("utf-8"))
+
+        def do_POST(self):
+            raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            names.append(raw.decode("latin-1")[:17])  # the bug: the wrong encoding, and a short column
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+@pytest.mark.tours
+@pytest.mark.confirm
+def test_saved_text_comes_back_as_typed_or_is_drafted(client, guestbook_app, monkeypatch, chromium_available):  # noqa: F811
+    from app.agent import explore as agent
+    monkeypatch.setattr(agent, "FAULTS", ())
+    monkeypatch.setattr(agent, "KEYBOARD", False)
+    steps, bugs = explore_once(monkeypatch, guestbook_app, [
+        step("Open", kind="goto", url=guestbook_app),
+        step("Sign", kind="try", values={"Full name": "Abebe Kebede", "Email": "abebe@example.com"}),
+        step("Done", kind="done", summary="Signed once.")])
+    tour = next(s for s in steps if s["kind"] == "tour")
+    assert "the saved text (Ge'ez letters: mangled; an apostrophe, a hyphen and an ampersand: mangled)" in tour["detail"], tour["detail"]
+    titles = [b.title for b in bugs]
+    assert len(titles) == 2 and titles[0].startswith('Full name "አበበ ከበደ ተሰማ" comes back as "á') and titles[0].endswith("(garbled)"), titles
+    assert titles[1] == 'Full name "Mary O\'Brien-Tesfaye & Co" comes back as "Mary O\'Brien-Tesf" (cut to 17 of its 25 characters)', titles
+    assert bugs[0].severity == "high" and "UTF-8 read as" in bugs[0].actual
+    assert bugs[1].steps_to_reproduce[-1].startswith("open ") and bugs[1].steps_to_reproduce[-1].endswith("/entries")
+    assert [b.reproducibility for b in bugs] == ["always", "always"], [b.confirmation for b in bugs]
