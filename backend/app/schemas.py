@@ -927,7 +927,8 @@ class DuplicateCandidate(BaseModel):
     status: str
     closed: bool
     snippet: str = ""
-    verdict: Literal["likely_duplicate", "related", "different", "not_assessed"]
+    # same_problem: Mirmera knows it's the same problem without AI (its fingerprint, or its own earlier filing)
+    verdict: Literal["same_problem", "likely_duplicate", "related", "different", "not_assessed"]
     reason: str
 
 
@@ -936,6 +937,7 @@ class DuplicateCheckOut(BaseModel):
     target: str
     searched_for: list[str]  # the words used, so the tester can judge the search
     candidates: list[DuplicateCandidate]
+    fingerprint: Optional[str] = None  # the problem's Mirmera fingerprint, written into every issue it files
     ai_provider: Optional[str] = None
     ai_model: Optional[str] = None
     prompt_version: Optional[str] = None
@@ -954,6 +956,8 @@ class FileRequest(BaseModel):
     mode: Literal["new", "comment"] = "new"
     issue_key: Optional[str] = Field(default=None, max_length=50)  # required for "comment"
     note: Optional[str] = Field(default=None, max_length=2000)
+    # A new issue is refused while the same problem is already filed (same fingerprint), unless the tester says so.
+    file_anyway: bool = False
 
     @model_validator(mode="after")
     def comment_needs_issue(self):

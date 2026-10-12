@@ -307,3 +307,65 @@ def test_a_question_is_filed_as_a_question(client, session, mocked):
     issue = mock_trackers.MockTracker("jira", "KYC")._db["issues"][-1]
     assert issue.title == "Question: Blurry selfies accepted"
     assert "This is a question, not a confirmed bug" in issue.snippet
+
+
+# ---------- the same problem, known without AI ----------
+
+def _same_problem(bug_id: str, signature="failed_request:/api/documents", symptom=None) -> None:
+    """As the exploration agent leaves its drafts: the problem as a key, and what shows it."""
+    with SessionLocal() as db:
+        b = db.get(models.Bug, bug_id)
+        b.signature = signature
+        b.symptom = symptom or {"kind": "failed_request", "value": "/api/documents", "explanation": "POST /api/documents -> 500"}
+        db.commit()
+
+
+def test_every_filed_issue_carries_the_problems_fingerprint(client, session, mocked):
+    from app.trackers.fingerprint import FOUND
+    bug = reviewed_bug(client, session)
+    md = client.get(f"/bugs/{bug['id']}/filing-preview?tracker=github").json()["markdown"]
+    [fp] = FOUND.findall(md)
+    assert md.rstrip().endswith(f"Filed from Mirmera. Mirmera fingerprint: {fp}")
+    assert client.post(f"/bugs/{bug['id']}/duplicates", json={"tracker": "github"}).json()["fingerprint"] == fp
+
+
+def test_the_same_problem_filed_before_is_found_and_a_second_issue_is_refused(client, session, mocked):
+    first = reviewed_bug(client, session, title="Upload fails with a server error")
+    _same_problem(first["id"])
+    filed = client.post(f"/bugs/{first['id']}/file", json={"tracker": "jira"}).json()["filing"]["issue_key"]
+
+    # Another session meets it again, under other words: the titles share nothing.
+    second = reviewed_bug(client, session, title="Saving the ID scan breaks")
+    _same_problem(second["id"])
+    out = client.post(f"/bugs/{second['id']}/duplicates", json={"tracker": "jira"}).json()
+    assert out["searched_for"] == ["saving", "scan", "breaks", "documents"]  # the title's words, then the request's
+    top = out["candidates"][0]
+    assert (top["key"], top["verdict"]) == (filed, "same_problem")
+    assert top["reason"].startswith('Mirmera already filed this problem, from the bug "Upload fails with a server error"')
+    assert [c["key"] for c in out["candidates"]].count(filed) == 1  # not listed again from the word search
+
+    refused = client.post(f"/bugs/{second['id']}/file", json={"tracker": "jira"})
+    assert refused.status_code == 409
+    assert refused.json()["detail"].startswith(f"Already filed: {filed} (open) is the same problem (Mirmera fingerprint mfp")
+    # The tester decides: an occurrence on the issue, or a new issue anyway.
+    assert client.post(f"/bugs/{second['id']}/file", json={"tracker": "jira", "mode": "comment", "issue_key": filed}).status_code == 200
+    other = reviewed_bug(client, session, title="Third time")
+    _same_problem(other["id"])
+    assert client.post(f"/bugs/{other['id']}/file", json={"tracker": "jira", "file_anyway": True}).status_code == 200
+
+
+def test_a_closed_issue_with_the_fingerprint_is_a_possible_regression(client, session, mocked):
+    from app.trackers.fingerprint import fingerprint
+    bug = reviewed_bug(client, session, title="Order total wrong")
+    _same_problem(bug["id"], signature="text_visible:breaks ac1:total: # birr", symptom={"kind": "text_visible", "value": "Total: 700 Birr"})
+    with SessionLocal() as db:
+        fp = fingerprint(db.get(models.Bug, bug["id"]))
+    # Filed from Mirmera by a teammate, in another workspace, and closed since.
+    tracker = mock_trackers.MockTracker("github", "addisverify/kyc")
+    issue = run(tracker.create("Total is one item short", [Block("paragraph", f"Filed from Mirmera. Mirmera fingerprint: {fp}")], []))
+    tracker.set_closed(issue.key)
+    out = client.post(f"/bugs/{bug['id']}/duplicates", json={"tracker": "github"}).json()
+    top = out["candidates"][0]
+    assert (top["key"], top["verdict"], top["closed"]) == (issue.key, "same_problem", True)
+    assert "a possible regression" in top["reason"]
+    assert client.post(f"/bugs/{bug['id']}/file", json={"tracker": "github"}).json()["detail"].startswith(f"Already filed: {issue.key} (closed)")

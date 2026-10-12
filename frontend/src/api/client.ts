@@ -192,7 +192,8 @@ export interface DuplicateCandidate {
   status: string
   closed: boolean
   snippet: string
-  verdict: 'likely_duplicate' | 'related' | 'different' | 'not_assessed'
+  /** same_problem: known without AI (the Mirmera fingerprint, or Mirmera's own earlier filing) */
+  verdict: 'same_problem' | 'likely_duplicate' | 'related' | 'different' | 'not_assessed'
   reason: string
 }
 
@@ -201,6 +202,8 @@ export interface DuplicateCheck {
   target: string
   searched_for: string[]
   candidates: DuplicateCandidate[]
+  /** The problem's Mirmera fingerprint, written into every issue Mirmera files */
+  fingerprint?: string | null
   ai_provider: string | null
   ai_model: string | null
 }
@@ -228,7 +231,11 @@ export interface BugFiling {
   status_checked_at: string | null
 }
 
-export interface FileRequest { tracker: TrackerName; mode: 'new' | 'comment'; issue_key?: string; note?: string }
+export interface FileRequest {
+  tracker: TrackerName; mode: 'new' | 'comment'; issue_key?: string; note?: string
+  /** File a new issue although the same problem is already filed (the server refuses otherwise) */
+  file_anyway?: boolean
+}
 
 // ---- Browser session runner ------------------------------------------------
 
