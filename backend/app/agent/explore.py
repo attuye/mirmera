@@ -48,6 +48,7 @@ STEP_IN_AFTER = 3  # steps in a row that taught nothing before Mirmera takes the
 REPLIES_PER_STEP = 2  # model replies per step of the budget, refused ones too: a model that is only ever refused still stops
 SUBMITS = ("click", "press", "try")
 TOURS = True  # after the first accepted submit on a form, Mirmera tours the flow itself
+ACCESS_CHECK = True  # after a signed-in run, the user's own pages are opened signed out and as the second user
 CONFIRM_RUNS = 3  # each new draft's steps, replayed in this many fresh browsers when the run ends
 # A note that says the app accepted or refused something: only true after a submit.
 CLAIM = re.compile(r"\b(accepts|accepted|rejects|rejected|refuses|refused|works|succeeds|successful(?:ly)?|confirm(?:s|ed|ing)?)\b", re.I)
@@ -61,7 +62,7 @@ SLOW_NETWORK = {"offline": False, "latency": 400, "downloadThroughput": 50 * 102
 def steps_used(steps: list[dict]) -> int:
     """The steps that count against the budget: a refused step was never run, and a flow tour is
     Mirmera's own, so they cost none."""
-    return sum(1 for s in steps if s.get("status") != "refused" and s.get("kind") not in ("tour", "confirm"))
+    return sum(1 for s in steps if s.get("status") != "refused" and s.get("kind") not in ("tour", "confirm", "access"))
 
 
 def context_options(conditions: dict | None) -> dict:
@@ -1099,6 +1100,13 @@ def signature(p: schemas.ExploreProblem) -> str:
 SEEN_AGAIN = "seen again"
 
 
+def first_step(fault: str) -> str:
+    """What has to happen before the steps for a bug Mirmera made happen on purpose."""
+    if fault.startswith(("open ", "sign in")):
+        return fault[:1].upper() + fault[1:]
+    return f"Make {fault} (e.g. stop the API, or block the request in the browser's dev tools)"
+
+
 def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evidence: str, steps: list[dict],
                page_url: str, screenshot: Path | None, provider: LLMProvider) -> tuple[str, bool]:
     """(bug id, new?): a bug draft, or, when the project already has a draft of the same problem, a sighting
@@ -1135,8 +1143,7 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
                          f"Found by the Mirmera exploration agent ({provider.name}/{provider.model}). "
                          "A draft: review it before filing."),
             expected=p.expected, actual=p.actual,
-            steps_to_reproduce=([f"Make {p.fault} (e.g. stop the API, or block the request in the browser's dev tools)"]
-                                if p.fault else []) + [s["action"]["summary"] if s["type"] == "action"
+            steps_to_reproduce=([first_step(p.fault)] if p.fault else []) + [s["action"]["summary"] if s["type"] == "action"
                                                        else f"open {s['url']}" for s in (edited or [])],
             reproduction_trail=trail, edited_steps=edited,
             environment={"browser": "Chromium (headless)", "url": page_url, "found_by": TESTER,
@@ -1963,6 +1970,40 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
             finally:
                 video = await _keep_recording(context, folder, run_id)
                 await browser.close()
+            if ACCESS_CHECK and sign_in_cfg and final.get("status") not in ("cancelled", "error"):
+                # Who sees what: the user's own pages opened signed out and as the second user. (No AI.)
+                from app.agent.access import access_check
+                from app.sign_in import second
+                access = {"n": len(history) + 1, "thought": "Mirmera opens the pages this user opened, that look like "
+                          "their own, as someone else: signed out, and as the project's second user.",
+                          "action": "check who sees what", "kind": "access", "status": "ok", "detail": "",
+                          "url": start_url, "by": "Mirmera"}
+
+                async def draft_access(problem, pg, rec):
+                    from app.regression.replay import Signals
+                    ok, evidence = await verify(pg, problem.symptom, Signals())
+                    if not ok:
+                        return False
+                    shot = folder / f"explore-{run_id[:8]}-{len(bug_ids) + 1}.png"
+                    try:
+                        await pg.screenshot(path=str(shot))
+                    except Exception:
+                        shot = None
+                    bid, new = _draft_bug(session_id, charter_id, problem, evidence, rec, pg.url, shot, provider)
+                    if bid not in bug_ids:
+                        bug_ids.append(bid)
+                    access["status"] = "drafted"
+                    return True
+                try:
+                    urls = [h["url"] for h in history if h.get("url")] + sorted(visited)
+                    access["detail"] = await access_check(pw, urls, sign_in_cfg, second(sign_in_cfg), start_url,
+                                                          executable_path, headless, draft_access)
+                except Exception as err:  # extra: it never fails the run
+                    access["detail"] = f"could not check: {_first_line(err)}"
+                if access["detail"]:
+                    history.append(access)
+                    _save(run_id, steps=list(history), bug_ids=list(bug_ids))
+                    _note(session_id, "test", f"Who sees what: {access['detail']}")
             if CONFIRM_RUNS and bug_ids and final.get("status") != "cancelled":
                 # Before a tester reads a draft: does it happen again from its steps alone, in a
                 # browser that saw nothing before? (No AI.)

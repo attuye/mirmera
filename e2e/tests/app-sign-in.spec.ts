@@ -11,6 +11,8 @@ test('sign in to the app under test: save, try, and the password stays hidden', 
   await box.getByLabel('Username', { exact: true }).fill('tester@example.com')
   await box.getByLabel('Password', { exact: true }).fill('e2e-pass')
   await box.getByLabel('Words that show it worked').fill('Sign out')
+  await box.getByLabel('Second username').fill('second@example.com')
+  await box.getByLabel('Second password').fill('second-pass')
   await box.getByRole('button', { name: 'Save sign-in' }).click()
   await expect(box.getByRole('status')).toHaveText('Saved. Try it to be sure.')
   await expect(box.getByLabel('Password', { exact: true })).toHaveValue('')
@@ -26,6 +28,8 @@ test('sign in to the app under test: save, try, and the password stays hidden', 
 
   const saved = await (await request.get(`${API_URL}/projects/${project.id}/sign-in`)).text()
   expect(saved).not.toContain('e2e-pass')  // never sent back
+  expect(saved).not.toContain('second-pass')
+  await expect(box.getByLabel('Second password')).toHaveAttribute('placeholder', 'Saved: type to replace')
 
   await box.getByLabel('Password', { exact: true }).fill('wrong')
   await box.getByRole('button', { name: 'Save sign-in' }).click()

@@ -461,9 +461,11 @@ export interface DebriefListItem {
 export interface AppSignIn {
   url: string; username_field: string; username: string; password_field: string
   password_set: boolean; submit: string; signed_in_text: string
+  /** a second user, for checking who sees what */
+  second_username: string; second_password_set: boolean
 }
 /** password: undefined keeps the saved one, '' clears it */
-export type AppSignInChanges = Omit<AppSignIn, 'password_set'> & { password?: string }
+export type AppSignInChanges = Omit<AppSignIn, 'password_set' | 'second_password_set'> & { password?: string; second_password?: string }
 export interface AppSignInTry { ok: boolean; detail: string; url: string; screenshot: string | null }
 
 export interface BugSighting { session_id: string; charter_id: string; mission: string; at: string; url: string }
