@@ -2183,7 +2183,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
     finally:
         try:
             _wrap_up(session_id, final, history, bug_ids)
-            _save(run_id, steps=list(history), bug_ids=list(bug_ids), finished_at=utcnow(), video=video, **final)
+            _save(run_id, steps=list(history), bug_ids=list(bug_ids), finished_at=utcnow(), video=video,
+                  journey=list(steps)[:60], **final)
         finally:
             ACTIVE.discard(run_id)
             LIVE.pop(run_id, None)  # from here on, its steps' frames show what it did

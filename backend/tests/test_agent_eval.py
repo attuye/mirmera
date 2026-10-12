@@ -1464,6 +1464,9 @@ def test_the_browser_clock_finds_a_utc_today_and_a_wrong_ethiopian_date(client, 
         bugs = [db.get(models.Bug, b) for b in r.bug_ids]
         notes = [n.content for n in db.query(models.Note).filter_by(session_id=r.session_id)]
     assert r.conditions["timezone"] == "Africa/Addis_Ababa" and r.conditions["clock_at"].startswith("2026-09-11T00:20")
+    # the run keeps its journey, so it can be done again on another environment
+    assert r.journey[0] == {"type": "goto", "url": delivery_app + "/"} and \
+        [s["action"]["action"] for s in r.journey if s["type"] == "action"] == ["fill", "click", "fill", "click"]
     assert any("clock is set to Fri 11 Sep 2026, 00:20 (Africa/Addis_Ababa), Meskerem 1, 2019" in n for n in notes), notes
     ideas = provider.users[1].split("<ideas>")[1].split("</ideas>")[0]
     assert '- Delivery date: yesterday (by the user\'s clock) ("2026-09-10"); the last day of Pagume ("2027-09-11")' in ideas, ideas

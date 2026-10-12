@@ -356,6 +356,9 @@ export interface ReproductionRun {
   finished_at: string | null
 }
 
+export const comparisonShotUrl = (comparisonId: string, name: string) =>
+  `${BASE_URL}/comparisons/${comparisonId}/shots/${encodeURIComponent(name)}`
+
 export const reproductionScreenshotUrl = (runId: string) => `${BASE_URL}/reproduction-runs/${runId}/screenshot`
 
 export const regressionDownloadUrl = (testId: string) => `${BASE_URL}/regression-tests/${testId}/download`
@@ -766,6 +769,19 @@ export interface WorkspaceKey {
   set: boolean; shown: string | null; unreadable: boolean; updated_at: string | null; updated_by: string | null; server_fallback: boolean
 }
 export interface WorkspaceKeys { keys: WorkspaceKey[]; server_keys_for_all: boolean }
+/** What one environment's browser saw after a step of the journey. */
+export interface CompareSnapshot {
+  status: string; detail: string; path: string | null; title?: string; headings?: string[]; messages?: string[]
+  fields?: string[]; buttons?: string[]; links?: string[]; failed?: string[]; page_errors?: string[]
+}
+/** A session's journey done again on two environments, side by side. */
+export interface Comparison {
+  id: string; session_id: string; env_a: Environment; env_b: Environment
+  steps: { n: number; description: string; a: CompareSnapshot; b: CompareSnapshot; differences: string[]; shots: string[] }[]
+  summary: string | null; status: 'done' | 'error'; detail: string | null; started_by: string | null
+  bug_ids: string[]; created_at: string
+}
+
 export interface ExploreConditions {
   device?: 'desktop' | 'phone'; network?: 'normal' | 'slow'; locale?: string; timezone?: string
   /** The browser's clock: a preset ("after-midnight", "pagume", …) or a local "2026-09-10T23:50" */
@@ -1071,6 +1087,11 @@ export const api = {
     request<WorkspaceKeys>(`/workspaces/${workspaceId}/keys`, { method: 'PUT', body: JSON.stringify({ values }) }),
   workspaceActivity: (workspaceId: string) => request<AgentActivityList>(`/workspaces/${workspaceId}/agent-activity`),
   storyActivity: (storyId: string) => request<AgentActivityList>(`/stories/${storyId}/agent-activity`),
+  compareSession: (sessionId: string, a: Environment, b: Environment) =>
+    request<Comparison>(`/sessions/${sessionId}/comparisons`, { method: 'POST', body: JSON.stringify({ a, b }) }),
+  comparisons: (sessionId: string) => request<Comparison[]>(`/sessions/${sessionId}/comparisons`),
+  comparisonBug: (comparisonId: string, n: number, right: 'a' | 'b') =>
+    request<Comparison>(`/comparisons/${comparisonId}/steps/${n}/bug`, { method: 'POST', body: JSON.stringify({ right }) }),
   exploreCharter: (charterId: string, body: { max_steps?: number; base_url?: string; conditions?: ExploreConditions } = {}) =>
     request<ExplorationRun>(`/charters/${charterId}/explore`, { method: 'POST', body: JSON.stringify(body) }),
   charterExploration: (charterId: string) => request<ExplorationRun | null>(`/charters/${charterId}/exploration`),

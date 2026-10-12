@@ -62,7 +62,9 @@ http
   .createServer((req, res) => {
     const path = new URL(req.url, 'http://localhost').pathname
     if (path === '/') {
-      res.writeHead(200, { 'Content-Type': 'text/html' }).end(home)
+      // Reached as 127.0.0.1 it plays "the next version": its heading changed (for comparing two environments).
+      const next = (req.headers.host || '').startsWith('127.0.0.1')
+      res.writeHead(200, { 'Content-Type': 'text/html' }).end(next ? home.replace('<h1>Upload your ID</h1>', '<h1>Upload your ID document</h1>') : home)
     } else if (path === '/signup') {
       res.writeHead(200, { 'Content-Type': 'text/html' }).end(signup)
     } else if (path === '/login') {  // for signing in to the app under test: tester@example.com / e2e-pass
