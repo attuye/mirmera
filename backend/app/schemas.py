@@ -1232,6 +1232,9 @@ class ExploreProblem(BaseModel):
     # Mirmera's own key for "the same problem" when the symptom changes every time (a marker
     # value): set by Mirmera's checks, never by the AI.
     same_as: SkipJsonSchema[Optional[str]] = None
+    # The failure Mirmera made happen to show it ("POST /api/verify answering 500"): its replays
+    # can't make it happen again, so it isn't replayed. Mirmera's own, never the AI's.
+    fault: SkipJsonSchema[Optional[str]] = None
 
 
 EXPLORE_KINDS = ("goto", "click", "fill", "fill_secret", "select", "check", "uncheck", "press", "wait",
