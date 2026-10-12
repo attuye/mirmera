@@ -1479,3 +1479,70 @@ def test_the_browser_clock_finds_a_utc_today_and_a_wrong_ethiopian_date(client, 
     assert bugs[0].environment["clock_at"].startswith("2026-09-11T00:20") and bugs[0].environment["timezone"] == "Africa/Addis_Ababa"
     # the replays set the same clock in the same time zone: both show every time
     assert [b.reproducibility for b in bugs] == ["always", "always"], [b.confirmation for b in bugs]
+
+
+# ---------- the keyboard-only tour ----------
+
+KEYS = b"""<!doctype html><title>Newsletter</title><h1>Join the newsletter</h1>
+<style>#e:focus { outline: none }  /* the designer removed the focus ring and put nothing back */
+.box { display: inline-block; width: 14px; height: 14px; border: 1px solid #555; cursor: pointer }</style>
+<form id=f onsubmit="return false"><label for=n>Full name</label><input id=n>
+<label for=e>Email</label><input id=e type=email>
+<span class=box role=checkbox aria-checked=false aria-label="Weekly digest" onclick="this.setAttribute('aria-checked', this.getAttribute('aria-checked') === 'true' ? 'false' : 'true')"></span>
+<button type=button tabindex=-1 id=go>Join</button></form><p role=status id=out></p>
+<script>
+document.getElementById('go').addEventListener('click', async () => {
+  const r = await fetch('/api/join', { method: 'POST', body: document.getElementById('e').value })
+  document.getElementById('out').textContent = r.ok ? 'Thanks, you are subscribed.' : 'Something went wrong.'
+})
+</script>"""
+
+
+@pytest.fixture
+def keys_app():
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class App(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(KEYS)
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+@pytest.mark.tours
+@pytest.mark.confirm
+def test_the_keyboard_tour_tabs_through_the_form_and_sends_it_with_enter(client, keys_app, monkeypatch, chromium_available):  # noqa: F811
+    from app.agent import explore as agent
+    monkeypatch.setattr(agent, "FAULTS", ())  # this page handles failures; only the keyboard is looked at here
+    steps, bugs = explore_once(monkeypatch, keys_app, [
+        step("Open", kind="goto", url=keys_app),
+        step("Join", kind="try", values={"Full name": "Abebe Kebede", "Email": "abebe@example.com"}),
+        step("Done", kind="done", summary="Joined once.")])
+    tour = next(s for s in steps if s["kind"] == "tour")
+    assert "the keyboard only (2 Tab stops, Enter doesn't send it)" in tour["detail"], tour["detail"]
+    titles = [b.title for b in bugs]
+    assert titles == ['"Weekly digest" can\'t be reached with the keyboard',
+                      '"Join" can\'t be reached with the keyboard',
+                      'No visible focus on "Email"',
+                      "The form can't be sent with the keyboard (Enter in a field)"], titles
+    assert bugs[1].severity == "high" and "Tab order: Full name → Email" in bugs[1].actual
+    assert bugs[0].symptom == {"kind": "keyboard", "value": "unreachable:Weekly digest", "explanation": "Not in the Tab order"}
+    # Each one checked again in a fresh browser, by tabbing again (or pressing Enter again).
+    assert [b.reproducibility for b in bugs] == ["always"] * 4, [b.confirmation for b in bugs]
