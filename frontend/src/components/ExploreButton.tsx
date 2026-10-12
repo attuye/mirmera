@@ -8,6 +8,17 @@ import { api, ExplorationRun } from '../api/client'
 import { useProjectPath } from '../project'
 import { errorText, quietButton } from './ui'
 
+/** The browser's clock: now, or a moment at the calendar's edge (the backend's clock presets). */
+const CLOCKS: [string, string][] = [
+  ['', 'at the real time'],
+  ['after-midnight', 'just after midnight'],
+  ['before-midnight', 'just before midnight'],
+  ['pagume', 'on the last day of Pagume'],
+  ['ethiopian-new-year', 'on Ethiopian New Year'],
+  ['year-end', "on New Year's Eve"],
+  ['leap-day', 'on 29 February'],
+]
+
 const small: React.CSSProperties = { ...quietButton, fontSize: 12, padding: '4px 10px' }
 
 export default function ExploreButton({ charterId, onStarted, onFinished }: { charterId: string; onStarted?: () => void; onFinished?: () => void }) {
@@ -33,9 +44,11 @@ export default function ExploreButton({ charterId, onStarted, onFinished }: { ch
   }, [run])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const [as, setAs] = useState<'desktop' | 'phone' | 'phone-slow'>('desktop')
+  const [clock, setClock] = useState('')
   async function start() {
     setBusy(true); setError(null)
-    const conditions = as === 'desktop' ? undefined : { device: 'phone' as const, network: as === 'phone-slow' ? 'slow' as const : 'normal' as const }
+    const device = as === 'desktop' ? {} : { device: 'phone' as const, network: as === 'phone-slow' ? 'slow' as const : 'normal' as const }
+    const conditions = as === 'desktop' && !clock ? undefined : { ...device, ...(clock ? { clock } : {}) }
     try { setRun(await api.exploreCharter(charterId, conditions ? { conditions } : {})); onStarted?.() } catch (e) { setError(errorText(e)) } finally { setBusy(false) }
   }
 
@@ -61,6 +74,11 @@ export default function ExploreButton({ charterId, onStarted, onFinished }: { ch
             <option value="desktop">on a desktop</option>
             <option value="phone">on a phone</option>
             <option value="phone-slow">on a phone, slow network</option>
+          </select>
+          <select aria-label="Browser clock" value={clock} onChange={(e) => setClock(e.target.value)}
+            title="The day and time Mirmera's browser thinks it is, in Addis Ababa time: date bugs hide at the calendar's edges"
+            style={{ fontSize: 11.5, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)' }}>
+            {CLOCKS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
           {run && (
             <span role="status">

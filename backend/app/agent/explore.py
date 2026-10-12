@@ -18,6 +18,7 @@ import json
 import logging
 import re
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -54,6 +55,8 @@ CONFIRM_RUNS = 3  # each new draft's steps, replayed in this many fresh browsers
 CLAIM = re.compile(r"\b(accepts|accepted|rejects|rejected|refuses|refused|works|succeeds|successful(?:ly)?|confirm(?:s|ed|ing)?)\b", re.I)
 
 ACTIVE: set[str] = set()  # run ids being worked on in this process
+# The browser's clock for this run, when one is set (each run is its own task, so its own value).
+CLOCK_AT: ContextVar[datetime | None] = ContextVar("clock_at", default=None)
 VIEWPORT = {"width": 1280, "height": 800}  # fixed per run, so a target's box can be drawn on any frame
 PHONE = {"width": 390, "height": 844}
 SLOW_NETWORK = {"offline": False, "latency": 400, "downloadThroughput": 50 * 1024, "uploadThroughput": 20 * 1024}
@@ -76,9 +79,32 @@ def context_options(conditions: dict | None) -> dict:
                               "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"}
     if c.get("locale"):
         out["locale"] = c["locale"]
-    if c.get("timezone"):
-        out["timezone_id"] = c["timezone"]
+    if c.get("timezone") or c.get("clock_at"):
+        from app.agent.clock import DEFAULT_TZ
+        out["timezone_id"] = c.get("timezone") or DEFAULT_TZ
     return out
+
+
+def run_today():
+    """The user's today: by the browser's clock when the run set one, else UTC's."""
+    at = CLOCK_AT.get()
+    return at.date() if at else utcnow().date()
+
+
+def clock_line(at: datetime | None = None) -> str | None:
+    """The first step to reproduce a bug found with the clock set, for a person."""
+    at = at or CLOCK_AT.get()
+    if not at:
+        return None
+    from app.agent import clock
+    return f"Set the computer's clock to {clock.describe(at)}"
+
+
+async def set_clock(context, at: datetime | None = None) -> None:
+    """Fixes the clock of every page in this browser context at the run's moment (timers still run)."""
+    at = at or CLOCK_AT.get()
+    if at:
+        await context.clock.set_fixed_time(at)
 
 
 @dataclass
@@ -598,9 +624,14 @@ def _type_ideas(f: dict, today) -> list[tuple[str, str]]:
     from datetime import timedelta
     label, kind = f["label"].lower(), f["type"]
     if kind == "date" or "date" in label:
-        return [("a past date", "2020-01-01"), ("today", today.isoformat()),
-                ("tomorrow", (today + timedelta(days=1)).isoformat()), ("29 February", "2028-02-29"),
-                ("far in the future", "2099-12-31")]
+        edges = []
+        if CLOCK_AT.get():  # the clock is at a calendar edge: the dates around it first
+            from app.agent import clock
+            edges = clock.date_ideas(today)
+        plain = [("a past date", "2020-01-01"), ("today", today.isoformat()),
+                 ("tomorrow", (today + timedelta(days=1)).isoformat()), ("29 February", "2028-02-29"),
+                 ("far in the future", "2099-12-31")]
+        return edges + [(w, v) for w, v in plain if v not in {x for _, x in edges}]
     if kind.startswith("select"):
         return [(f"option {o}", o) for o in f.get("options") or []]
     if kind == "file":
@@ -1095,6 +1126,12 @@ def rule_cases(rules: dict[str, str], sent: FormState, today) -> list[tuple[str,
             kinds.append(("a name with an apostrophe or hyphen", ("apostroph", "hyphen")))
         if re.search(r"expir", label) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", v or "") and v < today.isoformat():
             kinds.append(("an expiry date in the past", ("expired", "expiry", "expire")))
+        elif (f["type"] == "date" or "date" in label) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", v or "") \
+                and v < today.isoformat():
+            past = past_rule(rules, f["label"])
+            if past:
+                out.append((past[0], past[1], "refuse", f'{f["label"]} = "{v}"',
+                            f'a {f["label"].lower()} in the past ({v}, the user\'s today is {today.isoformat()})', f["label"]))
         for what, words in kinds:
             for rid, text in rules.items():
                 if any(w in text.lower() for w in words):
@@ -1102,6 +1139,21 @@ def rule_cases(rules: dict[str, str], sent: FormState, today) -> list[tuple[str,
                                 f'{f["label"]} = "{v[:60]}"', what, f["label"]))
                     break
     return out
+
+
+PAST_RULE = re.compile(r"\b(today or later|today or after|not (?:be )?in the past|can(?:not|'t|’t) be in the past|"
+                       r"no past dates?|past dates? (?:are|is) (?:refused|not allowed|not accepted|rejected)|"
+                       r"must be (?:in the future|after today|a future date)|from today on)\b", re.I)
+
+
+def past_rule(rules: dict[str, str], label: str) -> tuple[str, str] | None:
+    """The rule that says this date can't be in the past ("The delivery date is today or later")."""
+    words = {w for w in re.findall(r"\w+", label.lower()) if len(w) > 2 and w not in LABEL_NOISE and w != "date"} or {"date"}
+    for rid, text in rules.items():
+        t = text.lower()
+        if PAST_RULE.search(t) and words & set(re.findall(r"\w+", t)):
+            return rid, text
+    return None
 
 
 def decide(j: schemas.LLMExploreJudgement, rules: dict[str, str], before: FormState, said: list[str]) -> tuple[str, str]:
@@ -1132,7 +1184,7 @@ async def judge(provider: LLMProvider, ctx: CharterContext, before: FormState, s
     browser often walks past a wrong answer."""
     rules = rules_of(ctx)
     moved = f"Went to: {defang(url)}\n" if before.url and url and url.split("#")[0] != before.url.split("#")[0] else ""
-    user = (f"Today: {utcnow().date().isoformat()}\n\n<rules>\n"
+    user = (f"Today: {run_today().isoformat()}\n\n<rules>\n"
             + defang("\n".join(f"{k}: {v}" for k, v in rules.items())) + "\n</rules>\n\n"
             f"<sent>\n{defang(sent_text(before)) or '(no form)'}\n</sent>\n\n"
             f"<answer>\n{moved}" + "\n".join(f"Says: {defang(m[:300])}" for m in said) + "\n</answer>")
@@ -1202,11 +1254,14 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
                          f"Found by the Mirmera exploration agent ({provider.name}/{provider.model}). "
                          "A draft: review it before filing."),
             expected=p.expected, actual=p.actual,
-            steps_to_reproduce=([first_step(p.fault)] if p.fault else []) + [s["action"]["summary"] if s["type"] == "action"
+            steps_to_reproduce=([clock_line()] if CLOCK_AT.get() else []) + ([first_step(p.fault)] if p.fault else []) + [s["action"]["summary"] if s["type"] == "action"
                                                        else f"open {s['url']}" for s in (edited or [])],
             reproduction_trail=trail, edited_steps=edited,
             environment={"browser": "Chromium (headless)", "url": page_url, "found_by": TESTER,
-                         **({"injected_failure": p.fault} if p.fault else {})},
+                         **({"injected_failure": p.fault} if p.fault else {}),
+                         **({"clock": clock_line().removeprefix("Set the computer's clock to "),
+                             "clock_at": CLOCK_AT.get().isoformat(), "timezone": str(CLOCK_AT.get().tzinfo)}
+                            if CLOCK_AT.get() else {})},
             signature=key, sightings=[], symptom=p.symptom.model_dump(),
         )
         db.add(bug)
@@ -1483,7 +1538,7 @@ def secrets_of(cfg: dict | None) -> list[str]:
 # ---------- confirming a draft before a tester reads it ----------
 
 async def confirm_drafts(pw, bug_ids: list[str], session_id: str, headless: bool, executable_path: str | None,
-                         prepare=None) -> str:
+                         prepare=None, context_options: dict | None = None) -> str:
     """Replays each draft this session made (not sightings of older ones) from its steps, in fresh
     browsers, and checks its symptom each time: "always" (every time), "intermittent" (some
     times) or "once" (never again). Kept on the bug as its reproducibility and confirmation."""
@@ -1495,7 +1550,8 @@ async def confirm_drafts(pw, bug_ids: list[str], session_id: str, headless: bool
     out = []
     for bug_id, title, steps, symptom in todo:
         if steps:
-            result = await _reruns({"steps": steps}, symptom, CONFIRM_RUNS, headless, executable_path, pw, prepare=prepare)
+            result = await _reruns({"steps": steps}, symptom, CONFIRM_RUNS, headless, executable_path, pw, prepare=prepare,
+                                   context_options=context_options)
         else:
             result = {"runs": 0, "reproduced": 0, "results": [], "note": "no steps to replay"}
         n, runs = result["reproduced"], result["runs"]
@@ -1538,6 +1594,13 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                 options = context_options(conditions)
                 context = await _recording_context(browser, folder, run_id, options)
                 filmed_from = time.monotonic()  # step times are kept against the recording's start
+                if (conditions or {}).get("clock_at"):
+                    from zoneinfo import ZoneInfo
+                    CLOCK_AT.set(datetime.fromisoformat(conditions["clock_at"]).astimezone(
+                        ZoneInfo(conditions.get("timezone") or "Africa/Addis_Ababa")))
+                    await set_clock(context)
+                    _note(session_id, "setup", f"The browser's clock is set to {clock_line().removeprefix('Set the computer' + chr(39) + 's clock to ')}: "
+                                               "the app's today is that day.")
                 page = await context.new_page()
                 live = LIVE[run_id] = Live()
                 await _start_screencast(page, live, options["viewport"], slow=(conditions or {}).get("network") == "slow")
@@ -1614,7 +1677,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         observation += "\n" + defang(before.text())
                     drain_signals()
                     hints = _pending_hints(run_id)
-                    today = utcnow().date()
+                    today = run_today()
                     ideas, _, _ = ideas_text(before.fields, tried_values, today, rules=rules_of(ctx))
                     tip = suggest(ctx, before, tried_values, dirty, n_submits, visited, today)
                     stepped_in = False
@@ -1914,6 +1977,27 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             entry["judged"] = "breaks"
                             break
 
+                    sent_dates = {f["label"]: f["value"] for f in before.fields
+                                  if re.fullmatch(r"\d{4}-\d{2}-\d{2}", f["value"] or "")} if submitted and not broke else {}
+                    if sent_dates:
+                        # A date the page shows in the Ethiopian calendar: converted here and compared, no AI.
+                        from app.agent import clock
+                        try:
+                            shown = await page.evaluate("() => document.body ? document.body.innerText : ''")
+                        except Exception:
+                            shown = ""
+                        for w in clock.wrong_dates(shown, sent_dates):
+                            await keep(schemas.ExploreProblem(
+                                title=(f"Shows {w['shown']} for {w['field']} {sent_dates[w['field']]}" if w.get("field")
+                                       else f"Shows {w['shown']}, a day that doesn't exist")[:200],
+                                severity="high",
+                                expected=("Each date shown in the Ethiopian calendar is the date sent: " + w["why"]
+                                          if w.get("field") else "Only days that exist in the Ethiopian calendar are shown.")[:600],
+                                actual=f"After sending {sent_text(before)[:300]}, the page shows \"{w['shown']}\": {w['why']}."[:600],
+                                symptom=schemas.Symptom(kind="text_visible", value=w["shown"],
+                                                        explanation=w["why"][:600])),
+                                ("ethiopian-date", w["shown"]), f". Checked against the Ethiopian calendar: {w['why']}")
+
                     if submitted and (said or broke):
                         # What the app did: from its own words first (no AI to misread it), else the check's reading.
                         outcome = outcome_of(said, broke)
@@ -2072,13 +2156,17 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                            "a fresh browser, to tell a steady bug from a one-off.", "action": "confirm the drafts",
                            "kind": "confirm", "status": "ok", "detail": "", "url": start_url, "by": "Mirmera"}
                 try:
-                    async def signed_in(fresh_page):  # each fresh browser signs in first, as the run did
-                        from app.sign_in import sign_in
-                        ok, how = await sign_in(fresh_page, sign_in_cfg, start_url)
-                        if not ok:
-                            raise RuntimeError(f"couldn't sign in: {how}")
+                    async def as_the_run(fresh_page):  # each fresh browser: the run's clock, signed in as the run was
+                        await set_clock(fresh_page.context)
+                        if sign_in_cfg:
+                            from app.sign_in import sign_in
+                            ok, how = await sign_in(fresh_page, sign_in_cfg, start_url)
+                            if not ok:
+                                raise RuntimeError(f"couldn't sign in: {how}")
+                    zone = {k: v for k, v in context_options(conditions).items() if k in ("timezone_id", "locale")}
                     confirm["detail"] = await confirm_drafts(pw, bug_ids, session_id, headless, executable_path,
-                                                             prepare=signed_in if sign_in_cfg else None)
+                                                             prepare=as_the_run if sign_in_cfg or CLOCK_AT.get() else None,
+                                                             context_options=zone)
                 except Exception as err:  # confirming is extra: it never fails the run
                     confirm["detail"] = f"could not replay: {_first_line(err)}"
                 if confirm["detail"]:

@@ -53,3 +53,23 @@ test('exploration agent: Mirmera explores a charter and leaves a session and a b
     await expect(page.getByText(/^Sent: Search documents = .*The app said: "No documents match/)).toBeVisible()
   })
 })
+
+// The browser's clock: Mirmera explores as if it were another moment, and the session says which.
+test('exploration agent: explores with the browser clock at the calendar\'s edge', async ({ page, api, request }) => {
+  const project = await api.newProject('AddisVerify Clock')
+  await request.patch(`${API_URL}/projects/${project.id}`, { data: { app_url: 'http://localhost:5190' } })
+  const story = await (await request.post(`${API_URL}/projects/${project.id}/stories`, { data: { title: 'Book a delivery', key: 'CLK-1' } })).json()
+  const charter = await api.charter(project.id, 'Explore delivery days around Ethiopian New Year', [])
+  await request.put(`${API_URL}/stories/${story.id}/charters`, { data: { ids: [charter.id] } })
+
+  await page.goto(`/projects/${project.id}/stories/${story.id}`)
+  const explore = page.getByRole('group', { name: 'Mirmera explores' })
+  await expect(explore.getByRole('combobox', { name: 'Browser clock' })).toHaveValue('')
+  await explore.getByRole('combobox', { name: 'Browser clock' }).selectOption({ label: 'on Ethiopian New Year' })
+  await explore.getByRole('button', { name: 'Let Mirmera explore' }).click()
+  await expect(explore.getByRole('status')).toContainText('Explored', { timeout: 60_000 })
+  await page.screenshot({ path: 'test-results/explore-clock.png' })
+  await explore.getByRole('link', { name: 'Open the session' }).click()
+  // Meskerem 1 at 00:20 in Addis Ababa: the session notes say so.
+  await expect(page.getByText(/clock is set to .*00:20 \(Africa\/Addis_Ababa\), Meskerem 1, \d{4}/).first()).toBeVisible()
+})

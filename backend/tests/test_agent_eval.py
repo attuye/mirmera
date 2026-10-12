@@ -1374,3 +1374,105 @@ def test_tricky_files_are_offered_uploaded_and_checked_against_the_rule(client, 
         "An empty file (0 bytes) is accepted although AC1 says it is refused"]
     # the uploads are steps a replay can do too: every draft shows again from its steps alone
     assert [b.reproducibility for b in bugs] == ["always", "always", "always"], [b.confirmation for b in bugs]
+
+
+DELIVERY = """<!doctype html><title>Delivery</title><h1>Choose a delivery day</h1>
+<form id=f><label for=d>Delivery date</label><input id=d type=date>
+<button type=submit>Book delivery</button></form><p role=status id=out></p><p id=ec></p>
+<script>
+// Two clock bugs: "today" is UTC's (a day behind in Addis Ababa until 3 am), and the Ethiopian
+// date counts from 11 September every year, so 11 September in a year without a Pagume 6 shows one.
+function ethiopian(iso) {
+  const MONTHS = ['Meskerem','Tikimt','Hidar','Tahsas','Tir','Yekatit','Megabit','Miazia','Genbot','Sene','Hamle','Nehase','Pagume']
+  const [y, m, d] = iso.split('-').map(Number)
+  const day = Date.UTC(y, m - 1, d), newYear = Date.UTC(y, 8, 12)
+  const start = day < newYear ? Date.UTC(y - 1, 8, 11) : Date.UTC(y, 8, 11)
+  const n = Math.round((day - start) / 86400000)
+  return MONTHS[Math.floor(n / 30)] + ' ' + (n % 30 + 1) + ', ' + (day < newYear ? y - 8 : y - 7)
+}
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const v = document.getElementById('d').value, out = document.getElementById('out')
+  if (!v) { out.textContent = 'Please choose a delivery date.'; return }
+  if (v < new Date().toISOString().slice(0, 10)) { out.textContent = "The delivery date can't be in the past."; return }
+  const r = await fetch('/api/delivery', { method: 'POST', body: v }).catch(() => ({ ok: false }))
+  out.textContent = r.ok ? 'Delivery booked.' : 'Something went wrong.'
+  document.getElementById('ec').textContent = r.ok ? 'We deliver on ' + ethiopian(v) + ' (Ethiopian calendar).' : ''
+})
+</script>""".encode()
+
+
+@pytest.fixture
+def delivery_app():
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class App(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(DELIVERY)
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+@pytest.mark.confirm
+def test_the_browser_clock_finds_a_utc_today_and_a_wrong_ethiopian_date(client, delivery_app, monkeypatch, chromium_available):  # noqa: F811
+    from app import models
+    from app.database import SessionLocal
+    from app.routers.explore import start_exploration
+    from app.agent import explore as agent
+    provider = Scripted([step("Open", kind="goto", url=delivery_app),
+                         step("Yesterday", kind="try", values={"Delivery date": "2026-09-10"}),
+                         step("New Year", kind="try", values={"Delivery date": "2026-09-11"}),
+                         step("Done", kind="done", summary="Tried two days.")])
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+    with SessionLocal() as db:
+        project = models.Project(org_id="eval", name="Delivery", app_url=delivery_app, default_ai_provider="mock")
+        db.add(project)
+        db.flush()
+        story = models.Story(project_id=project.id, title="Book a delivery",
+                             description="Acceptance criteria\n- The delivery date is today or later.")
+        charter = models.Charter(project_id=project.id, mission_statement="Explore delivery days", source="eval")
+        charter.stories = [story]
+        db.add_all([story, charter])
+        db.commit()
+        # 20 past midnight in Addis Ababa on Ethiopian New Year: 21:20 the evening before in UTC
+        r = start_exploration(db, charter, started_by="eval", max_steps=6, conditions={"clock": "2026-09-11T00:20"})
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            db.expire_all()
+            r = db.get(models.ExplorationRun, r.id)
+            if r.status != "running" and r.id not in agent.ACTIVE:
+                break
+        steps = list(r.steps)
+        bugs = [db.get(models.Bug, b) for b in r.bug_ids]
+        notes = [n.content for n in db.query(models.Note).filter_by(session_id=r.session_id)]
+    assert r.conditions["timezone"] == "Africa/Addis_Ababa" and r.conditions["clock_at"].startswith("2026-09-11T00:20")
+    assert any("clock is set to Fri 11 Sep 2026, 00:20 (Africa/Addis_Ababa), Meskerem 1, 2019" in n for n in notes), notes
+    ideas = provider.users[1].split("<ideas>")[1].split("</ideas>")[0]
+    assert '- Delivery date: yesterday (by the user\'s clock) ("2026-09-10"); the last day of Pagume ("2027-09-11")' in ideas, ideas
+    assert [s["status"] for s in steps[1:3]] == ["drafted", "drafted"], [(s["action"], s["detail"]) for s in steps]
+    assert [b.title for b in bugs] == [
+        "A delivery date in the past (2026-09-10, the user's today is 2026-09-11) is accepted although AC1 says it is refused",
+        "Shows Pagume 6, 2018, a day that doesn't exist"]
+    assert bugs[0].steps_to_reproduce[0] == ("Set the computer's clock to Fri 11 Sep 2026, 00:20 (Africa/Addis_Ababa), "
+                                             "Meskerem 1, 2019 in the Ethiopian calendar")
+    assert bugs[0].environment["clock_at"].startswith("2026-09-11T00:20") and bugs[0].environment["timezone"] == "Africa/Addis_Ababa"
+    # the replays set the same clock in the same time zone: both show every time
+    assert [b.reproducibility for b in bugs] == ["always", "always"], [b.confirmation for b in bugs]
