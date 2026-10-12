@@ -9,6 +9,7 @@ import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } f
 const TRACKER_LABEL: Record<TrackerName, string> = { github: 'GitHub', jira: 'Jira' }
 
 const VERDICT: Record<DuplicateCandidate['verdict'], { label: string; fg: string; bg: string }> = {
+  same_problem: { label: 'Already filed', fg: 'var(--danger)', bg: 'var(--danger-bg)' },
   likely_duplicate: { label: 'Likely duplicate', fg: 'var(--danger)', bg: 'var(--danger-bg)' },
   related: { label: 'Related', fg: 'var(--warning)', bg: 'var(--warning-bg)' },
   different: { label: 'Different', fg: 'var(--text-tertiary)', bg: 'var(--panel-alt)' },
@@ -127,11 +128,18 @@ export default function FileToTracker({ bug, project, onProject, onFiled }: {
 
   const status = statuses?.find((s) => s.name === tracker)
   const filed = bug.filings.find((f) => f.tracker === tracker)
+  const alreadyFiled = !!check?.candidates.some((c) => c.verdict === 'same_problem')
 
   async function runCheck() {
     if (!tracker) return
     setBusy('check'); setError(null); setPicked(null)
-    try { setCheck(await api.checkDuplicates(bug.id, tracker)) } catch (e) { setError(errorText(e)) } finally { setBusy(null) }
+    try {
+      const found = await api.checkDuplicates(bug.id, tracker)
+      setCheck(found)
+      // The same problem is already filed: adding to it is the likely choice (the tester can still file new).
+      const same = found.candidates.find((c) => c.verdict === 'same_problem')
+      if (same) setPicked(same.key)
+    } catch (e) { setError(errorText(e)) } finally { setBusy(null) }
   }
 
   async function file() {
@@ -140,6 +148,7 @@ export default function FileToTracker({ bug, project, onProject, onFiled }: {
     try {
       const r = await api.fileBug(bug.id, {
         tracker, mode: picked ? 'comment' : 'new', issue_key: picked ?? undefined, note: note.trim() || undefined,
+        file_anyway: !picked && alreadyFiled,  // the tester saw the issue with the same problem and chose a new one
       })
       setWarnings(r.warnings)
       onFiled(r.filing)
@@ -191,7 +200,8 @@ export default function FileToTracker({ bug, project, onProject, onFiled }: {
             </button>
             <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
               {check
-                ? <>Searched {TRACKER_LABEL[check.tracker]} for <span className="mono">{check.searched_for.join(', ') || '(no usable words in the title)'}</span>, open and closed.</>
+                ? <>Searched {TRACKER_LABEL[check.tracker]} for <span className="mono">{check.searched_for.join(', ') || '(no usable words in the title)'}</span>
+                    {check.fingerprint && <> and the fingerprint <span className="mono">{check.fingerprint}</span></>}, open and closed.</>
                 : 'Searches open and closed issues; the AI rates each match. You decide.'}
             </span>
           </div>
@@ -218,7 +228,7 @@ export default function FileToTracker({ bug, project, onProject, onFiled }: {
               </label>
               {picked && <button onClick={() => setPicked(null)} style={quietButton}>File as new instead</button>}
               <button onClick={file} disabled={!!busy} style={primaryButton(!!busy)}>
-                {busy === 'file' ? 'Filing…' : picked ? `Add to ${picked}` : `File new ${TRACKER_LABEL[tracker!]} issue`}
+                {busy === 'file' ? 'Filing…' : picked ? `Add to ${picked}` : `File new ${TRACKER_LABEL[tracker!]} issue${alreadyFiled ? ' anyway' : ''}`}
               </button>
             </div>
           )}

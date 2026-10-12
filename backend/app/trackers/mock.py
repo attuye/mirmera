@@ -50,7 +50,7 @@ class MockTracker(IssueTracker):
 
     async def search(self, words: list[str], limit: int = 8) -> list[TrackerIssue]:
         def overlap(issue: TrackerIssue) -> int:
-            return len(set(words) & set(keywords(issue.title + " " + issue.snippet, limit=50)))
+            return len(set(words) & set(keywords(issue.title + " " + (issue.body or issue.snippet), limit=10_000)))
         hits = [i for i in self._db["issues"] if overlap(i) > 0]
         return sorted(hits, key=overlap, reverse=True)[:limit]
 

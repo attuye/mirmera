@@ -75,7 +75,8 @@ def build_report(bug: models.Bug, evidence: list[models.Evidence], *, attaches_f
     footer = f"Found in an exploratory testing session. Charter: {bug.charter.mission_statement}"
     if settings.public_app_url:
         footer += f". Full evidence: {settings.public_app_url.rstrip('/')}/bugs"
-    b.append(Block("paragraph", footer + ". Filed from Mirmera."))
+    from app.trackers.fingerprint import fingerprint
+    b.append(Block("paragraph", footer + f". Filed from Mirmera. Mirmera fingerprint: {fingerprint(bug)}"))
     return b
 
 

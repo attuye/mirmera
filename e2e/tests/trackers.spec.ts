@@ -65,3 +65,36 @@ test('file a reviewed bug: set up, check duplicates, add an occurrence on GitHub
     await expect(row.getByRole('link', { name: 'KYC-3 ↗' })).toBeVisible()
   })
 })
+
+// The same problem reported again: Mirmera knows KYC-3 is it (its fingerprint), without AI.
+test('file a reviewed bug: the same problem already filed is found first and picked', async ({ page, api, request }) => {
+  const project = await api.project()
+  const { API_URL } = await import('./fixtures')
+  await request.patch(`${API_URL}/projects/${project.id}`, { data: { jira_project_key: 'KYC' } })
+  const charter = await api.charter(project.id, 'Explore ID upload across browsers')
+  const session = await api.session(charter.id)
+  const title = 'Selfie step freezes on retake'
+  const review = { kind: 'bug', steps_to_reproduce: ['Open /selfie', 'Retake'], expected: 'A new photo', actual: 'Frozen',
+    oracle_heuristic: 'user_expectations', oracle_explanation: 'Retake works elsewhere' }
+  const first = await api.bug(session.id, title)
+  await api.reviewBug(first.id, review)
+  await request.post(`${API_URL}/bugs/${first.id}/file`, { data: { tracker: 'jira' } })
+  const again = await api.bug(session.id, `${title}  `)  // the same report, from another tester
+  await api.reviewBug(again.id, review)
+
+  await page.goto(`/projects/${project.id}/bugs`)
+  const rows = page.getByRole('article', { name: title })
+  const row = rows.first()  // newest first: the one not filed yet
+  await row.getByRole('button', { name: new RegExp(title) }).click()
+  const panel = row.getByRole('region', { name: 'File in tracker' })
+  await panel.getByRole('tab', { name: /Jira/ }).click()
+  await panel.getByRole('button', { name: 'Check for duplicates' }).click()
+  await expect(panel).toContainText(/and the fingerprint mfp[0-9a-f]{12}, open and closed/)
+  const same = panel.getByRole('listitem', { name: new RegExp(`KYC-\\d+ ${title}`) })
+  await expect(same).toContainText('Already filed')
+  await expect(same).toContainText('Mirmera already filed this problem')
+  await expect(panel.getByRole('button', { name: /^Add to KYC-\d+$/ })).toBeVisible()  // picked for the tester
+  await page.screenshot({ path: 'test-results/same-problem.png' })
+  await panel.getByRole('button', { name: 'File as new instead' }).click()
+  await expect(panel.getByRole('button', { name: 'File new Jira issue anyway' })).toBeVisible()
+})
