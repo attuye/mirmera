@@ -7,7 +7,7 @@ import { EnvironmentChoice } from '../components/BrowserPanel'
 import ClosedIssues from '../components/ClosedIssues'
 import { utcDate } from '../components/Evidence'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton } from '../components/ui'
-import { api, projectUrls, suiteExportUrl, SuiteRun, SuiteTest, Triage } from '../api/client'
+import { api, BROWSER_LABEL, BrowserEngine, projectUrls, suiteExportUrl, SuiteRun, SuiteTest, Triage } from '../api/client'
 import { useProject, useProjectPath } from '../project'
 
 const POLL_MS = 1500
@@ -72,6 +72,7 @@ export default function Regression() {
   const [history, setHistory] = useState<SuiteRun[]>([])
   const [run, setRun] = useState<SuiteRun | null>(null)
   const [baseUrl, setBaseUrl] = useState(project.app_url ?? '')
+  const [engine, setEngine] = useState<BrowserEngine | ''>('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const timer = useRef<number | null>(null)
@@ -94,7 +95,7 @@ export default function Regression() {
   async function start(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true); setError(null)
-    try { setRun(await api.runSuite(project.id, baseUrl.trim() || undefined)) } catch (err) { setError(errorText(err)) } finally { setBusy(false) }
+    try { setRun(await api.runSuite(project.id, baseUrl.trim() || undefined, engine || undefined)) } catch (err) { setError(errorText(err)) } finally { setBusy(false) }
   }
 
   const running = run?.status === 'running'
@@ -132,6 +133,13 @@ export default function Regression() {
                 <span style={fieldLabel}>Replay against</span>
                 <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} style={input} placeholder="Each test's recorded address" />
               </label>
+              <label>
+                <span style={fieldLabel}>In</span>
+                <select aria-label="Browser" value={engine} onChange={(e) => setEngine(e.target.value as BrowserEngine | '')} style={input}>
+                  <option value="">each bug's own browser</option>
+                  {(Object.keys(BROWSER_LABEL) as BrowserEngine[]).map((b) => <option key={b} value={b}>{BROWSER_LABEL[b]}</option>)}
+                </select>
+              </label>
               <button type="submit" disabled={busy || running} style={primaryButton(busy || running)}>
                 {running ? `Running ${run!.results.length + 1} of ${run!.total}…` : `Run all ${tests.length} test${tests.length === 1 ? '' : 's'}`}
               </button>
@@ -145,7 +153,7 @@ export default function Regression() {
                 <div role="status" style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap', fontSize: 13 }}>
                   <b>{running ? 'Running' : run.status === 'done' ? 'Latest run' : run.status === 'cancelled' ? 'Cancelled' : 'Stopped'}</b>
                   <span style={{ color: 'var(--text-secondary)' }}>{counts(run)}</span>
-                  <span className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{run.base_url ?? 'recorded addresses'} · {when(run.created_at)}</span>
+                  <span className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{run.base_url ?? 'recorded addresses'}{run.browser ? ` · ${BROWSER_LABEL[run.browser]}` : ''} · {when(run.created_at)}</span>
                 </div>
                 {run.detail && <div style={{ fontSize: 12.5, color: 'var(--warning)', marginTop: 4 }}>{run.detail}</div>}
                 {fixedNow.length > 0 && (

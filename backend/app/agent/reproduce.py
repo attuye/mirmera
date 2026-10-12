@@ -237,12 +237,14 @@ def _user_message(ctx: BugContext, history: list[dict], observation: str, steps_
 
 
 async def _reruns(plan: dict, symptom: dict, runs: int, headless: bool, executable_path: str | None, pw,
-                  prepare=None, context_options: dict | None = None) -> dict:
+                  prepare=None, context_options: dict | None = None, browser: str | None = None) -> dict:
     """Replays the found steps in fresh browsers and checks the symptom each time.
     prepare(page): what each fresh browser does first (signing in to the app, setting its clock).
     context_options: how each browser is set up (its time zone, as the run had it)."""
+    from app.browsers import launch
     results = []
-    browser = await pw.chromium.launch(headless=headless, executable_path=executable_path or None)
+    engine = browser
+    browser = await launch(pw, engine, headless=headless, executable_path=executable_path)
     try:
         for i in range(runs):
             page = await (await browser.new_context(**(context_options or {}))).new_page()

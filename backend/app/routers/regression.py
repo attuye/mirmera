@@ -14,6 +14,7 @@ from app.evidence_text import browser_context
 from app.regression import steps as bug_steps
 from app.regression.plan import MAX_ACTIONS, action_lines, origin, resolve, slug
 from app.regression.render import render
+from app.browsers import BrowserMissing
 from app.regression.replay import replay as run_replay
 from app.routers import runner as runner_api
 from app.routers.trackers import _bug_or_404
@@ -163,6 +164,8 @@ async def generate(bug_id: str, payload: schemas.RegressionRequest, db: DBSessio
     if st.reach:
         resolved["reach"] = {"url_contains": st.reach, "recorded": st.anchor}
     env = bug.environment or {}
+    if env.get("engine") and env["engine"] != "chromium":  # found in Firefox or WebKit: the test runs there
+        resolved["browser"] = env["engine"]
     if env.get("clock_at"):  # found with the browser's clock set: the test sets it too
         resolved["clock"] = {"at": env["clock_at"], "timezone": env.get("timezone") or "Africa/Addis_Ababa"}
     base_url = resolved["base_url"]
@@ -192,9 +195,11 @@ def replay(test_id: str, payload: schemas.ReplayRequest, db: DBSession = Depends
     try:
         result = manager.loop.run(
             run_replay(test.plan, base_url=payload.base_url or test.base_url, headless=True,
-                       executable_path=settings.runner_chromium_path), timeout=240)
+                       executable_path=settings.runner_chromium_path, browser=payload.browser), timeout=240)
     except ImportError as err:
         raise RunnerUnavailable("Playwright is not installed. Run: python -m playwright install chromium") from err
+    except BrowserMissing as err:
+        raise RunnerUnavailable(str(err)) from err
     except Exception as err:
         if "Executable doesn't exist" in str(err) or "executable" in str(err).lower():
             raise RunnerUnavailable(f"The browser would not start: {str(err).splitlines()[0]}") from err

@@ -19,8 +19,9 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements*.txt
       - run: pip install -r requirements-dev.txt
-      # Chromium for the recorded-browser tests (they fail rather than skip in CI)
-      - run: python -m playwright install --with-deps chromium
+      # Chromium for the recorded-browser tests, Firefox and WebKit for the other-browser tests
+      # (they fail rather than skip in CI)
+      - run: python -m playwright install --with-deps chromium firefox webkit
       - run: python -m pytest -v
 
   frontend:

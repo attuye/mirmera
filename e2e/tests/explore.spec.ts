@@ -65,6 +65,8 @@ test('exploration agent: explores with the browser clock at the calendar\'s edge
   await page.goto(`/projects/${project.id}/stories/${story.id}`)
   const explore = page.getByRole('group', { name: 'Mirmera explores' })
   await expect(explore.getByRole('combobox', { name: 'Browser clock' })).toHaveValue('')
+  await expect(explore.getByRole('combobox', { name: 'Browser', exact: true })).toHaveValue('chromium')
+  await expect(explore.getByRole('combobox', { name: 'Browser', exact: true }).getByRole('option')).toHaveText(['in Chromium', 'in Firefox', 'in WebKit (Safari)'])
   await explore.getByRole('combobox', { name: 'Browser clock' }).selectOption({ label: 'on Ethiopian New Year' })
   await explore.getByRole('button', { name: 'Let Mirmera explore' }).click()
   await expect(explore.getByRole('status')).toContainText('Explored', { timeout: 60_000 })

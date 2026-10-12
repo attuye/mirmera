@@ -604,6 +604,7 @@ class RegressionSuiteRun(Base):
     project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
     status = Column(String, default="running")  # running | done | cancelled | error
     base_url = Column(String, nullable=True)  # None: each test's own recorded address
+    browser = Column(String, nullable=True)  # None: each test in the browser its bug was found in
     total = Column(Integer, default=0)
     results = Column(JSON, default=list)  # [{"bug_id", "bug_title", "test_id", "known_failing", "outcome", "duration_ms", "detail"}]
     detail = Column(Text, nullable=True)

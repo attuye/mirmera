@@ -71,7 +71,9 @@ async def access_check(pw, urls: list[str], cfg: dict, second: dict | None, base
     if not pages:
         return ""
     viewport = {"width": 1280, "height": 800}
-    browser = await pw.chromium.launch(headless=headless, executable_path=executable_path or None)
+    from app.agent.explore import ENGINE
+    from app.browsers import launch
+    browser = await launch(pw, ENGINE.get(), headless=headless, executable_path=executable_path)
     done, found = [], 0
     try:
         # What's on every page for anyone: the second user's (or a visitor's) own start page.

@@ -1150,6 +1150,7 @@ class RegressionRequest(BaseModel):
 
 class ReplayRequest(BaseModel):
     base_url: Optional[str] = Field(default=None, pattern=r"^https?://")
+    browser: Optional[Literal["chromium", "firefox", "webkit"]] = None  # None: the browser the bug was found in (Chromium unless said)
 
 
 class RegressionTestOut(BaseModel):
@@ -1439,6 +1440,7 @@ class ExploreConditions(BaseModel):
     # The browser's clock: a moment at the calendar's edge ("after-midnight", "pagume", "ethiopian-new-year",
     # "before-midnight", "year-end", "leap-day") or a local date and time ("2026-09-10T23:50").
     clock: Optional[str] = Field(default=None, max_length=40)
+    browser: Optional[Literal["chromium", "firefox", "webkit"]] = None  # the engine: Chromium unless asked
 
     @field_validator("clock")
     @classmethod
@@ -1616,6 +1618,7 @@ class Deleted(BaseModel):
 
 class SuiteRequest(BaseModel):
     base_url: Optional[str] = Field(default=None, pattern=r"^https?://")  # None: each test's recorded address
+    browser: Optional[Literal["chromium", "firefox", "webkit"]] = None  # None: each test in the browser its bug was found in
 
 
 class SuiteTest(BaseModel):
@@ -1638,6 +1641,7 @@ class SuiteRunOut(BaseModel):
     project_id: str
     status: str
     base_url: Optional[str] = None
+    browser: Optional[str] = None
     total: int
     results: list[dict] = []
     detail: Optional[str] = None
@@ -2432,15 +2436,21 @@ class AppMapRequest(BaseModel):
     max_pages: int = Field(default=25, ge=1, le=60)
 
 
+class CompareSide(Environment):
+    """One side of a comparison: an address, in a browser (Chromium unless said)."""
+    browser: Literal["chromium", "firefox", "webkit"] = "chromium"
+
+
 class CompareRequest(BaseModel):
-    """Do a session's journey on two versions or environments and list what differs."""
-    a: Environment
-    b: Environment
+    """Do a session's journey on two versions or environments (or one address in two browsers)
+    and list what differs."""
+    a: CompareSide
+    b: CompareSide
 
     @model_validator(mode="after")
     def _two(self):
-        if self.a.url.rstrip("/") == self.b.url.rstrip("/"):
-            raise ValueError("Pick two different addresses to compare.")
+        if self.a.url.rstrip("/") == self.b.url.rstrip("/") and self.a.browser == self.b.browser:
+            raise ValueError("Pick two different addresses, or two browsers, to compare.")
         if self.a.name == self.b.name:
             raise ValueError("Give the two environments different names.")
         return self

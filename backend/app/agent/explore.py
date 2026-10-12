@@ -58,6 +58,7 @@ CLAIM = re.compile(r"\b(accepts|accepted|rejects|rejected|refuses|refused|works|
 ACTIVE: set[str] = set()  # run ids being worked on in this process
 # The browser's clock for this run, when one is set (each run is its own task, so its own value).
 CLOCK_AT: ContextVar[datetime | None] = ContextVar("clock_at", default=None)
+ENGINE: ContextVar[str] = ContextVar("engine", default="chromium")  # chromium | firefox | webkit, for this run
 VIEWPORT = {"width": 1280, "height": 800}  # fixed per run, so a target's box can be drawn on any frame
 PHONE = {"width": 390, "height": 844}
 SLOW_NETWORK = {"offline": False, "latency": 400, "downloadThroughput": 50 * 1024, "uploadThroughput": 20 * 1024}
@@ -84,6 +85,11 @@ def context_options(conditions: dict | None) -> dict:
         from app.agent.clock import DEFAULT_TZ
         out["timezone_id"] = c.get("timezone") or DEFAULT_TZ
     return out
+
+
+def _engine_label() -> str:
+    from app.browsers import label
+    return label(ENGINE.get())
 
 
 def run_today():
@@ -120,9 +126,21 @@ LIVE: dict[str, Live] = {}  # run id -> its latest frame, while it runs
 
 
 async def _start_screencast(page, live: Live, viewport: dict = VIEWPORT, slow: bool = False) -> None:
-    """Chromium sends a frame whenever the page repaints: kept as the latest frame."""
+    """Chromium sends a frame whenever the page repaints: kept as the latest frame. Firefox and
+    WebKit have no screencast: a screenshot every 0.7 s instead, while the page is open."""
     import asyncio
     import base64
+    if ENGINE.get() != "chromium":
+        async def shoot():
+            while not page.is_closed():
+                try:
+                    live.frame, live.url = await page.screenshot(type="jpeg", quality=50), page.url
+                    live.seq += 1
+                except Exception:
+                    pass
+                await asyncio.sleep(0.7)
+        asyncio.ensure_future(shoot())
+        return
     try:
         cdp = await page.context.new_cdp_session(page)
 
@@ -1258,7 +1276,8 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
             steps_to_reproduce=([clock_line()] if CLOCK_AT.get() else []) + ([first_step(p.fault)] if p.fault else []) + [s["action"]["summary"] if s["type"] == "action"
                                                        else f"open {s['url']}" for s in (edited or [])],
             reproduction_trail=trail, edited_steps=edited,
-            environment={"browser": "Chromium (headless)", "url": page_url, "found_by": TESTER,
+            environment={"browser": f"{_engine_label()} (headless)", "url": page_url, "found_by": TESTER,
+                         **({"engine": ENGINE.get()} if ENGINE.get() != "chromium" else {}),
                          **({"injected_failure": p.fault} if p.fault else {}),
                          **({"clock": clock_line().removeprefix("Set the computer's clock to "),
                              "clock_at": CLOCK_AT.get().isoformat(), "timezone": str(CLOCK_AT.get().tzinfo)}
@@ -1570,7 +1589,7 @@ async def confirm_drafts(pw, bug_ids: list[str], session_id: str, headless: bool
     for bug_id, title, steps, symptom in todo:
         if steps:
             result = await _reruns({"steps": steps}, symptom, CONFIRM_RUNS, headless, executable_path, pw, prepare=prepare,
-                                   context_options=context_options)
+                                   context_options=context_options, browser=ENGINE.get())
         else:
             result = {"runs": 0, "reproduced": 0, "results": [], "note": "no steps to replay"}
         n, runs = result["reproduced"], result["runs"]
@@ -1607,10 +1626,12 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
 
     try:
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=headless, executable_path=executable_path or None)
+            from app import browsers
+            ENGINE.set((conditions or {}).get("browser") or "chromium")
+            browser = await browsers.launch(pw, ENGINE.get(), headless=headless, executable_path=executable_path)
             context = None
             try:
-                options = context_options(conditions)
+                options = browsers.context_options(ENGINE.get(), context_options(conditions))
                 context = await _recording_context(browser, folder, run_id, options)
                 filmed_from = time.monotonic()  # step times are kept against the recording's start
                 if (conditions or {}).get("clock_at"):
@@ -1620,6 +1641,10 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     await set_clock(context)
                     _note(session_id, "setup", f"The browser's clock is set to {clock_line().removeprefix('Set the computer' + chr(39) + 's clock to ')}: "
                                                "the app's today is that day.")
+                if ENGINE.get() != "chromium":
+                    _note(session_id, "setup", f"Exploring in {browsers.label(ENGINE.get())}"
+                          + (" (the slow network is Chromium's only: this run's network is normal)."
+                             if (conditions or {}).get("network") == "slow" else "."))
                 page = await context.new_page()
                 live = LIVE[run_id] = Live()
                 await _start_screencast(page, live, options["viewport"], slow=(conditions or {}).get("network") == "slow")

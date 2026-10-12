@@ -705,6 +705,7 @@ export interface SuiteRun {
   project_id: string
   status: 'running' | 'done' | 'cancelled' | 'error'
   base_url: string | null
+  browser?: BrowserEngine | null
   total: number
   results: { bug_id: string; bug_title: string; test_id: string; known_failing: boolean
     outcome: ReplayResult['outcome'] | 'error'; meaning: string; duration_ms: number; detail: string
@@ -783,16 +784,21 @@ export interface CompareSnapshot {
 }
 /** A session's journey done again on two environments, side by side. */
 export interface Comparison {
-  id: string; session_id: string; env_a: Environment; env_b: Environment
+  id: string; session_id: string; env_a: Environment & { browser?: BrowserEngine }; env_b: Environment & { browser?: BrowserEngine }
   steps: { n: number; description: string; a: CompareSnapshot; b: CompareSnapshot; differences: string[]; shots: string[] }[]
   summary: string | null; status: 'done' | 'error'; detail: string | null; started_by: string | null
   bug_ids: string[]; created_at: string
 }
 
+/** The browser engine Mirmera drives. */
+export type BrowserEngine = 'chromium' | 'firefox' | 'webkit'
+export const BROWSER_LABEL: Record<BrowserEngine, string> = { chromium: 'Chromium', firefox: 'Firefox', webkit: 'WebKit (Safari)' }
+
 export interface ExploreConditions {
   device?: 'desktop' | 'phone'; network?: 'normal' | 'slow'; locale?: string; timezone?: string
   /** The browser's clock: a preset ("after-midnight", "pagume", …) or a local "2026-09-10T23:50" */
   clock?: string
+  browser?: BrowserEngine
   /** Set by Mirmera when the run starts: the moment the clock was fixed at */
   clock_at?: string
 }
@@ -1026,8 +1032,8 @@ export const suiteExportUrl = (projectId: string) => `${BASE_URL}/projects/${pro
 
 export const api = {
   listRegressionTests: (projectId: string) => request<SuiteTest[]>(`/projects/${projectId}/regression-tests`),
-  runSuite: (projectId: string, base_url?: string) =>
-    request<SuiteRun>(`/projects/${projectId}/regression-suite`, { method: 'POST', body: JSON.stringify({ base_url }) }),
+  runSuite: (projectId: string, base_url?: string, browser?: BrowserEngine) =>
+    request<SuiteRun>(`/projects/${projectId}/regression-suite`, { method: 'POST', body: JSON.stringify({ base_url, browser }) }),
   getSuiteRun: (runId: string) => request<SuiteRun>(`/suite-runs/${runId}`),
   cancelSuiteRun: (runId: string) => request<SuiteRun>(`/suite-runs/${runId}/cancel`, { method: 'POST' }),
   suiteHistory: (projectId: string) => request<SuiteRun[]>(`/projects/${projectId}/suite-runs`),
@@ -1094,7 +1100,7 @@ export const api = {
     request<WorkspaceKeys>(`/workspaces/${workspaceId}/keys`, { method: 'PUT', body: JSON.stringify({ values }) }),
   workspaceActivity: (workspaceId: string) => request<AgentActivityList>(`/workspaces/${workspaceId}/agent-activity`),
   storyActivity: (storyId: string) => request<AgentActivityList>(`/stories/${storyId}/agent-activity`),
-  compareSession: (sessionId: string, a: Environment, b: Environment) =>
+  compareSession: (sessionId: string, a: Environment & { browser?: BrowserEngine }, b: Environment & { browser?: BrowserEngine }) =>
     request<Comparison>(`/sessions/${sessionId}/comparisons`, { method: 'POST', body: JSON.stringify({ a, b }) }),
   comparisons: (sessionId: string) => request<Comparison[]>(`/sessions/${sessionId}/comparisons`),
   comparisonBug: (comparisonId: string, n: number, right: 'a' | 'b') =>

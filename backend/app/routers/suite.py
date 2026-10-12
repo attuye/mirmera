@@ -58,6 +58,10 @@ def run_all(project_id: str, payload: schemas.SuiteRequest, db: DBSession = Depe
                                                          models.RegressionSuiteRun.status == "running").all()
     if any(r.id in engine.ACTIVE for r in running):
         raise HTTPException(409, "The regression tests are already running for this project.")
+    if payload.browser not in (None, "chromium"):
+        from app import browsers
+        if not browsers.installed(payload.browser):
+            raise HTTPException(409, browsers.install_hint(payload.browser))
     pairs = engine.latest_tests(db, project_id)
     if not pairs:
         raise HTTPException(409, "No regression tests yet. Generate one from a reviewed bug on the Bugs page.")
@@ -65,13 +69,15 @@ def run_all(project_id: str, payload: schemas.SuiteRequest, db: DBSession = Depe
     items = [{"bug_id": b.id, "bug_title": b.title, "test_id": t.id, "known_failing": t.known_failing,
               "plan": t.plan, "base_url": t.base_url, "history": history.get(t.id, [])} for b, t in pairs]
     run = models.RegressionSuiteRun(project_id=project_id, status="running",
-                                    base_url=(payload.base_url or "").rstrip("/") or None, total=len(items), results=[])
+                                    base_url=(payload.base_url or "").rstrip("/") or None, browser=payload.browser,
+                                    total=len(items), results=[])
     db.add(run)
     db.commit()
     db.refresh(run)
     engine.ACTIVE.add(run.id)
     asyncio.run_coroutine_threadsafe(
-        engine.run_suite(run.id, items, base_url=run.base_url, headless=True, executable_path=settings.runner_chromium_path),
+        engine.run_suite(run.id, items, base_url=run.base_url, headless=True, executable_path=settings.runner_chromium_path,
+                         browser=payload.browser),
         manager.loop._get(),
     )
     return run

@@ -74,7 +74,7 @@ def _cancelled(run_id: str) -> bool:
 
 
 async def run_suite(run_id: str, items: list[dict], *, base_url: str | None, headless: bool,
-                    executable_path: str | None) -> None:
+                    executable_path: str | None, browser: str | None = None) -> None:
     """items: [{"bug_id", "bug_title", "test_id", "known_failing", "plan", "base_url", "history"}]
     An unexpected result is replayed once more straight away, then triaged: product, test, data,
     environment, setup, or flaky."""
@@ -90,7 +90,7 @@ async def run_suite(run_id: str, items: list[dict], *, base_url: str | None, hea
             row = {k: item[k] for k in ("bug_id", "bug_title", "test_id", "known_failing")}
             try:
                 result = await replay(item["plan"], base_url=base_url or item["base_url"], headless=headless,
-                                      executable_path=executable_path)
+                                      executable_path=executable_path, browser=browser)
                 failed = next((s for s in result["steps"] if s["status"] in ("failed", "skipped")), None)
                 row |= {"outcome": result["outcome"], "duration_ms": result["duration_ms"],
                         "meaning": meaning(result["outcome"], item["known_failing"]),
@@ -99,7 +99,7 @@ async def run_suite(run_id: str, items: list[dict], *, base_url: str | None, hea
                 if not expected(result["outcome"], item["known_failing"]) and result["outcome"] != "incomplete":
                     # A second try straight away: a result that doesn't repeat is flaky, not news.
                     retry = await replay(item["plan"], base_url=base_url or item["base_url"], headless=headless,
-                                         executable_path=executable_path)
+                                         executable_path=executable_path, browser=browser)
                     row["retry_outcome"] = retry["outcome"]
                 row["triage"] = classify(result, item["known_failing"], retry=retry, history=item.get("history"))
                 with SessionLocal() as db:

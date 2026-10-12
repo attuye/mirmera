@@ -20,6 +20,7 @@ test('compare: the same steps on two environments show what changed, and a diffe
   const panel = page.getByRole('region', { name: 'Compare environments' })
   await expect(panel.getByLabel('A address')).toHaveValue('http://localhost:5190')
   await expect(panel.getByLabel('B address')).toHaveValue('http://127.0.0.1:5190')
+  await expect(panel.getByLabel('B browser')).toHaveValue('chromium')  // one address in two browsers works too
   await panel.getByRole('button', { name: 'Compare' }).click()
 
   const result = panel.getByRole('region', { name: 'Comparison result' })
