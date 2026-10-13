@@ -10,11 +10,14 @@ export default function DismissalList({ projectId }: { projectId: string }) {
   useEffect(() => { api.dismissals(projectId).then(setRows).catch((e) => setError(errorText(e))) }, [projectId])
   if (!rows) return <ErrorLine message={error} />
   return (
-    <section aria-label="Dismissed problems" style={{ marginTop: 28 }}>
-      <h2 style={{ fontSize: 15, fontWeight: 600, margin: '0 0 4px' }}>What Mirmera won't draft again</h2>
-      <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: '0 0 10px', lineHeight: 1.5 }}>
-        Drafts the team dismissed, and why. Mirmera skips these problems in this project, and its AI is told why.
-      </p>
+    <section aria-label="Dismissed problems" style={{ borderTop: '1px solid var(--border-soft)', padding: '22px 0', display: 'grid', gridTemplateColumns: '220px 1fr', gap: 24 }}>
+      <div>
+        <h2 style={{ fontSize: 14.5, fontWeight: 600, margin: 0 }}>What Mirmera won't draft again</h2>
+        <p style={{ fontSize: 12, color: 'var(--text-tertiary)', margin: '5px 0 0', lineHeight: 1.5 }}>
+          Drafts the team dismissed, and why. Mirmera skips these problems in this project, and its AI is told why.
+        </p>
+      </div>
+      <div style={{ minWidth: 0 }}>
       {rows.length === 0 ? <div style={{ fontSize: 12.5, color: 'var(--text-tertiary)' }}>Nothing dismissed yet.</div> : (
         <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {rows.map((d) => (
@@ -34,6 +37,7 @@ export default function DismissalList({ projectId }: { projectId: string }) {
         </ul>
       )}
       <ErrorLine message={error} />
+      </div>
     </section>
   )
 }

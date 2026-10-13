@@ -826,3 +826,24 @@ class Dismissal(Base):
     note = Column(Text, nullable=True)
     by = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow)
+
+
+class TestData(Base):
+    """A value the team keeps for the app under test, and which fields it fills (see app/test_data.py)."""
+    __tablename__ = "test_data"
+    __test__ = False  # not a pytest class
+    id = Column(String, primary_key=True, default=gen_id)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)  # "valid national ID": how people, steps ({data:…}) and the agent name it
+    value = Column(Text, nullable=False)  # encrypted when secret
+    secret = Column(Boolean, default=False)
+    labels = Column(JSON, default=list)  # the app's field labels it fills: ["National ID", "ID number"]
+    page = Column(String, nullable=True)  # only on this page (a path), when a label means different things
+    kind = Column(String, default="valid")  # valid | invalid | edge
+    once = Column(Boolean, default=False)  # works once (a voucher): marked used when the app accepts it
+    used_at = Column(DateTime, nullable=True)
+    used_by_run = Column(String, nullable=True)
+    note = Column(Text, nullable=True)
+    last_seen_at = Column(DateTime, nullable=True)  # a run met one of its fields
+    missed_at = Column(DateTime, nullable=True)  # a run saw forms but none of its fields: renamed?
+    created_at = Column(DateTime, default=utcnow)

@@ -227,6 +227,8 @@ class CharterContext:
     app_map: str | None = None  # the app's pages and forms, from the latest survey
     signed_in_as: str | None = None  # Mirmera signed in to the app as this user before the run
     dismissed: list[str] = field(default_factory=list)  # what the team said isn't a bug here, and why
+    project_id: str | None = None
+    test_data: list[dict] = field(default_factory=list)  # the team's values (secrets in memory only): never in the prompt
 
     def has_rules(self) -> bool:
         return bool(self.criteria or self.risks)
@@ -380,6 +382,13 @@ class FormState:
 async def form_state(page) -> FormState:
     try:
         data = await page.evaluate(FORM_JS)
+        from app import test_data
+        if test_data.secrets():  # the team's secret test data never leaves the browser
+            for f in data.get("fields") or []:
+                f["value"] = test_data.mask(f.get("value") or "")
+            data["messages"] = [test_data.mask(m) for m in data.get("messages") or []]
+            data["lines"] = [test_data.mask(m) for m in data.get("lines") or []]
+        test_data.PAGE.set(page.url)
         return FormState(fields=data.get("fields") or [], messages=data.get("messages") or [],
                          lines=[l[:200] for l in data.get("lines") or []], url=page.url,
                          title=(data.get("title") or "")[:200], heading=(data.get("heading") or "")[:200],
@@ -461,8 +470,13 @@ def option_of(f: dict, value: str) -> str | None:
 
 def valid_value(f: dict, today, rules: dict[str, str] | None = None) -> str | None:
     """Ordinary valid data for a field, so a try changes only the fields it names. None: leave it.
-    Within what the rules allow: a quantity of 1 to 10 gets 1, not 12345."""
+    Within what the rules allow: a quantity of 1 to 10 gets 1, not 12345. The team's test data first."""
+    from app import test_data
+    if (mine := test_data.valid_for(f)) is not None:
+        return mine
     v = _plain_valid(f, today)
+    if v is not None:
+        test_data.note_made_up(f)
     for c in field_rules(f, rules) if rules else []:
         if c["kind"] == "range":
             lo, hi = c["lo"], c["hi"]
@@ -637,7 +651,9 @@ GEEZ_NAME = "አበበ ከበደ"
 def ideas_for(f: dict, today, rules: dict[str, str] | None = None) -> list[tuple[str, str]]:
     """(what, value) ideas for one field: the boundaries its rules give first, then the
     variations an experienced tester tries for its type and label."""
-    first = boundary_ideas(f, rules) if rules else []
+    from app import test_data
+    first = (boundary_ideas(f, rules) if rules else [])
+    first += [(w, v) for w, v in test_data.ideas(f) if v not in {x for _, x in first}]  # the team's own bad values
     have = {v for _, v in first}
     return first + [(w, v) for w, v in _type_ideas(f, today) if v not in have]
 
@@ -685,6 +701,9 @@ def expand(value: str | None, f: dict | None = None) -> str:
     it until its reply runs out (an unusable reply), so ideas name long values by this code."""
     if value and value.startswith("@file:"):
         return value[6:]  # a file field holds the file's name
+    if value and "{data:" in value:
+        from app import test_data
+        value = test_data.resolve(value)  # typed into the browser only
     if not value or "@long" not in value:
         return value or ""
     name = f is not None and "name" in f["label"].lower()
@@ -884,7 +903,8 @@ SUCCESS_WORDS = ("verified", "welcome", "success", "saved", "thank you", "thanks
                  "placed", "added", "updated", "submitted", "registered", "booked", "received", "signed up",
                  "subscribed", "joined", "completed", "ordered", "paid", "uploaded", "accepted")
 REFUSAL_WORDS = ("please", "required", "must", "invalid", "not allowed", "only", "can't", "cannot", "not accepted", "rejected",
-                 "not available", "unavailable", "sorry", "isn't possible", "not possible", "declined")
+                 "not available", "unavailable", "sorry", "isn't possible", "not possible", "declined", "not valid",
+                 "already used", "already exists", "already registered", "already taken")
 LISTING_WORDS = ("list", "lists", "listed", "show", "shows", "shown", "display", "displays", "appear", "appears")
 
 
@@ -1637,8 +1657,9 @@ def signed_out(url: str, cfg: dict, base: str) -> bool:
 
 
 def secrets_of(cfg: dict | None) -> list[str]:
+    from app import test_data
     from app.sign_in import secrets
-    return secrets(cfg)
+    return secrets(cfg) + test_data.secrets()
 
 
 # ---------- confirming a draft before a tester reads it ----------
@@ -1680,6 +1701,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
     from playwright.async_api import async_playwright
 
     ACTIVE.add(run_id)
+    from app import test_data
+    test_data.start(ctx.test_data)  # this run's rows (and nothing picked yet)
     history: list[dict] = []
     bug_ids: list[str] = []
     reported: set[tuple[str, str]] = set()
@@ -2122,6 +2145,9 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         outcome = outcome_of(said, broke)
                         if outcome == "other" and entry.get("judged_means") in ("accepted", "refused", "error"):
                             outcome = entry["judged_means"]
+                        from app import test_data
+                        for line in test_data.after_submit(outcome, said, session_id, run_id, noted):
+                            _note(session_id, "test", line)
                         values = {f["label"]: f["value"] for f in before.fields}
                         # Consistent with itself: the form offers these choices, so each should work like
                         # the others. Same form, one choice changed, accepted before and not now: a bug.
@@ -2311,6 +2337,12 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
     finally:
         try:
             _wrap_up(session_id, final, history, bug_ids)
+            if ctx.project_id:
+                from app import test_data
+                try:
+                    test_data.after_run(ctx.project_id, visited_forms=bool(last_fields))
+                except Exception:
+                    logger.exception("Test data: couldn't record which rows met their fields")
             _save(run_id, steps=list(history), bug_ids=list(bug_ids), finished_at=utcnow(), video=video,
                   journey=list(steps)[:60], **final)
         finally:

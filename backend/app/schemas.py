@@ -2494,3 +2494,58 @@ class DismissalOut(BaseModel):
     note: Optional[str] = None
     by: Optional[str] = None
     created_at: datetime
+
+
+class TestDataIn(BaseModel):
+    """A value the team keeps for the app under test."""
+    __test__ = False
+    name: str = Field(min_length=1, max_length=80, pattern=r"^[^{}]+$")
+    value: Optional[str] = Field(default=None, max_length=2000)  # None on an update: keep the stored one
+    secret: bool = False
+    labels: list[str] = Field(default_factory=list, max_length=12)
+    page: Optional[str] = Field(default=None, max_length=300)
+    kind: Literal["valid", "invalid", "edge"] = "valid"
+    once: bool = False
+    note: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("labels")
+    @classmethod
+    def _labels(cls, v: list[str]) -> list[str]:
+        out = []
+        for x in v:
+            x = x.strip()[:80]
+            if x and x.lower() not in {o.lower() for o in out}:
+                out.append(x)
+        return out
+
+
+class TestDataOut(BaseModel):
+    __test__ = False
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    name: str
+    value: Optional[str] = None  # never for a secret row
+    secret: bool
+    labels: list[str] = []
+    page: Optional[str] = None
+    kind: str
+    once: bool
+    used_at: Optional[datetime] = None
+    note: Optional[str] = None
+    last_seen_at: Optional[datetime] = None
+    missed_at: Optional[datetime] = None
+    # A run saw forms but none of this row's fields since it last met one: renamed?
+    not_seen: bool = False
+    created_at: datetime
+
+
+class TestDataImport(BaseModel):
+    """CSV with a header row: name,value,labels,kind,once,secret,page,note (labels separated by |)."""
+    __test__ = False
+    csv: str = Field(min_length=1, max_length=200_000)
+
+
+class KnownField(BaseModel):
+    label: str
+    type: str
+    pages: list[str] = []
