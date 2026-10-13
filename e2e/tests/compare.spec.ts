@@ -33,4 +33,9 @@ test('compare: the same steps on two environments show what changed, and a diffe
   await expect(result).toContainText('1 bug draft from this comparison')
   await result.getByRole('link', { name: 'Review the bugs' }).click()
   await expect(page.getByText('On next, the page has the heading "Upload your ID document" after open /').first()).toBeVisible()
+  // Open Mirmera's draft: its trail (the comparison's summary) and the review buttons show.
+  const draft = page.getByRole('article', { name: 'On next, the page has the heading "Upload your ID document" after open /' })
+  await draft.getByRole('button', { name: /On next, the page has the heading/ }).click()
+  await expect(draft).toContainText('The same 3 steps on app and next: 1 step differs (step 1).')
+  await expect(draft.getByRole('button', { name: 'Draft report with AI' })).toBeVisible()
 })
