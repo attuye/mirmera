@@ -140,7 +140,8 @@ export interface Bug {
   charter_id: string
   title: string
   description: string | null
-  reproduction_trail: { tag: string; content: string; timestamp: string }[]
+  /** timestamp: missing on drafts Mirmera wrote before 13 Oct 2026 */
+  reproduction_trail: { tag: string; content: string; timestamp?: string | null }[]
   environment: Record<string, string>
   severity: 'high' | 'medium' | 'low'
   status: string

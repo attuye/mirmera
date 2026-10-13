@@ -15,6 +15,8 @@ from app.regression.steps import clean_steps, describe_step, StepError
 from app.routers import runner as runner_api
 from app.runner import RunnerUnavailable, manager
 
+from app.timeutil import utcnow
+
 router = APIRouter(tags=["compare"])
 
 
@@ -131,7 +133,8 @@ def draft_bug(comparison_id: str, n: int, payload: schemas.CompareBugRequest, db
                      **({"engine": engine} if engine != "chromium" else {}),
                      "compared_with": f"{right['name']} {right['url']} in {label(right.get('browser'))}",
                      "found_by": "Mirmera comparison"},
-        symptom=symptom, reproduction_trail=[{"tag": "test", "content": c.summary or ""}], sightings=[],
+        symptom=symptom, reproduction_trail=[{"tag": "test", "content": c.summary or "",
+                                                      "timestamp": (c.created_at or utcnow()).isoformat()}], sightings=[],
     )
     db.add(bug)
     db.flush()
