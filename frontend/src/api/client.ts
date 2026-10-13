@@ -1274,6 +1274,8 @@ export const api = {
   getRegressionTest: (bugId: string) => request<RegressionTest | null>(`/bugs/${bugId}/regression-test`),
   generateRegressionTest: (bugId: string, knownFailing: boolean) =>
     request<RegressionTest>(`/bugs/${bugId}/regression-test`, { method: 'POST', body: JSON.stringify({ known_failing: knownFailing }) }),
+  freshData: (testId: string) =>
+    request<{ test: RegressionTest; changes: { field: string; was: string; now: string }[] }>(`/regression-tests/${testId}/fresh-data`, { method: 'POST' }),
   replayRegressionTest: (testId: string, baseUrl?: string) =>
     request<RegressionTest>(`/regression-tests/${testId}/replay`, { method: 'POST', body: JSON.stringify({ base_url: baseUrl || null }) }),
   trackerStatus: (projectId: string) => request<TrackerStatus[]>(`/projects/${projectId}/trackers`),

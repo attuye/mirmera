@@ -133,7 +133,14 @@ function StepForm({ initial, onDone, onCancel, title, positions }: {
             {(f.kind === 'fill' || f.kind === 'select') && (
               <label style={{ flex: 1, minWidth: 140 }}>
                 <span style={fieldLabel}>{f.kind === 'fill' ? 'Text to type' : 'Option'}</span>
-                <input value={f.text} onChange={(e) => set({ text: e.target.value })} style={small} />
+                <input value={f.text} onChange={(e) => set({ text: e.target.value })} style={small}
+                  title={f.kind === 'fill' ? 'Fresh each replay: {unique}, {email}, {phone}, {today}, {today+3}. From Test data: {data:Name}' : undefined}
+                  list={f.kind === 'fill' ? 'mirmera-templates' : undefined} />
+                {f.kind === 'fill' && (
+                  <datalist id="mirmera-templates">
+                    {['{email}', '{phone}', '{unique}', '{today}', '{today+1}', '{today-1}'].map((t) => <option key={t} value={t} />)}
+                  </datalist>
+                )}
               </label>
             )}
             {f.kind === 'secret' && (

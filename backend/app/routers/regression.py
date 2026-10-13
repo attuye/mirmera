@@ -213,6 +213,31 @@ def replay(test_id: str, payload: schemas.ReplayRequest, db: DBSession = Depends
     return test
 
 
+@router.post("/regression-tests/{test_id}/fresh-data", response_model=schemas.FreshDataOut)
+def fresh_data(test_id: str, db: DBSession = Depends(get_db)):
+    """The app refused the test's data ("already registered"): the steps it is about get fresh values
+    ({email}, {phone}, "… {unique}"), the spec is written again, and the test is replayed."""
+    test = db.get(models.RegressionTest, test_id)
+    if not test:
+        raise HTTPException(404, "Regression test not found")
+    page = (test.replay or {}).get("page") or {}
+    said = " ".join(page.get("messages") or []) + " " + " ".join((test.replay or {}).get("signals", {}).get("failed") or [])
+    plan, changes = test_data.freshen(test.plan, said)
+    if not changes:
+        raise HTTPException(409, "No step fills a value Mirmera can make fresh (an email, a phone, a name): "
+                                 "edit the test's steps, or add the data in Settings → Test data.")
+    bug = db.get(models.Bug, test.bug_id)
+    issue_links = [f"{f.issue_key} {f.issue_url}" for f in bug.filings]
+    oracle = f"{ORACLE_NAMES.get(bug.oracle_heuristic, bug.oracle_heuristic)}. {bug.oracle_explanation or ''}".strip()
+    test.plan = plan
+    test.code = render(plan, bug_title=bug.title, oracle=oracle, issue_links=issue_links,
+                       provenance=f"{test.ai_provider}/{test.ai_model}, {test.prompt_version}", known_failing=test.known_failing)
+    test.warnings = list(test.warnings or []) + ["Fresh values each run: " + ", ".join(f'{c["field"]} ({c["now"]})' for c in changes)]
+    db.commit()
+    replayed = replay(test_id, schemas.ReplayRequest(), db)
+    return schemas.FreshDataOut(test=replayed, changes=changes)
+
+
 @router.get("/regression-tests/{test_id}/download")
 def download(test_id: str, db: DBSession = Depends(get_db)):
     test = db.get(models.RegressionTest, test_id)

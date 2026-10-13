@@ -218,9 +218,17 @@ async def replay(plan: dict, *, base_url: str | None, headless: bool = True, exe
                  browser: str | None = None, data: list[dict] | None = None) -> dict:
     """browser: the engine to replay in; None: the plan's (the browser its bug was found in), else Chromium.
     data: the project's test data, for steps that name it ({data:National ID})."""
+    from app import test_data
+    clock = plan.get("clock")
+    today = None
+    if clock:
+        from datetime import datetime
+        today = datetime.fromisoformat(clock["at"]).date()
     if data is not None:
-        from app import test_data
-        test_data.start(data)
+        test_data.start(data, today=today)  # and a fresh {unique} for this replay
+    else:
+        test_data.TODAY.set(today)
+        test_data.next_unique()
     from playwright.async_api import async_playwright
 
     started = time.monotonic()
