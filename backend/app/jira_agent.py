@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session as DBSession
 
-from app import jira_app, models, stories
+from app import jira_app, models, story_risks
 from app.ai import tasks as ai_tasks
 from app.ai.base import ProviderError
 from app.ai.routing import provider_for
@@ -223,7 +223,6 @@ def _story(db: DBSession, project: models.Project, t: models.JiraAgentTask, site
 
 async def plan(db: DBSession, t: models.JiraAgentTask) -> str:
     """Story → (story-only product model, not saved) → proposed risks → proposed charters."""
-    from app.routers.risks import _next_ref_number
     project = db.get(models.Project, t.project_id)
     inst = (db.query(models.JiraInstallation)
             .filter(models.JiraInstallation.installation_id == t.installation_id).first())
@@ -236,32 +235,24 @@ async def plan(db: DBSession, t: models.JiraAgentTask) -> str:
         return (f"{t.issue_key} is already planned in Mirmera: {len(story.risks)} risks and {len(story.charters)} charters. "
                 f"I left them as they are.")
 
-    # A product model of the story alone. Not saved: the project's own model stays as it is.
-    story_input = ("story", f"{story.key}: {story.title}", stories.artifact_text(story))
-    _stage(db, t, "model")
-    model, _ = await ai_tasks.build_product_model(
-        provider_for(project, "product_model"), project_name=project.name, testing_mission=project.testing_mission,
-        artifacts=[story_input])
-    existing = db.query(models.Risk).filter(models.Risk.project_id == project.id, models.Risk.status != "retired").all()
-    existing_titles = [r.title for r in existing]
+    # The story with the project's model and risks (the same code as Suggest risks on the story page):
+    # touched project risks are linked, new ones are proposed and linked.
+    _stage(db, t, "model")  # reads the project's model and risks; the AI is asked in the next stage
     _stage(db, t, "risks")
-    risk_provider = provider_for(project, "risk_analysis")
-    proposed = await ai_tasks.analyze_risks(
-        risk_provider, project_name=project.name, testing_mission=project.testing_mission,
-        product_model={"summary": model.summary, "elements": [e.model_dump() for e in model.elements], "unknowns": model.unknowns},
-        max_risks=MAX_RISKS, existing_titles=existing_titles)
-    proposed = sorted(proposed, key=lambda r: r.impact * r.likelihood, reverse=True)
-    number = _next_ref_number(db, project.id)
-    risks = []
-    for i, r in enumerate(proposed):
-        risk = models.Risk(project_id=project.id, ref=f"R{number + i}", **r.model_dump(), status="proposed", source="ai",
-                           ai_provider=risk_provider.name, ai_model=risk_provider.model,
-                           prompt_version=ai_tasks.PROMPT_VERSIONS["risk_analysis"],
-                           tester_notes=f"Proposed by the Mirmera agent when {t.issue_key} was assigned to it in Jira.")
-        db.add(risk)
-        story.risks.append(risk)
-        risks.append(risk)
+    try:
+        found = await story_risks.suggest(
+            db, project, story, max_risks=MAX_RISKS,
+            why=f"Proposed by the Mirmera agent when {t.issue_key} was assigned to it in Jira.")
+    except story_risks.StoryTooThin:
+        found = {"new": [], "links": [], "thin": "The issue has no description to find risks in."}
+    db.refresh(story)
+    touched = [db.get(models.Risk, x["risk_id"]) for x in found["links"]]
+    for risk in touched:  # nobody is there to review a link suggestion: link them; the comment says so
+        if risk and risk not in story.risks:
+            story.risks.append(risk)
     db.commit()
+    risks = [db.get(models.Risk, x["risk_id"]) for x in found["new"]]
+    model_summary = (story_risks._model_of(db, project.id) or {}).get("summary") or f"{story.key}: {story.title}"
 
     charters = []
     if risks:
@@ -269,7 +260,7 @@ async def plan(db: DBSession, t: models.JiraAgentTask) -> str:
         charter_provider = provider_for(project, "risk_charters")
         drafts = await ai_tasks.charters_from_risks(
             charter_provider, project_name=project.name, testing_mission=project.testing_mission,
-            product_summary=model.summary,
+            product_summary=model_summary,
             risks=[{"ref": r.ref, "title": r.title, "failure_mode": r.failure_mode, "quality_criterion": r.quality_criterion,
                     "score": r.score, "evidence": r.evidence, "tester_notes": None} for r in risks],
             max_charters=MAX_CHARTERS)
@@ -293,7 +284,12 @@ async def plan(db: DBSession, t: models.JiraAgentTask) -> str:
         lines.append(f"\nRisks ({len(risks)}):")
         lines += [f"- {r.ref} {r.title} (impact {r.impact} × likelihood {r.likelihood})" for r in risks]
     else:
-        lines.append("\nI found no risks in the description alone. Add acceptance criteria or detail, then assign it again.")
+        lines.append("\nI found no new risks in the description. Add acceptance criteria or detail, then assign it again.")
+    if touched:
+        lines.append(f"\nProject risks this change touches, linked to the story ({len(touched)}):")
+        lines += [f"- {x['ref']} {x['title']}: {x['reason']}" for x in found["links"]]
+    if found.get("thin"):
+        lines.append(f"\nNote: {found['thin']}")
     if charters:
         lines.append(f"\nCharters ({len(charters)}):")
         lines += [f"- {c.mission_statement}" for c in charters]

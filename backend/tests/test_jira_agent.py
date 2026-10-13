@@ -191,7 +191,7 @@ def test_planning_never_holds_the_database_while_the_ai_thinks(client, anon, for
     t = rpc(anon, forge, "SendMessage", message())["result"]["task"]
     done = rpc(anon, forge, "GetTask", {"taskId": t["id"]})["result"]["task"]
     assert done["status"]["state"] == "TASK_STATE_COMPLETED", done["status"]["message"]
-    assert writes == ["product_model", "risk_analysis", "risk_charters"]
+    assert writes == ["story_risks", "risk_charters"]
 
 
 def test_sqlite_runs_in_wal_mode():

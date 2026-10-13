@@ -102,3 +102,56 @@ test('stories: a Jira story comes with its sprint', async ({ page, api, request 
     await page.screenshot({ path: 'test-results/jira-sprint-page.png' })
   })
 })
+
+test('stories: suggest risks from a story, link a touched one, accept and drop new ones', async ({ page, api, request }) => {
+  const project = await api.newProject('AddisVerify Story Risks')
+  const risk = async (title: string) => (await (await request.post(`${API_URL}/projects/${project.id}/risks`, { data: {
+    title, failure_mode: `${title}, for customers`, quality_criterion: 'capability', impact: 4, likelihood: 3 } })).json())
+  const expired = await risk('Expired passports accepted')
+  await risk('Slow dashboard on Mondays')
+  const story = await (await request.post(`${API_URL}/projects/${project.id}/stories`, { data: {
+    title: 'Upload a passport',
+    description: 'As a customer I can upload my passport.\nAcceptance criteria:\n- JPG, PNG or PDF up to 10 MB\n- An expired passport is refused with a reason' } })).json()
+
+  await page.goto(`/projects/${project.id}/stories/${story.id}`)
+  const risks = page.getByRole('region', { name: 'Risks' })
+
+  await test.step('suggest: a touched project risk, and new risks added as proposed', async () => {
+    await risks.getByRole('button', { name: 'Suggest risks' }).click()
+    const panel = page.getByRole('region', { name: 'Suggested risks' })
+    await expect(panel).toContainText('Added 3 new risks below as proposed (R3, R4, R5)')
+    const touched = panel.getByRole('list', { name: 'Project risks this story touches' }).getByRole('listitem')
+    await expect(touched).toHaveCount(1)
+    await expect(touched.first()).toContainText(`${expired.ref} · 12`)
+    await expect(touched.first()).toContainText('Expired passports accepted')
+    await expect(risks.getByRole('article')).toHaveCount(3)
+    await expect(risks.getByRole('article', { name: 'R3 Upload a passport: valid input refused' })).toContainText('(proposed)')
+    await page.screenshot({ path: 'test-results/story-risks-suggested.png' })
+  })
+
+  await test.step('link the touched risk; accept one new risk and drop another', async () => {
+    await page.getByRole('button', { name: `Link ${expired.ref}` }).click()
+    await expect(risks.getByRole('article', { name: `${expired.ref} Expired passports accepted` })).toBeVisible()
+    await expect(page.getByRole('list', { name: 'Project risks this story touches' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Accept R3' }).click()
+    await expect(risks.getByRole('article', { name: 'R3 Upload a passport: valid input refused' })).not.toContainText('(proposed)')
+    await page.getByRole('button', { name: 'Drop R5' }).click()
+    await expect(risks.getByRole('article', { name: /^R5 / })).toHaveCount(0)
+    await expect(risks.getByRole('article')).toHaveCount(3)  // R1, R3, R4
+  })
+
+  await test.step('after a reload the suggestions are remembered', async () => {
+    await page.reload()
+    await expect(page.getByRole('region', { name: 'Suggested risks' })).toContainText('Added 3 new risks')
+    await expect(page.getByRole('list', { name: 'Project risks this story touches' })).toHaveCount(0)
+    await page.screenshot({ path: 'test-results/story-risks-reviewed.png' })
+  })
+})
+
+test('stories: a story with no description can\'t be analysed', async ({ page, api, request }) => {
+  const project = await api.newProject('AddisVerify Thin Story')
+  const story = await (await request.post(`${API_URL}/projects/${project.id}/stories`, { data: { title: 'Pay in Birr' } })).json()
+  await page.goto(`/projects/${project.id}/stories/${story.id}`)
+  await page.getByRole('region', { name: 'Risks' }).getByRole('button', { name: 'Suggest risks' }).click()
+  await expect(page.getByRole('region', { name: 'Risks' })).toContainText('The story has no description to find risks in.')
+})

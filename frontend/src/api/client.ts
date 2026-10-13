@@ -857,7 +857,14 @@ export interface AgentActivity {
     bugs: { id: string; title: string; severity: string }[]; summary: string | null; detail: string | null
   } | null
 }
-export type AiJobKind = 'product_model' | 'risk_analysis' | 'charters_from_risks' | 'app_map'
+export type AiJobKind = 'product_model' | 'risk_analysis' | 'charters_from_risks' | 'app_map' | 'story_risks'
+/** What Suggest risks found for a story (backend/app/story_risks.py). */
+export interface StoryRisksResult {
+  story_id: string
+  thin: string | null  // the story says too little: what is missing
+  new: { risk_id: string; ref: string; title: string }[]  // made "proposed" and linked to the story
+  links: { risk_id: string; ref: string; title: string; score: number; reason: string; status: 'suggested' | 'linked' | 'dropped' }[]
+}
 export interface AppMapPage { path: string; url: string; title: string; heading: string; fields: { label: string; type: string; required?: boolean; options?: string[] }[]; buttons: string[]; summary?: string; error?: string }
 export interface AppMap { base_url: string; pages: AppMapPage[]; forms: number }
 export interface AiJob<T = unknown> {
@@ -1100,6 +1107,8 @@ export const api = {
     request<StoryDetail>(`/stories/${storyId}/charters`, { method: 'PUT', body: JSON.stringify({ ids }) }),
   newStoryRisk: (storyId: string, risk: RiskInput) =>
     request<StoryDetail>(`/stories/${storyId}/risks/new`, { method: 'POST', body: JSON.stringify(risk) }),
+  decideRiskSuggestion: (storyId: string, riskId: string, action: 'link' | 'drop') =>
+    request<StoryDetail>(`/stories/${storyId}/risk-suggestions/${riskId}`, { method: 'POST', body: JSON.stringify({ action }) }),
   storyArtifact: (storyId: string) => request<Artifact>(`/stories/${storyId}/artifact`, { method: 'POST' }),
   getAppSignIn: (projectId: string) => request<AppSignIn | null>(`/projects/${projectId}/sign-in`),
   saveAppSignIn: (projectId: string, body: AppSignInChanges) =>
@@ -1316,8 +1325,8 @@ export const api = {
     }),
   startAiJob: (projectId: string, kind: AiJobKind, input: Record<string, unknown> = {}) =>
     request<AiJob>(`/projects/${projectId}/ai-jobs`, { method: 'POST', body: JSON.stringify({ kind, request: input }) }),
-  latestAiJob: (projectId: string, kind: AiJobKind) =>
-    request<AiJob | null>(`/projects/${projectId}/ai-jobs/latest?kind=${kind}`),
+  latestAiJob: (projectId: string, kind: AiJobKind, storyId?: string) =>
+    request<AiJob | null>(`/projects/${projectId}/ai-jobs/latest?kind=${kind}${storyId ? `&story_id=${encodeURIComponent(storyId)}` : ''}`),
   aiJob: (jobId: string) => request<AiJob>(`/ai-jobs/${jobId}`),
   buildProductModel: (projectId: string, artifactIds: string[]) =>
     request<ProductModel>(`/projects/${projectId}/product-model`, {

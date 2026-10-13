@@ -76,6 +76,45 @@ async def import_story(project_id: str, payload: schemas.StoryImport, db: DBSess
     return {**stories.detail(db, story), "sprint_note": note}
 
 
+@router.post("/projects/{project_id}/story-risks")
+async def suggest_story_risks(project_id: str, payload: schemas.StoryRisksRequest, db: DBSession = Depends(get_db)):
+    """The project's risks the story touches (to link) and new ones it brings in (made "proposed"
+    and linked to the story). Usually run as an AI job (kind story_risks), so it survives a refresh."""
+    from app import story_risks
+    project = _project_or_404(db, project_id)
+    story = db.get(models.Story, payload.story_id)
+    if not story or story.project_id != project_id:
+        raise HTTPException(404, "Story not found in this project")
+    try:
+        return await story_risks.suggest(db, project, story, max_risks=payload.max_risks, provider_override=payload.provider)
+    except story_risks.StoryTooThin as err:
+        raise HTTPException(409, str(err))
+
+
+@router.post("/stories/{story_id}/risk-suggestions/{risk_id}", response_model=schemas.StoryDetail)
+def decide_risk_suggestion(story_id: str, risk_id: str, payload: schemas.StoryRiskDecision, db: DBSession = Depends(get_db)):
+    """A suggested link to a project risk: link it to the story, or drop the suggestion. Remembered on
+    the suggestion, so it isn't offered again after a refresh."""
+    from app import ai_jobs
+    story = _story_or_404(db, story_id)
+    job = ai_jobs.latest(db, story.project_id, "story_risks", story_id=story.id)
+    links = list(((job.result or {}).get("links") or []) if job and job.status == "done" else [])
+    found = next((x for x in links if x["risk_id"] == risk_id), None)
+    if not found:
+        raise HTTPException(404, "No such suggestion for this story")
+    if payload.action == "link":
+        risk = db.get(models.Risk, risk_id)
+        if not risk or risk.project_id != story.project_id:
+            raise HTTPException(404, "That risk is gone")
+        if risk not in story.risks:
+            story.risks.append(risk)
+    job.result = {**job.result, "links": [{**x, "status": "linked" if payload.action == "link" else "dropped"}
+                                          if x["risk_id"] == risk_id else x for x in links]}
+    db.commit()
+    db.refresh(story)
+    return stories.detail(db, story)
+
+
 @router.get("/stories/{story_id}", response_model=schemas.StoryDetail)
 def get_story(story_id: str, db: DBSession = Depends(get_db)):
     return stories.detail(db, _story_or_404(db, story_id))

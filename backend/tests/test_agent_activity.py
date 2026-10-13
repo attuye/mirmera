@@ -36,8 +36,7 @@ def test_each_stage_shows_while_the_agent_works(client, anon, forge, monkeypatch
     monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: Watching())
     rpc(anon, forge, "GetTask", {"taskId": rpc(anon, forge, "SendMessage", message())["result"]["task"]["id"]})
     assert seen == [
-        ("product_model", "model", ["done", "active", "todo", "todo"]),
-        ("risk_analysis", "risks", ["done", "done", "active", "todo"]),
+        ("story_risks", "risks", ["done", "done", "active", "todo"]),  # the story with the project's risks: one call
         ("risk_charters", "charters", ["done", "done", "done", "active"]),
     ]
     [done] = client.get(f"/workspaces/{ws(client)}/agent-activity").json()["items"]

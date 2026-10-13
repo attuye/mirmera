@@ -43,6 +43,8 @@ class MockProvider(LLMProvider):
             return json.dumps(self._risks(user))
         if task == "risk_charters":
             return json.dumps(self._risk_charters(user))
+        if task == "story_risks":
+            return json.dumps(self._story_risks(user))
         if task == "bug_report":
             return json.dumps(self._bug_report(user))
         if task == "risk_update":
@@ -226,6 +228,39 @@ class MockProvider(LLMProvider):
                 "evidence": "speculative",
             },
         ]}
+
+    @staticmethod
+    def _story_risks(user: str) -> dict:
+        """Touches every project risk sharing a word of 4+ letters with the story; proposes three
+        risks named after the story (one when the story has no detail, said in thin)."""
+        story = json.loads(_between(user, "story") or "{}")
+        try:
+            risks = json.loads(_between(user, "project_risks"))
+        except (ValueError, TypeError):
+            risks = []
+        title = story.get("title") or "the change"
+        words = set(re.findall(r"[a-z]{4,}", (title + " " + (story.get("description") or "")).lower()))
+        touches = [{"risk_ref": r["ref"], "reason": f"(mock) The story mentions {', '.join(sorted(shared)[:2])}."}
+                   for r in risks if not r.get("linked") and (shared := words & set(re.findall(r"[a-z]{4,}", r["title"].lower())))]
+        thin = len(story.get("description") or "") < 40
+        new = [{
+            "title": f"{title}: valid input refused",
+            "failure_mode": f"A customer doing what the story describes ({title.lower()}) is refused with valid input",
+            "quality_criterion": "capability", "elements": [title], "impact": 4, "likelihood": 3,
+            "rationale": "(mock) New behaviour with acceptance criteria that leave edge cases open.", "evidence": "inferred",
+        }, {
+            "title": f"{title}: someone else's data shown",
+            "failure_mode": f"While {title.lower()}, a customer sees data that belongs to another customer",
+            "quality_criterion": "security", "elements": [title], "impact": 5, "likelihood": 2,
+            "rationale": "(mock) High harm if it happens; nothing in the story says it does.", "evidence": "speculative",
+        }, {
+            "title": f"{title}: refusal says nothing useful",
+            "failure_mode": f"When {title.lower()} fails, the customer isn't told why or what to do next",
+            "quality_criterion": "usability", "elements": [title], "impact": 3, "likelihood": 3,
+            "rationale": "(mock) The story names no error messages.", "evidence": "inferred",
+        }]
+        return {"touches": touches, "new_risks": new[:1] if thin else new,
+                "thin": "(mock) The story has no acceptance criteria: what counts as done?" if thin else None}
 
     @staticmethod
     def _risk_charters(user: str) -> dict:
