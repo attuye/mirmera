@@ -102,3 +102,36 @@ def test_a_database_from_before_projects_keeps_its_risks_and_models(tmp_path):
         project = db.get(models.Project, "p1")
         assert [r.ref for r in project.risks] == ["R1"]
         assert [m.summary for m in project.product_models] == ["Upload flow"]
+
+
+def test_a_new_column_gives_existing_rows_its_default(tmp_path):
+    """A project made before the Ethiopia pack: ethiopia is false, not NULL, so GET /projects answers."""
+    path = tmp_path / "before-ethiopia.db"
+    old = create_engine(f"sqlite:///{path}")
+    Base.metadata.create_all(bind=old)
+    with old.begin() as conn:
+        conn.exec_driver_sql("ALTER TABLE projects DROP COLUMN ethiopia")
+        conn.exec_driver_sql("INSERT INTO projects (id, org_id, name, default_ai_provider, created_at)"
+                             " VALUES ('p1', 'org', 'KYC', 'mock', '2026-10-01 09:00:00')")
+    old.dispose()
+
+    engine = create_engine(f"sqlite:///{path}")
+    assert upgrade(engine)[1] == ["projects.ethiopia"]
+    with Session(engine) as db:
+        project = db.get(models.Project, "p1")
+        assert project.ethiopia is False
+        assert schemas.ProjectOut.model_validate(project).ethiopia is False
+
+
+def test_flags_left_null_by_an_earlier_upgrade_are_filled(tmp_path):
+    """Databases upgraded before this fix hold NULL in projects.ethiopia: the next start fills it."""
+    from app.database import fill_missing_flags
+    engine = create_engine(f"sqlite:///{tmp_path / 'null.db'}")
+    Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("INSERT INTO projects (id, org_id, name, default_ai_provider, ethiopia) VALUES ('p1', 'org', 'KYC', 'mock', NULL)")
+        conn.exec_driver_sql("INSERT INTO projects (id, org_id, name, default_ai_provider, ethiopia) VALUES ('p2', 'org', 'Shop', 'mock', 1)")
+    assert fill_missing_flags(engine) == ["projects.ethiopia"]
+    assert fill_missing_flags(engine) == []  # once filled, nothing to do
+    with Session(engine) as db:
+        assert (db.get(models.Project, "p1").ethiopia, db.get(models.Project, "p2").ethiopia) == (False, True)
