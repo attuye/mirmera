@@ -77,8 +77,9 @@ def start_exploration(db: DBSession, charter: models.Charter, *, started_by: str
         earlier=agent.earlier_runs(db, charter),
         app_map=app_map_text(db, project.id),
     )
-    from app import dismissals
+    from app import dismissals, test_data
     ctx.dismissed = dismissals.for_ai(db, project.id)
+    ctx.project_id, ctx.test_data = project.id, test_data.for_run(db, project.id)
     from app import sign_in
     sign_cfg = sign_in.for_run(project)  # the password stays in memory, for this run only
     if sign_cfg:

@@ -14,6 +14,7 @@ from app.evidence_text import browser_context
 from app.regression import steps as bug_steps
 from app.regression.plan import MAX_ACTIONS, action_lines, origin, resolve, slug
 from app.regression.render import render
+from app import test_data
 from app.browsers import BrowserMissing
 from app.regression.replay import replay as run_replay
 from app.routers import runner as runner_api
@@ -195,7 +196,8 @@ def replay(test_id: str, payload: schemas.ReplayRequest, db: DBSession = Depends
     try:
         result = manager.loop.run(
             run_replay(test.plan, base_url=payload.base_url or test.base_url, headless=True,
-                       executable_path=settings.runner_chromium_path, browser=payload.browser), timeout=240)
+                       executable_path=settings.runner_chromium_path, browser=payload.browser,
+                       data=test_data.for_run(db, db.get(models.Bug, test.bug_id).charter.project_id)), timeout=240)
     except ImportError as err:
         raise RunnerUnavailable("Playwright is not installed. Run: python -m playwright install chromium") from err
     except BrowserMissing as err:

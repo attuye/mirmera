@@ -81,7 +81,8 @@ async def _run_action(page, a: dict) -> str | None:
             return f"needs {secret}: set it in the backend's environment to replay this step"
         await target.fill(os.environ[secret], timeout=STEP_TIMEOUT)
     elif act == "fill":
-        await target.fill(a.get("value") or "", timeout=STEP_TIMEOUT)
+        from app import test_data
+        await target.fill(test_data.resolve(a.get("value") or ""), timeout=STEP_TIMEOUT)
     elif act == "select":
         await target.select_option(a.get("value"), timeout=STEP_TIMEOUT)
     elif act == "check":
@@ -214,8 +215,12 @@ async def _where(page) -> dict:
 
 
 async def replay(plan: dict, *, base_url: str | None, headless: bool = True, executable_path: str | None = None,
-                 browser: str | None = None) -> dict:
-    """browser: the engine to replay in; None: the plan's (the browser its bug was found in), else Chromium."""
+                 browser: str | None = None, data: list[dict] | None = None) -> dict:
+    """browser: the engine to replay in; None: the plan's (the browser its bug was found in), else Chromium.
+    data: the project's test data, for steps that name it ({data:National ID})."""
+    if data is not None:
+        from app import test_data
+        test_data.start(data)
     from playwright.async_api import async_playwright
 
     started = time.monotonic()

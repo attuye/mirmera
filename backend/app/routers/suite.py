@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.orm import Session as DBSession
 
+from app import test_data
 from app import models, schemas
 from app.config import settings
 from app.database import get_db
@@ -77,7 +78,7 @@ def run_all(project_id: str, payload: schemas.SuiteRequest, db: DBSession = Depe
     engine.ACTIVE.add(run.id)
     asyncio.run_coroutine_threadsafe(
         engine.run_suite(run.id, items, base_url=run.base_url, headless=True, executable_path=settings.runner_chromium_path,
-                         browser=payload.browser),
+                         browser=payload.browser, data=test_data.for_run(db, project_id)),
         manager.loop._get(),
     )
     return run

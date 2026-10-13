@@ -492,6 +492,20 @@ export interface Dismissal {
   by: string | null; created_at: string
 }
 
+/** A value the team keeps for the app under test, and which fields it fills. */
+export interface TestDataRow {
+  id: string; name: string; value: string | null  // null for a secret: never sent back
+  secret: boolean; labels: string[]; page: string | null; kind: 'valid' | 'invalid' | 'edge'; once: boolean
+  used_at: string | null; note: string | null; last_seen_at: string | null; missed_at: string | null
+  /** A run saw forms but none of its fields since it last met one: renamed? */
+  not_seen: boolean; created_at: string
+}
+export interface TestDataInput {
+  name: string; value?: string | null; secret: boolean; labels: string[]; page?: string | null
+  kind: TestDataRow['kind']; once: boolean; note?: string | null
+}
+export interface KnownField { label: string; type: string; pages: string[] }
+
 export interface BugListItem extends Bug {
   charter_mission: string
 }
@@ -1140,6 +1154,17 @@ export const api = {
   undoDismissal: (bugId: string) => request<Bug>(`/bugs/${bugId}/dismiss`, { method: 'DELETE' }),
   dismissals: (projectId: string) => request<Dismissal[]>(`/projects/${projectId}/dismissals`),
   forgetDismissal: (id: string) => request<void>(`/dismissals/${id}`, { method: 'DELETE' }),
+  testData: (projectId: string) => request<TestDataRow[]>(`/projects/${projectId}/test-data`),
+  addTestData: (projectId: string, row: TestDataInput) =>
+    request<TestDataRow>(`/projects/${projectId}/test-data`, { method: 'POST', body: JSON.stringify(row) }),
+  changeTestData: (projectId: string, id: string, row: TestDataInput) =>
+    request<TestDataRow>(`/projects/${projectId}/test-data/${id}`, { method: 'PATCH', body: JSON.stringify(row) }),
+  resetTestData: (projectId: string, id: string) =>
+    request<TestDataRow>(`/projects/${projectId}/test-data/${id}/reset`, { method: 'POST' }),
+  deleteTestData: (projectId: string, id: string) => request<void>(`/projects/${projectId}/test-data/${id}`, { method: 'DELETE' }),
+  importTestData: (projectId: string, csv: string) =>
+    request<TestDataRow[]>(`/projects/${projectId}/test-data/import`, { method: 'POST', body: JSON.stringify({ csv }) }),
+  knownFields: (projectId: string) => request<KnownField[]>(`/projects/${projectId}/known-fields`),
   getProject: (projectId: string) => request<Project>(`/projects/${projectId}`),
   authConfig: () => request<AuthConfig>('/auth/config'),
   me: () => request<Me>('/auth/me'),
