@@ -84,7 +84,7 @@ def add_mock_issue(payload: schemas.MockIssueCreate):
     if not settings.mock_trackers:
         raise HTTPException(404, "Only available with MOCK_TRACKERS=true.")
     from app.trackers.mock import MockTracker
-    issue = MockTracker(payload.tracker, payload.target)._add(payload.title, payload.body)
+    issue = MockTracker(payload.tracker, payload.target)._add(payload.title, payload.body, sprints=payload.sprints)
     return {"issue_key": issue.key, "url": issue.url}
 
 

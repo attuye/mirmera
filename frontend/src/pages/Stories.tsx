@@ -26,7 +26,7 @@ export function StoryStatus({ story }: { story: Pick<StorySummary, 'closed' | 't
   )
 }
 
-function AddStory({ onAdded }: { onAdded: (id: string) => void }) {
+function AddStory({ onAdded }: { onAdded: (id: string, note?: string | null) => void }) {
   const { project } = useProject()
   const [mode, setMode] = useState<Mode>(project.jira_project_key || project.github_repo ? 'import' : 'write')
   const [ref, setRef] = useState('')
@@ -34,9 +34,9 @@ function AddStory({ onAdded }: { onAdded: (id: string) => void }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function run(fn: () => Promise<{ id: string }>) {
+  async function run(fn: () => Promise<{ id: string; sprint_note?: string | null }>) {
     setBusy(true); setError(null)
-    try { onAdded((await fn()).id) } catch (e) { setError(errorText(e)) } finally { setBusy(false) }
+    try { const s = await fn(); onAdded(s.id, s.sprint_note) } catch (e) { setError(errorText(e)) } finally { setBusy(false) }
   }
   const tab = (m: Mode, label: string) => (
     <button key={m} role="tab" aria-selected={mode === m} onClick={() => { setMode(m); setError(null) }} style={{
@@ -158,7 +158,7 @@ export default function Stories() {
           still left, never a tick that says "tested".
         </p>
 
-        <AddStory onAdded={(id) => navigate(path(`/stories/${id}`))} />
+        <AddStory onAdded={(id, note) => navigate(path(`/stories/${id}`), { state: note ? { sprintNote: note } : undefined })} />
         <ErrorLine message={error} />
 
         <section aria-label="Your stories" style={{ marginTop: 26, maxWidth: 900 }}>

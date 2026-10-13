@@ -34,12 +34,14 @@ class MockTracker(IssueTracker):
     def _key(self, n: int) -> str:
         return f"#{n}" if self.name == "github" else f"{self.target}-{n}"
 
-    def _add(self, title: str, body: str, closed: bool = False) -> TrackerIssue:
+    def _add(self, title: str, body: str, closed: bool = False, sprints: list | None = None) -> TrackerIssue:
         n = len(self._db["issues"]) + 1
         key = self._key(n)
         issue = TrackerIssue(key=key, title=title, url=f"https://mock-{self.name}.local/{self.target}/{n}",
                              status="closed" if closed else "open", closed=closed, snippet=body[:300], body=body)
         self._db["issues"].append(issue)
+        if sprints:
+            self.set_sprints(key, sprints)
         return issue
 
     def _get(self, key: str) -> TrackerIssue:
@@ -91,6 +93,12 @@ class MockTracker(IssueTracker):
     def set_closed(self, key: str, closed: bool = True) -> None:
         issue = self._get(key)
         issue.closed, issue.status = closed, "closed" if closed else "open"
+
+    def set_sprints(self, key: str, sprints: list | None) -> None:
+        """Jira's sprint field as Jira sends it (a list of {id, name, state, startDate, endDate, goal});
+        read the way the real client reads it."""
+        from app.trackers.jira import pick_sprint
+        self._get(key).sprint = pick_sprint(sprints) if self.name == "jira" else None
 
     def comments(self, key: str) -> list[str]:
         return self._db["comments"].get(key, [])

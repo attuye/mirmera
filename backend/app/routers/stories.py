@@ -3,7 +3,7 @@ see the testing under them and what is still left."""
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DBSession
 
-from app import models, schemas, stories
+from app import models, schemas, sprints, stories
 from app.database import get_db
 from app.routers.risks import create_risk
 
@@ -58,18 +58,22 @@ def create_story(project_id: str, payload: schemas.StoryCreate, db: DBSession = 
 
 @router.post("/projects/{project_id}/stories/import", response_model=schemas.StoryDetail)
 async def import_story(project_id: str, payload: schemas.StoryImport, db: DBSession = Depends(get_db)):
-    """A story from Jira (KYC-12) or GitHub (#45): title, description, address and status."""
+    """A story from Jira (KYC-12) or GitHub (#45): title, description, address and status, and
+    from Jira its sprint (made here when it's new; see sprints.from_jira)."""
     project = _project_or_404(db, project_id)
     try:
         data = await stories.fetch(project, payload.ref)
     except stories.StoryProblem as err:
         raise HTTPException(400, str(err))
     _check_key_free(db, project_id, data["key"])
+    sprint = data.pop("sprint")
     story = models.Story(project_id=project_id, **data)
     db.add(story)
+    db.flush()
+    note = sprints.from_jira(db, story, sprint) if data["tracker"] == "jira" else None
     db.commit()
     db.refresh(story)
-    return stories.detail(db, story)
+    return {**stories.detail(db, story), "sprint_note": note}
 
 
 @router.get("/stories/{story_id}", response_model=schemas.StoryDetail)
@@ -100,7 +104,7 @@ def update_story(story_id: str, payload: schemas.StoryUpdate, db: DBSession = De
 
 @router.post("/stories/{story_id}/refresh", response_model=schemas.StoryDetail)
 async def refresh_story(story_id: str, db: DBSession = Depends(get_db)):
-    """Read the story again from its tracker: title, description and status may have changed."""
+    """Read the story again from its tracker: title, description, status and (Jira) sprint may have changed."""
     story = _story_or_404(db, story_id)
     if not story.tracker or not story.key:
         raise HTTPException(400, "This story was written here, so there is nothing to refresh it from.")
@@ -111,9 +115,10 @@ async def refresh_story(story_id: str, db: DBSession = Depends(get_db)):
         raise HTTPException(400, str(err))
     for field in ("title", "description", "url", "tracker_status", "closed"):
         setattr(story, field, data[field])
+    note = sprints.from_jira(db, story, data["sprint"]) if story.tracker == "jira" else None
     db.commit()
     db.refresh(story)
-    return stories.detail(db, story)
+    return {**stories.detail(db, story), "sprint_note": note}
 
 
 @router.delete("/stories/{story_id}", response_model=schemas.Deleted)

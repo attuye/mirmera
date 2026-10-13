@@ -1,7 +1,11 @@
 """Jira Cloud through the REST API v3 (descriptions in Atlassian Document Format).
 
 Search uses POST /rest/api/3/search/jql: the older /rest/api/3/search was
-removed from Jira Cloud, and the new one returns only the fields requested."""
+removed from Jira Cloud, and the new one returns only the fields requested.
+
+The sprint is a custom field whose id differs between sites (customfield_10020 on most
+Cloud sites). The client asks Jira once which field is the sprint (its schema is
+"com.pyxis.greenhopper.jira:gh-sprint") and reads that one."""
 import base64
 import re
 
@@ -9,6 +13,48 @@ import httpx
 
 from app.trackers.base import TIMEOUT, IssueTracker, TrackerError, TrackerIssue, failure_message
 from app.trackers.report import Block, adf_text, to_adf
+
+
+SPRINT_SCHEMA = "com.pyxis.greenhopper.jira:gh-sprint"
+DEFAULT_SPRINT_FIELD = "customfield_10020"
+_SPRINT_FIELDS: dict[str, str] = {}  # site address -> its sprint field id, asked once per server start
+_ORDER = {"active": 0, "future": 1, "closed": 2}
+
+
+def _legacy_sprint(text: str) -> dict:
+    """Jira Server/Data Center's older form: "com.atlassian.greenhopper.service.sprint.Sprint@1a[id=7,state=ACTIVE,name=Sprint 14,...]"."""
+    inside = text[text.find("[") + 1:text.rfind("]")] if "[" in text else text
+    out = {}
+    for m in re.finditer(r"(\w+)=(.*?)(?=,\w+=|$)", inside):
+        out[m.group(1)] = None if m.group(2) == "<null>" else m.group(2)
+    return out
+
+
+def _day(value) -> str | None:
+    """'2026-10-01T08:00:00.000+03:00' -> '2026-10-01' (the day as Jira wrote it)."""
+    return value[:10] if isinstance(value, str) and re.match(r"\d{4}-\d{2}-\d{2}", value) else None
+
+
+def pick_sprint(value) -> dict | None:
+    """The sprint an issue is in, from Jira's sprint field. An issue carried over keeps its old, closed
+    sprints in the list too, so: the active one, else the next future one, else the last closed one."""
+    items = value if isinstance(value, list) else [value] if value else []
+    sprints = []
+    for i, raw in enumerate(items):
+        item = _legacy_sprint(raw) if isinstance(raw, str) else raw if isinstance(raw, dict) else None
+        if not item or not item.get("name"):
+            continue
+        state = (item.get("state") or "").lower()
+        sprints.append((_ORDER.get(state, 1), i, {
+            "id": str(item["id"]) if item.get("id") is not None else None, "name": str(item["name"]).strip()[:100],
+            "state": state or None, "starts_on": _day(item.get("startDate")), "ends_on": _day(item.get("endDate")),
+            "goal": (item.get("goal") or "").strip() or None}))
+    if not sprints:
+        return None
+    best = min(s[0] for s in sprints)
+    same = [s for s in sprints if s[0] == best]
+    # several closed: the one that ended last (Jira lists them oldest first); several future: the first planned
+    return (max(same, key=lambda s: (s[2]["ends_on"] or "", s[1])) if best == 2 else min(same, key=lambda s: s[1]))[2]
 
 
 class JiraTracker(IssueTracker):
@@ -54,7 +100,7 @@ class JiraTracker(IssueTracker):
         })
         return [self._issue(item) for item in data.get("issues", [])]
 
-    def _issue(self, item: dict) -> TrackerIssue:
+    def _issue(self, item: dict, sprint_field: str | None = None) -> TrackerIssue:
         f = item.get("fields", {})
         status = f.get("status") or {}
         return TrackerIssue(
@@ -62,7 +108,20 @@ class JiraTracker(IssueTracker):
             status=status.get("name", "unknown"),
             closed=(status.get("statusCategory") or {}).get("key") == "done",
             snippet=adf_text(f.get("description")).strip()[:300], body=adf_text(f.get("description")).strip(),
+            sprint=pick_sprint(f.get(sprint_field)) if sprint_field else None,
         )
+
+    async def sprint_field(self) -> str:
+        """This site's sprint field id. Asked once; a site that won't say gets the usual Cloud id."""
+        if self.base_url not in _SPRINT_FIELDS:
+            try:
+                fields = await self._call("GET", "/rest/api/3/field")
+            except TrackerError:
+                return DEFAULT_SPRINT_FIELD  # not remembered: ask again next time
+            found = next((f["id"] for f in fields if isinstance(f, dict)
+                          and (f.get("schema") or {}).get("custom") == SPRINT_SCHEMA), None) if isinstance(fields, list) else None
+            _SPRINT_FIELDS[self.base_url] = found or DEFAULT_SPRINT_FIELD
+        return _SPRINT_FIELDS[self.base_url]
 
     async def list_issues(self, jql: str, limit: int = 50) -> list[dict]:
         """Issues matching a JQL query, with their description as plain text."""
@@ -78,8 +137,9 @@ class JiraTracker(IssueTracker):
 
     async def issue(self, key: str) -> TrackerIssue:
         key = self._check_key(key)
+        sprint = await self.sprint_field()
         return self._issue(await self._call("GET", f"/rest/api/3/issue/{key}",
-                                            params={"fields": "summary,status,description"}))
+                                            params={"fields": f"summary,status,description,{sprint}"}), sprint)
 
     async def create(self, title: str, blocks: list[Block], labels: list[str]) -> TrackerIssue:
         data = await self._call("POST", "/rest/api/3/issue", json={"fields": {

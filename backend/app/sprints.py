@@ -100,3 +100,61 @@ def current(db: DBSession, project_id: str) -> models.Sprint | None:
     return (db.query(models.Sprint).filter(models.Sprint.project_id == project_id, models.Sprint.starts_on <= today,
                                            models.Sprint.ends_on >= today)
             .order_by(models.Sprint.starts_on.desc()).first())
+
+
+# ---------- the sprint a Jira story is in ----------
+
+def _days(info: dict) -> tuple[date, date] | None:
+    try:
+        start, end = date.fromisoformat(info["starts_on"]), date.fromisoformat(info["ends_on"])
+    except (TypeError, ValueError, KeyError):
+        return None
+    return (start, end) if end >= start else None
+
+
+def _when(start: date, end: date) -> str:
+    return f"{start.day} {start:%b} – {end.day} {end:%b %Y}"
+
+
+def from_jira(db: DBSession, story: models.Story, info: dict | None) -> str | None:
+    """Puts an imported (or refreshed) Jira story in the sprint Jira has it in, and says what it did.
+
+    The sprint here is found by its Jira id, else by name (a sprint the team added here by hand
+    before importing); else it is made, with Jira's dates. Jira's dates and goal win for a sprint
+    that came from Jira, since that's where the team plans. A future sprint Jira hasn't dated yet
+    can't be made here (a sprint here needs dates), so the story stays where it was and the note
+    says so. A story Jira took out of every sprint leaves a sprint that came from Jira; one the team
+    put in a sprint they made here stays there."""
+    if not info:
+        if story.sprint and story.sprint.jira_id:
+            name = story.sprint.name
+            story.sprint_id = None
+            return f"Not in a sprint in Jira any more, so taken out of {name} here."
+        return None
+    rows = db.query(models.Sprint).filter(models.Sprint.project_id == story.project_id).all()
+    sprint = next((s for s in rows if info.get("id") and s.jira_id == info["id"]), None) or \
+        next((s for s in rows if not s.jira_id and s.name.casefold() == info["name"].casefold()), None)
+    days = _days(info)
+    made = False
+    if not sprint:
+        if not days:
+            return (f"In Jira it's in {info['name']}, which has no dates in Jira yet, so it isn't in a sprint here. "
+                    f"Refresh from Jira once the sprint is started, or add {info['name']} here with its dates.")
+        sprint = models.Sprint(project_id=story.project_id, name=info["name"], goal=info.get("goal"),
+                               starts_on=days[0], ends_on=days[1], jira_id=info.get("id"))
+        db.add(sprint)
+        db.flush()
+        made = True
+    else:
+        sprint.jira_id = sprint.jira_id or info.get("id")
+        sprint.name = info["name"]
+        if days:
+            sprint.starts_on, sprint.ends_on = days
+        if info.get("goal"):
+            sprint.goal = info["goal"]
+    moved = story.sprint_id != sprint.id
+    story.sprint_id = sprint.id
+    story.sprint = sprint
+    if made:
+        return f"In {sprint.name}, as in Jira: a new sprint here, {_when(sprint.starts_on, sprint.ends_on)}."
+    return f"In {sprint.name}, as in Jira." if moved else None

@@ -63,3 +63,42 @@ test('stories: import one, add a risk, suggest charters for it, see what is left
     await expect(page.getByRole('region', { name: 'Your stories' }).getByRole('listitem')).toHaveText([/Customers can retry a failed upload/])
   })
 })
+
+test('stories: a Jira story comes with its sprint', async ({ page, api, request }) => {
+  const project = await api.newProject('AddisVerify Jira Sprints')
+  await request.patch(`${API_URL}/projects/${project.id}`, { data: { jira_project_key: 'SPR' } })
+  const add = async (title: string, sprints: object[] | null) => (await (await request.post(`${API_URL}/mock-trackers/issues`, { data: {
+    tracker: 'jira', target: 'SPR', title, body: 'As a customer…', sprints } })).json()).issue_key as string
+  const sprint14 = { id: 914, name: 'Sprint 14', state: 'active', startDate: '2026-09-28T06:00:00.000Z', endDate: '2026-10-11T15:00:00.000Z', goal: 'Passports end to end' }
+  const first = await add('Upload a passport', [{ id: 913, name: 'Sprint 13', state: 'closed', startDate: '2026-09-14', endDate: '2026-09-27' }, sprint14])
+  const second = await add('Pay in Birr', [{ id: 915, name: 'Sprint 15', state: 'future' }])
+
+  await test.step('import: the story lands in Jira\'s active sprint, made here with its dates', async () => {
+    await page.goto(`/projects/${project.id}/stories`)
+    await page.getByLabel('Story key or address').fill(first)
+    await page.getByRole('button', { name: 'Import story' }).click()
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Upload a passport')
+    await expect(page.getByRole('status', { name: 'Sprint from Jira' })).toHaveText('In Sprint 14, as in Jira: a new sprint here, 28 Sep – 11 Oct 2026.')
+    await expect(page.getByRole('combobox', { name: 'Sprint' })).toHaveValue(/.+/)
+    await expect(page.getByRole('combobox', { name: 'Sprint' }).locator('option:checked')).toHaveText('Sprint 14')
+    await page.screenshot({ path: 'test-results/jira-sprint-import.png' })
+  })
+
+  await test.step('a sprint Jira has not dated yet: said, and the story stays out of sprints', async () => {
+    await page.goto(`/projects/${project.id}/stories`)
+    await page.getByLabel('Story key or address').fill(second)
+    await page.getByRole('button', { name: 'Import story' }).click()
+    await expect(page.getByRole('status', { name: 'Sprint from Jira' })).toContainText("In Jira it's in Sprint 15, which has no dates in Jira yet")
+    await expect(page.getByRole('combobox', { name: 'Sprint' })).toHaveValue('')
+  })
+
+  await test.step('the list and the sprint page show it', async () => {
+    await page.getByRole('navigation', { name: 'Project pages' }).getByRole('link', { name: 'Stories' }).click()
+    const row = page.getByRole('region', { name: 'Your stories' }).getByRole('listitem', { name: 'Upload a passport' })
+    await row.getByRole('link', { name: 'Sprint 14' }).click()
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Sprint 14')
+    await expect(page.getByText('Passports end to end')).toBeVisible()
+    await expect(page.getByText('Upload a passport')).toBeVisible()
+    await page.screenshot({ path: 'test-results/jira-sprint-page.png' })
+  })
+})

@@ -1705,6 +1705,7 @@ class MockIssueCreate(BaseModel):
     target: str
     title: str
     body: str = ""
+    sprints: Optional[list[dict]] = None  # Jira's sprint field, as Jira sends it
 
 
 class ProjectReport(BaseModel):
@@ -1943,6 +1944,7 @@ class StoryDetail(StorySummary):
     pages: list[dict]  # [{"page", "sessions", "actions"}]
     more_pages: int
     left_list: list[dict]  # [{"text", "to", "action"}]
+    sprint_note: Optional[str] = None  # after an import or refresh: what happened to the Jira sprint
 
 
 # ---- Sprints ---------------------------------------------------------------------

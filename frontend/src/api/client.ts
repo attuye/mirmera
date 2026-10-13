@@ -940,6 +940,7 @@ export interface StoryDetail extends StorySummary {
   pages: { page: string; sessions: number; actions: number }[]
   more_pages: number
   left_list: StoryLeft[]
+  sprint_note?: string | null  // after an import or refresh: what happened to the Jira sprint
 }
 export interface StoryInput { title: string; key?: string | null; description?: string | null; url?: string | null }
 

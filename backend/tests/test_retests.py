@@ -141,7 +141,7 @@ def test_real_trackers_read_one_issue(monkeypatch):
         if request.url.path == "/repos/addisverify/kyc/issues/7":
             return httpx.Response(200, json={"number": 7, "title": "T", "html_url": "u", "state": "closed", "body": ""})
         if request.url.path == "/rest/api/3/issue/KYC-7":
-            assert request.url.params["fields"] == "summary,status,description"
+            assert request.url.params["fields"] == "summary,status,description,customfield_10020"  # + the sprint (see trackers.jira)
             return httpx.Response(200, json={"key": "KYC-7", "fields": {
                 "summary": "T", "status": {"name": "Done", "statusCategory": {"key": "done"}}}})
         return httpx.Response(404, json={"message": "nope"})

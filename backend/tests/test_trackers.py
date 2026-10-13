@@ -135,6 +135,57 @@ def test_jira_create_sends_adf_and_attachments_are_multipart():
     assert b'filename="shot.png"' in att.content
 
 
+def test_jira_reads_the_sites_sprint_field():
+    from app.trackers import jira as jira_mod
+    jira_mod._SPRINT_FIELDS.clear()
+
+    def handler(request: httpx.Request):
+        if request.url.path == "/rest/api/3/field":
+            return httpx.Response(200, json=[{"id": "summary", "schema": {"type": "string"}},
+                                             {"id": "customfield_10104", "name": "Sprint",
+                                              "schema": {"type": "array", "custom": jira_mod.SPRINT_SCHEMA}}])
+        return httpx.Response(200, json={"key": "KYC-5", "fields": {
+            "summary": "Upload a passport", "status": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}},
+            "customfield_10104": [{"id": 41, "name": "Sprint 13", "state": "closed", "endDate": "2026-09-27T15:00:00.000Z"},
+                                  {"id": 42, "name": "Sprint 14", "state": "active", "startDate": "2026-09-28T06:00:00.000+03:00",
+                                   "endDate": "2026-10-11T15:00:00.000+03:00"}]}})
+    rec = Recorder(handler)
+    j = jira(rec)
+    issue = run(j.issue("KYC-5"))
+    assert issue.sprint == {"id": "42", "name": "Sprint 14", "state": "active", "starts_on": "2026-09-28",
+                            "ends_on": "2026-10-11", "goal": None}
+    assert rec.requests[1].url.params["fields"] == "summary,status,description,customfield_10104"
+    run(j.issue("KYC-5"))
+    assert [r.url.path for r in rec.requests].count("/rest/api/3/field") == 1  # asked once
+
+
+def test_jira_sprint_choice_and_older_servers():
+    from app.trackers.jira import pick_sprint
+    closed = [{"id": 1, "name": "S1", "state": "closed", "endDate": "2026-09-01"},
+              {"id": 2, "name": "S2", "state": "closed", "endDate": "2026-09-15"}]
+    assert pick_sprint(closed)["name"] == "S2"  # the last one it was in
+    assert pick_sprint(closed + [{"id": 3, "name": "S3", "state": "future"}])["name"] == "S3"
+    assert pick_sprint(None) is None and pick_sprint([]) is None
+    legacy = pick_sprint(["com.atlassian.greenhopper.service.sprint.Sprint@1a[id=7,rapidViewId=3,state=ACTIVE,"
+                          "name=Sprint 14, passports,startDate=2026-09-28T06:00:00.000Z,endDate=2026-10-11T15:00:00.000Z,"
+                          "completeDate=<null>,sequence=7,goal=]"])
+    assert (legacy["id"], legacy["name"], legacy["starts_on"], legacy["goal"]) == ("7", "Sprint 14, passports", "2026-09-28", None)
+
+
+def test_jira_falls_back_to_the_usual_sprint_field():
+    from app.trackers import jira as jira_mod
+    jira_mod._SPRINT_FIELDS.clear()
+
+    def handler(request: httpx.Request):
+        if request.url.path == "/rest/api/3/field":
+            return httpx.Response(403, json={"errorMessages": ["no"]})
+        return httpx.Response(200, json={"key": "KYC-5", "fields": {"summary": "x", "status": {"name": "To Do"}}})
+    rec = Recorder(handler)
+    issue = run(jira(rec).issue("KYC-5"))
+    assert issue.sprint is None and rec.requests[1].url.params["fields"].endswith(",customfield_10020")
+    assert jira_mod._SPRINT_FIELDS == {}  # not remembered: asked again next time
+
+
 def test_jira_refuses_keys_from_other_projects():
     with pytest.raises(TrackerError):
         run(jira(Recorder(jira_handler)).comment("OPS-4", BLOCKS))
