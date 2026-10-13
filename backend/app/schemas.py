@@ -2549,3 +2549,9 @@ class KnownField(BaseModel):
     label: str
     type: str
     pages: list[str] = []
+
+
+class FreshDataOut(BaseModel):
+    """A regression test given fresh values where the app said its data was used, and replayed."""
+    test: "RegressionTestOut"
+    changes: list[dict]  # [{"field", "was", "now"}]

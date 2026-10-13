@@ -70,6 +70,9 @@ test('regression test: generate from the recording, read the code, replay it to 
     await form.getByRole('combobox', { name: 'Step', exact: true }).selectOption('fill')
     await form.getByLabel('Find it by').selectOption('label')
     await form.getByLabel('Which one').fill('Search documents')
+    // fresh values each replay are offered as you type: {email}, {phone}, {unique}, {today+1}…
+    await expect(form.getByLabel('Text to type')).toHaveAttribute('list', 'mirmera-templates')
+    await expect(page.locator('#mirmera-templates option[value="{email}"]')).toHaveCount(1)
     await form.getByLabel('Text to type').fill('passport')
     await form.getByRole('button', { name: 'Add step' }).click()
 

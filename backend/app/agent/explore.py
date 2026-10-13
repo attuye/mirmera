@@ -472,6 +472,8 @@ def valid_value(f: dict, today, rules: dict[str, str] | None = None) -> str | No
     """Ordinary valid data for a field, so a try changes only the fields it names. None: leave it.
     Within what the rules allow: a quantity of 1 to 10 gets 1, not 12345. The team's test data first."""
     from app import test_data
+    if (fresh := test_data.fresh_for(f)) is not None:  # the app said "already registered": a new one each time
+        return fresh
     if (mine := test_data.valid_for(f)) is not None:
         return mine
     v = _plain_valid(f, today)
@@ -701,9 +703,9 @@ def expand(value: str | None, f: dict | None = None) -> str:
     it until its reply runs out (an unusable reply), so ideas name long values by this code."""
     if value and value.startswith("@file:"):
         return value[6:]  # a file field holds the file's name
-    if value and "{data:" in value:
+    if value and "{" in value:
         from app import test_data
-        value = test_data.resolve(value)  # typed into the browser only
+        value = test_data.resolve(value)  # {data:…} typed into the browser only; {email}, {unique}… made fresh
     if not value or "@long" not in value:
         return value or ""
     name = f is not None and "name" in f["label"].lower()
@@ -1736,6 +1738,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     _note(session_id, "setup", f"Exploring in {browsers.label(ENGINE.get())}"
                           + (" (the slow network is Chromium's only: this run's network is normal)."
                              if (conditions or {}).get("network") == "slow" else "."))
+                from app import test_data as _td
+                _td.TODAY.set(run_today())  # {today} is the user's today, by the run's clock when it has one
                 page = await context.new_page()
                 live = LIVE[run_id] = Live()
                 await _start_screencast(page, live, options["viewport"], slow=(conditions or {}).get("network") == "slow")
@@ -2146,7 +2150,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         if outcome == "other" and entry.get("judged_means") in ("accepted", "refused", "error"):
                             outcome = entry["judged_means"]
                         from app import test_data
-                        for line in test_data.after_submit(outcome, said, session_id, run_id, noted):
+                        for line in test_data.after_submit(outcome, said, session_id, run_id, noted, sent=before.fields):
                             _note(session_id, "test", line)
                         values = {f["label"]: f["value"] for f in before.fields}
                         # Consistent with itself: the form offers these choices, so each should work like

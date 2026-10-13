@@ -45,13 +45,31 @@ const TRIAGE_COLOR: Record<Triage['kind'], { fg: string; bg: string }> = {
 }
 
 /** Why it went red: the kind, the evidence, and what to do next. */
-function TriageLine({ t }: { t: Triage }) {
+function TriageLine({ t, testId }: { t: Triage; testId: string }) {
   const c = TRIAGE_COLOR[t.kind]
+  const [fixed, setFixed] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  async function fresh() {
+    setBusy(true); setError(null)
+    try {
+      const r = await api.freshData(testId)
+      const changed = r.changes.map((x) => `${x.field}: ${x.now}`).join(', ')
+      setFixed(`${changed}. Replayed: ${r.test.replay?.outcome === 'passes' ? 'passes now' : r.test.replay?.outcome ?? 'not run'}.`)
+    } catch (e) { setError(errorText(e)) } finally { setBusy(false) }
+  }
   return (
     <div aria-label="Why" style={{ marginTop: 4, fontSize: 12 }}>
       <span style={{ fontSize: 10.5, fontWeight: 600, color: c.fg, background: c.bg, padding: '1px 6px', borderRadius: 5, marginRight: 6 }}>{t.label}</span>
       <span style={{ color: 'var(--text-secondary)' }}>{t.why}</span>
       <div style={{ color: 'var(--text-tertiary)', fontSize: 11.5, marginTop: 2 }}>Next: {t.next}</div>
+      {t.kind === 'data' && !fixed && (
+        <button onClick={fresh} disabled={busy} style={{ ...quietButton, fontSize: 11.5, padding: '3px 9px', marginTop: 4 }}
+          title="The steps whose values the app said were used get fresh ones each run ({email}, {phone}, … {unique}); then it replays">
+          {busy ? 'Replaying…' : 'Use fresh values'}</button>
+      )}
+      {fixed && <div role="status" style={{ color: 'var(--accent)', fontSize: 11.5, marginTop: 4 }}>Fresh values each run: {fixed}</div>}
+      <ErrorLine message={error} />
     </div>
   )
 }
@@ -169,7 +187,7 @@ export default function Regression() {
                         <td style={{ padding: '6px' }}>
                           <div>{r.bug_title}</div>
                           <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{r.meaning}{r.detail ? ` · ${r.detail}` : ''}</div>
-                          {r.triage && <TriageLine t={r.triage} />}
+                          {r.triage && <TriageLine t={r.triage} testId={r.test_id} />}
                         </td>
                         <td className="mono" style={{ padding: '6px', fontSize: 11, color: 'var(--text-quiet)', textAlign: 'right' }}>{(r.duration_ms / 1000).toFixed(1)}s</td>
                       </tr>

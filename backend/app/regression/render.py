@@ -42,6 +42,42 @@ def goto_target(url: str, base_url: str | None) -> str:
     return ts(url)
 
 
+TEMPLATED = re.compile(r"\{(?:unique|email|phone|today(?:[+-]\d{1,4})?|data:[^{}]{1,80})\}")
+HELPERS = [
+    "// Fresh values for each run (Mirmera's {unique}, {email}, {phone}, {today+n}), and test data from the environment.",
+    "const RUN = Date.now().toString(36).slice(-5)",
+    "const unique = () => RUN",
+    "const email = () => `mirmera+${RUN}@example.com`",
+    "const phone = () => '+2519' + String(parseInt(RUN, 36) % 100000000).padStart(8, '0')",
+    "const today = (days = 0) => { const d = new Date(); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10) }",
+    "const data = (name: string) => process.env['DATA_' + name.toUpperCase().replace(/[^A-Z0-9]+/g, '_')] ?? ''",
+]
+
+
+def js_value(value: str | None) -> str:
+    """A fill's value: a plain string, or a template literal when it holds {email}, {today+3}, {data:Name}…"""
+    value = value or ""
+    if not TEMPLATED.search(value):
+        return ts(value)
+    out, last = [], 0
+    for m in TEMPLATED.finditer(value):
+        out.append(value[last:m.start()].replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${"))
+        t = m.group(0)[1:-1]
+        if t.startswith("data:"):
+            out.append("${data(" + ts(t[5:]) + ")}")
+        elif t.startswith("today"):
+            out.append("${today(" + (t[5:].lstrip("+") or "0") + ")}")
+        else:
+            out.append("${" + t + "()}")
+        last = m.end()
+    out.append(value[last:].replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${"))
+    return "`" + "".join(out) + "`"
+
+
+def uses_templates(steps: list[dict]) -> bool:
+    return any(TEMPLATED.search(str((s.get("action") or {}).get("value") or "")) for s in steps)
+
+
 def action_line(a: dict) -> list[str]:
     target = locator(a.get("locator") or {})
     act = a.get("action")
@@ -57,7 +93,7 @@ def action_line(a: dict) -> list[str]:
         lines.append(f"// Not recorded (sensitive). Set {secret} when running the test.")
         lines.append(f"await {target}.fill(process.env.{secret} ?? '')")
     elif act == "fill":
-        lines.append(f"await {target}.fill({ts(a.get('value'))})")
+        lines.append(f"await {target}.fill({js_value(a.get('value'))})")
     elif act == "select":
         lines.append(f"await {target}.selectOption({ts(a.get('value'))})")
     elif act in ("check", "uncheck"):
@@ -116,6 +152,8 @@ def render(plan: dict, *, bug_title: str, oracle: str, issue_links: list[str],
     out.append("")
     out.append(f"const BASE_URL = process.env.BASE_URL ?? {ts(base_url or 'http://localhost:3000')}")
     out.append("")
+    if uses_templates(steps):
+        out += HELPERS + [""]
     if plan.get("browser") and plan["browser"] != "chromium":  # the bug was found in this engine
         out.append(f"test.use({{ browserName: {ts(plan['browser'])} }})")
     if plan.get("clock"):  # found with the browser's clock set: the user's time zone and moment
