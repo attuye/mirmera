@@ -22,6 +22,7 @@ interface Form {
   github_repo: string
   jira_project_key: string
   ai_task_providers: Record<string, string>
+  ethiopia: boolean
 }
 
 const toForm = (p: Project): Form => ({
@@ -30,6 +31,7 @@ const toForm = (p: Project): Form => ({
   default_ai_provider: p.default_ai_provider, default_tester: p.default_tester ?? '',
   github_repo: p.github_repo ?? '', jira_project_key: p.jira_project_key ?? '',
   ai_task_providers: { ...p.ai_task_providers },
+  ethiopia: !!p.ethiopia,
 })
 
 /** Only what changed, trimmed; "" clears a field on the server. */
@@ -41,6 +43,7 @@ function changes(form: Form, saved: Form): ProjectChanges {
   const envs = form.environments.map((e) => ({ name: e.name.trim(), url: e.url.trim() })).filter((e) => e.name || e.url)
   if (JSON.stringify(envs) !== JSON.stringify(saved.environments)) out.environments = envs
   if ('testing_mission' in out && !out.testing_mission) out.testing_mission = null
+  if (form.ethiopia !== saved.ethiopia) out.ethiopia = form.ethiopia
   if (JSON.stringify(Object.entries(form.ai_task_providers).sort()) !== JSON.stringify(Object.entries(saved.ai_task_providers).sort())) {
     out.ai_task_providers = form.ai_task_providers
   }
@@ -165,6 +168,16 @@ export default function ProjectSettings() {
                 <input id="s-tester" value={form.default_tester} onChange={(e) => set({ default_tester: e.target.value })} style={input} placeholder="Your name" maxLength={60} />
               </Field>
             </div>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
+              <input type="checkbox" checked={form.ethiopia} onChange={(e) => set({ ethiopia: e.target.checked })} style={{ marginTop: 3 }} />
+              <span>Users in Ethiopia
+                <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                  Runs also try phone numbers as people here write them (+251 9…, 09…, Safaricom 07…), names like
+                  "Haile W/Mariam" and Afaan Oromo names, Birr amounts and Woreda/Kebele addresses, and check that
+                  every valid form is accepted.
+                </span>
+              </span>
+            </label>
           </Section>
 
           <Section title="AI" intro="Which AI does what. Cheap tasks can run on a local model while the ones that need judgement use a stronger one. API keys are in Workspace keys (link at the top); model names stay in backend/.env.">

@@ -8,7 +8,8 @@ from app import models, schemas
 from app.database import Base, add_missing_columns, apply_renames
 
 NEW_PROJECT_COLUMNS = {"projects.description", "projects.app_url", "projects.environments", "projects.default_tester",
-                       "projects.archived_at", "projects.ai_task_providers", "projects.notify", "projects.sign_in"}
+                       "projects.archived_at", "projects.ai_task_providers", "projects.notify", "projects.sign_in",
+                       "projects.ethiopia"}
 
 
 def upgrade(engine) -> tuple[list[str], list[str]]:
@@ -85,7 +86,7 @@ def test_a_database_from_before_projects_keeps_its_risks_and_models(tmp_path):
         for table in ("artifacts", "product_models", "risks", "charters"):
             conn.exec_driver_sql(f"ALTER TABLE {table} RENAME COLUMN project_id TO product_id")
         for column in ("description", "app_url", "environments", "default_tester", "archived_at", "ai_task_providers", "notify",
-                       "sign_in"):
+                       "sign_in", "ethiopia"):
             conn.exec_driver_sql(f"ALTER TABLE products DROP COLUMN {column}")
         conn.exec_driver_sql("INSERT INTO products (id, org_id, name, default_ai_provider) VALUES ('p1', 'org', 'KYC', 'mock')")
         conn.exec_driver_sql("INSERT INTO product_models (id, product_id, summary) VALUES ('m1', 'p1', 'Upload flow')")

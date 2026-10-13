@@ -234,6 +234,7 @@ class CharterContext:
     signed_in_as: str | None = None  # Mirmera signed in to the app as this user before the run
     dismissed: list[str] = field(default_factory=list)  # what the team said isn't a bug here, and why
     project_id: str | None = None
+    ethiopia: bool = False  # the Ethiopia pack (a project setting)
     test_data: list[dict] = field(default_factory=list)  # the team's values (secrets in memory only): never in the prompt
 
     def has_rules(self) -> bool:
@@ -662,6 +663,8 @@ def ideas_for(f: dict, today, rules: dict[str, str] | None = None) -> list[tuple
     from app import test_data
     first = (boundary_ideas(f, rules) if rules else [])
     first += [(w, v) for w, v in test_data.ideas(f) if v not in {x for _, x in first}]  # the team's own bad values
+    from app.agent import ethiopia
+    first += [(w, v) for w, v in ethiopia.ideas(f) if v not in {x for _, x in first}]  # how people here write it
     have = {v for _, v in first}
     return first + [(w, v) for w, v in _type_ideas(f, today) if v not in have]
 
@@ -912,7 +915,8 @@ SUCCESS_WORDS = ("verified", "welcome", "success", "saved", "thank you", "thanks
                  "subscribed", "joined", "completed", "ordered", "paid", "uploaded", "accepted")
 REFUSAL_WORDS = ("please", "required", "must", "invalid", "not allowed", "only", "can't", "cannot", "not accepted", "rejected",
                  "not available", "unavailable", "sorry", "isn't possible", "not possible", "declined", "not valid",
-                 "already used", "already exists", "already registered", "already taken")
+                 "already used", "already exists", "already registered", "already taken", "enter a valid",
+                 "is not a valid")
 LISTING_WORDS = ("list", "lists", "listed", "show", "shows", "shown", "display", "displays", "appear", "appears")
 
 
@@ -1710,7 +1714,9 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
 
     ACTIVE.add(run_id)
     from app import test_data
+    from app.agent import ethiopia
     test_data.start(ctx.test_data)  # this run's rows (and nothing picked yet)
+    ethiopia.ON.set(ctx.ethiopia)
     history: list[dict] = []
     bug_ids: list[str] = []
     reported: set[tuple[str, str]] = set()
@@ -2176,6 +2182,9 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                                             explanation="The same form with one choice changed got a different answer.")),
                                     ("choice", fld, now_), " (consistency with the product itself)")
                                 break
+                        from app.agent import ethiopia
+                        if (prob := ethiopia.check(before.fields, values, outcome, submits, rules_of(ctx), said)):
+                            await keep(prob, ("ethiopia", prob.title), " (valid Ethiopian formats, the rest of the form the same)")
                         submits.append((values, outcome, entry["n"]))
                         if outcome == "accepted":
                             accepted_values += [v for v in kept_values(before) if v not in accepted_values]

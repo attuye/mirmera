@@ -173,12 +173,12 @@ def score(db, run, planted: list | None = None) -> RunScore:
     return s
 
 
-def setup(db, app_url: str, provider: str, checker: str | None, app: str = "kyc"):
+def setup(db, app_url: str, provider: str, checker: str | None, app: str = "kyc", ethiopia: bool = False):
     """A project on the practice app, its story, and its charters."""
     from app import models
     pa = APPS[app]
     project = models.Project(org_id="eval", name=f"{pa.name} (eval)", app_url=app_url.rstrip("/"),
-                             default_ai_provider=provider,
+                             default_ai_provider=provider, ethiopia=ethiopia,
                              ai_task_providers={"agent": provider, **({"explore_check": checker} if checker else {})})
     db.add(project)
     db.flush()
@@ -196,7 +196,7 @@ def setup(db, app_url: str, provider: str, checker: str | None, app: str = "kyc"
 
 def run_eval(app_url: str, provider: str, *, checker: str | None = None, runs: int = 1, max_steps: int = 25,
              only: list[str] | None = None, timeout: float = 1800, on_progress=print, app: str = "kyc",
-             clock: str | None = None, browser: str | None = None) -> list[RunScore]:
+             clock: str | None = None, browser: str | None = None, ethiopia: bool = False) -> list[RunScore]:
     """Explores each charter `runs` times, one run at a time, and scores every run."""
     from app import models
     from app.agent import explore as agent
@@ -204,7 +204,7 @@ def run_eval(app_url: str, provider: str, *, checker: str | None = None, runs: i
     from app.routers.explore import start_exploration
     out = []
     with SessionLocal() as db:
-        _, charters = setup(db, app_url, provider, checker, app)
+        _, charters = setup(db, app_url, provider, checker, app, ethiopia)
         for i in range(runs):
             for key, charter in charters:
                 if only and key not in only:
@@ -305,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
                          "ethiopian-new-year, year-end, leap-day, or a moment like 2026-09-11T00:20")
     ap.add_argument("--browser", default=None, choices=("chromium", "firefox", "webkit"),
                     help="the browser engine (default: chromium; firefox and webkit need: python -m playwright install firefox webkit)")
+    ap.add_argument("--ethiopia", action="store_true", help="the Ethiopia pack: phone, name, Birr and address ideas and checks")
     ap.add_argument("--out", default=None, help="folder for the database, evidence and report (default: a new temp folder)")
     args = ap.parse_args(argv)
     pa = APPS[args.app]
@@ -333,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
             from app.agent import explore as agent
             agent.STEP_IN_AFTER = 10 ** 6
         scores = run_eval(args.app_url, args.provider, checker=args.checker, runs=args.runs, max_steps=args.steps,
-                          only=args.only, app=args.app, clock=args.clock, browser=args.browser)
+                          only=args.only, app=args.app, clock=args.clock, browser=args.browser, ethiopia=args.ethiopia)
         text = report(scores, args.provider, args.checker, args.app)
         (folder / "report.md").write_text(text, encoding="utf-8")
         (folder / "steps.md").write_text(steps_text(), encoding="utf-8")

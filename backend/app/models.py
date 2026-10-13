@@ -140,6 +140,7 @@ class Project(Base):
     # How to sign in to the app under test (app/sign_in.py); the password is encrypted
     sign_in = Column(JSON, nullable=True)
     default_tester = Column(String, nullable=True)  # prefilled when starting a session
+    ethiopia = Column(Boolean, default=False)  # the app's users are in Ethiopia: the Ethiopia pack's ideas and check
     notify = Column(JSON, nullable=True)  # {"telegram_chat_id", "slack": bool, "events": [...]}
 
     artifacts = relationship("Artifact", back_populates="project", cascade="all, delete-orphan")
