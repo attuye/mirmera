@@ -40,6 +40,7 @@ def sign_up(c, name="Attu", email="attu@addisverify.et", workspace="AddisVerify"
 def pytest_configure(config):
     config.addinivalue_line("markers", "tours: the exploration agent tours the flow after an accepted submit")
     config.addinivalue_line("markers", "confirm: the exploration agent replays its new drafts when the run ends")
+    config.addinivalue_line("markers", "layout: the exploration agent looks at each new page at phone width")
 
 
 @pytest.fixture(autouse=True)
@@ -50,6 +51,8 @@ def flow_tours(request, monkeypatch):
         monkeypatch.setattr("app.agent.explore.TOURS", False)
     if not request.node.get_closest_marker("confirm"):
         monkeypatch.setattr("app.agent.explore.CONFIRM_RUNS", 0)
+    if not request.node.get_closest_marker("layout"):
+        monkeypatch.setattr("app.agent.explore.LAYOUT", False)
 
 
 @pytest.fixture(autouse=True)

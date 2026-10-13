@@ -94,6 +94,7 @@ class Obvious:
 
 @pytest.mark.tours
 @pytest.mark.confirm
+@pytest.mark.layout  # and no layout false alarms on the practice apps
 def test_the_shop_ceiling_six_bugs_chosen_in_advance(client, shop, monkeypatch, chromium_available):  # noqa: F811
     monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: Obvious(shop))
     scores = explore_eval.run_eval(shop, "mock", on_progress=lambda *_: None, max_steps=12, app="shop")

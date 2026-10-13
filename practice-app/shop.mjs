@@ -15,10 +15,11 @@ const PRODUCTS = {
 const orders = [] // { id, product, qty, name, email, phone, date, total }
 
 const page = (title, body) => `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>${title} · AddisMart</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title} · AddisMart</title>
 <style>
   body { font-family: system-ui, sans-serif; margin: 0; background: #f7f5f2; color: #2a2118 }
-  header { background: #5a2d0c; color: white; padding: 14px 32px; display: flex; gap: 24px; align-items: center }
+  header { background: #5a2d0c; color: white; padding: 14px 32px; display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center }
+  @media (max-width: 600px) { header { padding: 12px 16px } main { margin: 16px 12px; padding: 20px 16px } input, select { max-width: 100% } }
   header a { color: #ffe0c2; text-decoration: none } header strong { margin-right: auto }
   main { max-width: 560px; margin: 32px auto; background: white; padding: 28px 32px; border-radius: 10px; box-shadow: 0 1px 3px #0002 }
   label { display: block; font-size: 14px; margin: 14px 0 4px }
