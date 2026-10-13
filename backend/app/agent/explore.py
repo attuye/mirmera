@@ -1265,7 +1265,7 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
     except StepError:
         edited = None
     with SessionLocal() as db:
-        trail = [{"tag": n.tag, "content": n.content}
+        trail = [{"tag": n.tag, "content": n.content, "timestamp": n.timestamp.isoformat()}
                  for n in db.query(models.Note).filter_by(session_id=session_id).order_by(models.Note.timestamp).all()][-6:]
         bug = models.Bug(
             session_id=session_id, charter_id=charter_id, title=p.title[:200], severity=p.severity,

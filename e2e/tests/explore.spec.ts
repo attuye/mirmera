@@ -38,6 +38,13 @@ test('exploration agent: Mirmera explores a charter and leaves a session and a b
   await test.step('the bug draft waits for review; nothing was filed', async () => {
     await page.getByRole('group', { name: 'Mirmera explores' }).getByRole('link', { name: 'Review the bugs' }).click()
     await expect(page.getByText('GET /api/documents fails with 500').first()).toBeVisible()
+    // Open Mirmera's draft under Needs review: its trail of notes and the review buttons show.
+    await page.getByRole('tab', { name: /Needs review/ }).click()
+    const draft = page.getByRole('article', { name: 'GET /api/documents fails with 500' })
+    await draft.getByRole('button', { name: /GET \/api\/documents fails with 500/ }).click()
+    await expect(draft).toContainText('What happened before it (session notes)')
+    await expect(draft.getByRole('button', { name: 'Draft report with AI' })).toBeVisible()
+    await expect(page.getByRole('alert').filter({ hasText: "Mirmera couldn't show" })).toHaveCount(0)
   })
 
   await test.step('the session: the agent as tester, with its notes', async () => {

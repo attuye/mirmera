@@ -9,6 +9,7 @@ import BugStepsPanel from '../components/BugStepsPanel'
 import IsolationPanel from '../components/IsolationPanel'
 import { useProject, useProjectPath } from '../project'
 import { Screenshot, SignalList } from '../components/Evidence'
+import ErrorBoundary from '../components/ErrorBoundary'
 
 const SEVERITY_COLOR: Record<string, string> = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-tertiary)' }
 
@@ -120,7 +121,9 @@ export default function Bugs() {
                 </div>
                 {isOpen && (
                   <div style={{ padding: '0 16px 16px', borderTop: '1px solid var(--border-soft)' }}>
-                    <BugDetail bug={b} onSaved={replace} onDeleted={() => remove(b.id)} project={project} onProject={setProject} />
+                    <ErrorBoundary what="this bug">
+                      <BugDetail bug={b} onSaved={replace} onDeleted={() => remove(b.id)} project={project} onProject={setProject} />
+                    </ErrorBoundary>
                   </div>
                 )}
               </article>
@@ -275,7 +278,7 @@ function Trail({ bug }: { bug: BugListItem }) {
       {bug.reproduction_trail.map((n, i) => (
         <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12.5, marginBottom: 3 }}>
           <span className="mono" style={{ color: 'var(--text-quiet)', width: 72, flexShrink: 0, fontSize: 11.5 }}>
-            {new Date(n.timestamp.endsWith('Z') ? n.timestamp : n.timestamp + 'Z').toLocaleTimeString()}
+            {n.timestamp ? new Date(n.timestamp.endsWith('Z') ? n.timestamp : n.timestamp + 'Z').toLocaleTimeString() : n.tag}
           </span>
           <span style={{ color: 'var(--text-secondary)' }}>{n.content}</span>
         </div>
