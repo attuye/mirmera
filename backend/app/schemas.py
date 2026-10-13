@@ -85,6 +85,7 @@ class ProjectOut(BaseModel):
     app_url: Optional[str] = None
     environments: list[Environment] = []
     default_tester: Optional[str] = None
+    ethiopia: bool = False  # users in Ethiopia: phone, name, Birr and address ideas, and the format check
     archived_at: Optional[datetime] = None
     ai_task_providers: dict[str, str] = {}
     created_at: datetime
@@ -121,6 +122,7 @@ class ProjectUpdate(BaseModel):
     app_url: Optional[str] = None  # "" clears
     environments: Optional[list[Environment]] = Field(default=None, max_length=10)
     default_tester: Optional[str] = Field(default=None, max_length=60)  # "" clears
+    ethiopia: Optional[bool] = None
     # {"debrief": "local"}: tasks left out use the default provider; "" removes a choice
     ai_task_providers: Optional[dict[str, str]] = None
 

@@ -55,6 +55,8 @@ export interface Project {
   app_url: string | null
   environments: Environment[]
   default_tester: string | null
+  /** The app's users are in Ethiopia: the Ethiopia pack's ideas and format check */
+  ethiopia?: boolean
   /** Set while archived: hidden from the Projects page, still usable. */
   archived_at: string | null
   /** Provider per AI task, e.g. { debrief: 'local' }; other tasks use default_ai_provider. */
@@ -73,7 +75,7 @@ export interface ProjectSummary extends Project {
 
 export type ProjectChanges = Partial<Pick<Project,
   'name' | 'description' | 'testing_mission' | 'default_ai_provider' | 'github_repo' | 'jira_project_key' |
-  'app_url' | 'environments' | 'default_tester' | 'ai_task_providers'>>
+  'app_url' | 'environments' | 'default_tester' | 'ai_task_providers' | 'ethiopia'>>
 
 /** Every address a project knows, default first, without repeats. */
 export function projectUrls(project: Project): Environment[] {
