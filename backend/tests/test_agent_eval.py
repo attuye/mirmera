@@ -144,6 +144,7 @@ def run_with(monkeypatch, provider, app_url, **kw):
 
 @pytest.mark.tours
 @pytest.mark.confirm
+@pytest.mark.layout  # and no layout false alarms on the practice apps
 def test_an_ideal_tester_finds_every_planted_bug_and_nothing_else(client, practice_app, monkeypatch, chromium_available):  # noqa: F811
     """The ceiling: if the agent always does the right thing, Mirmera drafts all four
     planted bugs and no false alarm. A bug missing here is Mirmera's fault, not the model's."""

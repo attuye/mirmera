@@ -1184,7 +1184,8 @@ class RegressionTestOut(BaseModel):
 class Symptom(BaseModel):
     """What the agent says it saw. Mirmera checks it itself before believing it."""
     # keyboard: Mirmera's own keyboard tour ("unreachable:Send", "no-focus:Email", "trap:Notes"), checked by tabbing again
-    kind: Literal["failed_request", "console_error", "page_error", "text_visible", "text_absent", "url", "keyboard"]
+    # layout: Mirmera's phone layout check ("scroll", "cut:<text>", "overlap:<a>|<b>", "small:<target>"), checked at 390 px
+    kind: Literal["failed_request", "console_error", "page_error", "text_visible", "text_absent", "url", "keyboard", "layout"]
     value: str = Field(min_length=1, max_length=300)  # URL part, message part, or page text
     explanation: str = Field(min_length=3, max_length=600)  # why this is the bug the tester reported
 

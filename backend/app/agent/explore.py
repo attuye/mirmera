@@ -51,7 +51,8 @@ SUBMITS = ("click", "press", "try")
 TOURS = True  # after the first accepted submit on a form, Mirmera tours the flow itself
 INTERRUPTIONS = True  # the flow tour signs out halfway and saves the same record from two tabs
 SAVED_TEXT = True  # the flow tour sends Ge'ez and punctuation and checks they come back as typed
-KEYBOARD = True  # the flow tour ends with the form done with the keyboard only
+KEYBOARD = True
+LAYOUT = True  # each new page is looked at 390 px wide once  # the flow tour ends with the form done with the keyboard only
 ACCESS_CHECK = True  # after a signed-in run, the user's own pages are opened signed out and as the second user
 CONFIRM_RUNS = 3  # each new draft's steps, replayed in this many fresh browsers when the run ends
 # A note that says the app accepted or refused something: only true after a submit.
@@ -92,6 +93,11 @@ def context_options(conditions: dict | None) -> dict:
 def _engine_label() -> str:
     from app.browsers import label
     return label(ENGINE.get())
+
+
+def urlsplit_path(url: str) -> str:
+    from urllib.parse import urlsplit
+    return urlsplit(url or "").path or "/"
 
 
 def run_today():
@@ -2229,6 +2235,18 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             if leads:
                                 _note(session_id, "issue", f"Accessibility leads on {path} ({len(leads)}): "
                                       + "; ".join(f"{x.get('rule')}: {x.get('text')}" for x in leads[:5]))
+                            if LAYOUT and not page.is_closed():
+                                # The page at phone width, once: sideways scroll, cut-off text, overlap, small targets.
+                                from app.agent import layout
+                                try:
+                                    found = await layout.look(page)
+                                except Exception:
+                                    found = {}
+                                url_path = urlsplit_path(after.url)
+                                for prob in layout.problems(found, url_path):
+                                    prob.same_as = f"layout:{url_path}:{prob.symptom.value[:80]}"
+                                    await keep(prob, ("layout", url_path, prob.symptom.value),
+                                               f". Seen at 390 px wide ({'the run itself is on a phone' if (conditions or {}).get('device') == 'phone' else 'Mirmera narrowed the browser for a moment'}).")
                     # Slow answers: a tester notices waiting.
                     took = time.monotonic() - acted_at
                     if is_submit and took > 5:
