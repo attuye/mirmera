@@ -8,6 +8,7 @@ import { useProject } from '../project'
 import NotificationSettings from '../components/NotificationSettings'
 import AISettings from '../components/AISettings'
 import AppSignInSettings from '../components/AppSignInSettings'
+import DismissalList from '../components/DismissalList'
 
 interface Form {
   name: string
@@ -187,6 +188,7 @@ export default function ProjectSettings() {
           <ErrorLine message={error} />
         </form>
         <AppSignInSettings projectId={project.id} hasAppUrl={!!project.app_url} />
+        <DismissalList projectId={project.id} />
         <NotificationSettings projectId={project.id} />
         <DangerZone />
       </main>

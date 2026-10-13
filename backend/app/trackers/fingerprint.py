@@ -25,17 +25,25 @@ def _norm(text: str) -> str:
 
 def basis(bug: models.Bug) -> str:
     """What makes two reports the same problem."""
-    if bug.signature:
-        return bug.signature
-    s = bug.symptom or {}
+    return basis_of(bug.signature, bug.symptom, bug.title)
+
+
+def basis_of(signature: str | None, symptom: dict | None, title: str) -> str:
+    if signature:
+        return signature
+    s = symptom or {}
     if s.get("kind") and s.get("value"):
         value = urlsplit(s["value"]).path or s["value"] if s["kind"] == "failed_request" else s["value"]
         return f"{s['kind']}:{_norm(value)}"
-    return f"title:{_norm(bug.title)}"
+    return f"title:{_norm(title)}"
 
 
 def fingerprint(bug: models.Bug) -> str:
     return PREFIX + hashlib.sha256(basis(bug).encode()).hexdigest()[:12]
+
+
+def fingerprint_of(signature: str | None, symptom: dict | None, title: str) -> str:
+    return PREFIX + hashlib.sha256(basis_of(signature, symptom, title).encode()).hexdigest()[:12]
 
 
 def symptom_words(bug: models.Bug) -> list[str]:

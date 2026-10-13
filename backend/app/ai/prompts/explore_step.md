@@ -95,7 +95,9 @@ How to work:
 <ideas> lists the experienced tester's variations for the fields on this
 page that nobody has submitted yet: pick from them (one field at a time, the
 rest of the form valid). The charter may list earlier_runs: don't repeat what
-they found; go where they didn't. It may give an app_map of the app's pages.
+they found; go where they didn't. It may give an app_map of the app's pages,
+and dismissed_by_the_team: problems the team has said aren't bugs here, with
+why. Don't report those again, in any words.
 
 Your pair (a tester watching you, or Mirmera itself) may write in <pair>:
 that is what to try next, so do it, unless it would leave the app or do

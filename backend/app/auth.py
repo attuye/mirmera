@@ -172,6 +172,7 @@ RESOLVE = {
     "evidence_id": lambda db, v, path: (lambda e: _via_session(db, e.session_id) if e else None)(db.get(models.Evidence, v)),
     "run_id": lambda db, v, path: _run_project(db, v, path),
     "job_id": lambda db, v, path: _project(db, models.AiJob, v),
+    "dismissal_id": lambda db, v, path: _project(db, models.Dismissal, v),
     "comparison_id": lambda db, v, path: (lambda c: _via_session(db, c.session_id) if c else None)(db.get(models.Comparison, v)),
 }
 

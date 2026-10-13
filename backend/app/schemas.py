@@ -358,6 +358,8 @@ class BugOut(BaseModel):
     sightings: list[dict] = []
     # Mirmera replayed the draft's steps in fresh browsers: {"runs", "reproduced", "results", "at"}
     confirmation: Optional[dict] = None
+    # A tester dismissed it: {"reason", "note", "by", "at"}. Mirmera won't draft the same problem again.
+    dismissal: Optional[dict] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -2474,3 +2476,21 @@ class ComparisonOut(BaseModel):
 class CompareBugRequest(BaseModel):
     """Draft a bug from one differing step: the environment that is right is the oracle."""
     right: Literal["a", "b"] = "a"
+
+
+class DismissRequest(BaseModel):
+    """Why a draft isn't a bug: Mirmera doesn't draft the same problem again in this project."""
+    reason: Literal["by_design", "not_a_problem", "not_important", "duplicate", "cant_reproduce"]
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+class DismissalOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    bug_id: Optional[str] = None
+    fingerprint: str
+    title: str
+    reason: str
+    note: Optional[str] = None
+    by: Optional[str] = None
+    created_at: datetime

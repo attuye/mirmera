@@ -410,6 +410,7 @@ class Bug(Base):
     sightings = Column(JSON, nullable=True)  # [{"session_id", "charter_id", "mission", "at", "url"}]
     symptom = Column(JSON, nullable=True)  # what shows it, as the agent's checks see it: {"kind", "value", "explanation"}
     confirmation = Column(JSON, nullable=True)  # its steps replayed in fresh browsers: {"runs", "reproduced", "results", "at"}
+    dismissal = Column(JSON, nullable=True)  # a tester said it isn't a bug: {"reason", "note", "by", "at"}
 
     session = relationship("Session", back_populates="bugs")
     charter = relationship("Charter")
@@ -809,4 +810,19 @@ class Comparison(Base):
     detail = Column(Text, nullable=True)
     started_by = Column(String, nullable=True)
     bug_ids = Column(JSON, default=list)  # drafts made from its differences
+    created_at = Column(DateTime, default=utcnow)
+
+
+class Dismissal(Base):
+    """A draft a tester dismissed, and why: Mirmera doesn't draft that problem again in the project
+    (see app/dismissals.py)."""
+    __tablename__ = "dismissals"
+    id = Column(String, primary_key=True, default=gen_id)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    bug_id = Column(String, nullable=True)  # the draft it came from (kept even if that bug is deleted)
+    fingerprint = Column(String, nullable=False, index=True)
+    title = Column(String, nullable=False)
+    reason = Column(String, nullable=False)  # by_design | not_a_problem | not_important | duplicate | cant_reproduce
+    note = Column(Text, nullable=True)
+    by = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow)

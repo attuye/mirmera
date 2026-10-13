@@ -9,7 +9,7 @@ from app.ai.base import ProviderError, ProviderNotConfigured, UnknownProvider
 from app.auth import guard
 from app.config import settings
 from app.database import Base, add_missing_columns, apply_renames, engine
-from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension, isolate, suite, retests, report, coverage, nudges, notifications, stories, sprints, ai, members, workspace_keys, jira_app, api_explore, openapi, strategy, explore, agent_activity, ai_jobs, sign_in as sign_in_routes, auth as auth_routes, compare as compare_routes
+from app.routers import projects, artifacts, bugs, charters, sessions, debriefs, risks, runner, risk_feedback, trackers, regression, reproduce, extension, isolate, suite, retests, report, coverage, nudges, notifications, stories, sprints, ai, members, workspace_keys, jira_app, api_explore, openapi, strategy, explore, agent_activity, ai_jobs, sign_in as sign_in_routes, auth as auth_routes, compare as compare_routes, dismissals as dismissal_routes
 from app.runner import RunnerConflict, RunnerUnavailable, manager as runner_manager
 from app.trackers import TrackerError, TrackerNotConfigured, UnknownTracker
 
@@ -137,6 +137,7 @@ app.include_router(strategy.router, dependencies=GUARDED)
 app.include_router(ai.router, dependencies=GUARDED)
 app.include_router(ai_jobs.router, dependencies=GUARDED)
 app.include_router(compare_routes.router, dependencies=GUARDED)
+app.include_router(dismissal_routes.router, dependencies=GUARDED)
 
 
 @app.get("/health")
