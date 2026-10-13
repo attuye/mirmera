@@ -2,7 +2,7 @@
 
 Two kinds of work, shown the same way:
 - a Jira work item planned by the Mirmera agent (the panel button or an assignment):
-  read the work item → model it → propose risks → draft charters → explore → done;
+  read the work item → read the project's risks → propose risks → draft charters → explore → done;
 - an exploration started in Mirmera ("Let Mirmera explore" on a charter): explore → done.
 
 Each item says which stage is running, how far exploring has got (steps used of the
@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session as DBSession
 from app import models
 from app.timeutil import utcnow
 
-STAGES = [("read", "Read the work item"), ("model", "Model the story"), ("risks", "Propose risks"),
+STAGES = [("read", "Read the work item"), ("model", "Read the project's risks"), ("risks", "Propose risks"),
           ("charters", "Draft charters"), ("explore", "Explore in the app"), ("done", "Done")]
 ORDER = [k for k, _ in STAGES]
 RECENT_STEPS = 6

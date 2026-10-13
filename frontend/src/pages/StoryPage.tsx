@@ -7,9 +7,11 @@ import Sidebar from '../components/Sidebar'
 import ExploreButton from '../components/ExploreButton'
 import AgentProgress, { useAgentActivity } from '../components/AgentProgress'
 import RiskForm from '../components/RiskForm'
+import SuggestedRisks from '../components/SuggestedRisks'
+import { useAiJob } from '../components/useAiJob'
 import { utcDate } from '../components/Evidence'
 import { ConfirmDelete, ErrorLine, errorText, input, quietButton } from '../components/ui'
-import { api, Charter, Risk, SprintSummary, StoryDetail } from '../api/client'
+import { api, Charter, Risk, SprintSummary, StoryDetail, StoryRisksResult } from '../api/client'
 import { useProject, useProjectPath } from '../project'
 import { StoryStatus, timeText } from './Stories'
 
@@ -85,6 +87,10 @@ export default function StoryPage() {
   const [watch, setWatch] = useState(0)  // bumped when an exploration starts here: look again at once
   const activity = useAgentActivity(() => api.storyActivity(storyId), `${storyId}-${watch}`)
   const wasRunning = useRef(0)
+  const suggest = useAiJob<StoryRisksResult>(project.id, 'story_risks', () => {  // new proposed risks are on the story now
+    api.getStory(storyId).then(setStory).catch(() => {})
+    api.listRisks(project.id).then(setRisks).catch(() => {})
+  }, storyId)
 
   useEffect(() => {  // Mirmera just finished something here: show what it made
     if (!activity) return
@@ -116,6 +122,19 @@ export default function StoryPage() {
   if (!story) return <div style={{ display: 'flex', minHeight: '100vh' }}><Sidebar /><main style={{ padding: '32px 40px' }}>{error ? <ErrorLine message={error} /> : 'Loading…'}</main></div>
 
   const riskIds = story.risk_list.map((r) => r.id)
+  const suggested = suggest.job?.status === 'done' && suggest.job.result?.story_id === story.id ? suggest.job.result : null
+  async function decide(riskId: string, action: 'link' | 'drop') {
+    await act('suggest', () => api.decideRiskSuggestion(story!.id, riskId, action))
+    if (suggest.job?.result) suggest.setJob({ ...suggest.job, result: { ...suggest.job.result,
+      links: suggest.job.result.links.map((l) => l.risk_id === riskId ? { ...l, status: action === 'link' ? 'linked' : 'dropped' } : l) } })
+  }
+  async function review(riskId: string, accept: boolean) {  // a proposed risk on this story: accept it, or drop it from the project
+    await act('review', async () => {
+      await api.updateRisk(riskId, { status: accept ? 'accepted' : 'retired' })
+      return accept ? api.getStory(story!.id) : api.setStoryRisks(story!.id, riskIds.filter((x) => x !== riskId))
+    })
+    api.listRisks(project.id).then(setRisks).catch(() => {})
+  }
   const charterIds = story.charter_list.map((c) => c.id)
   const go = (to: string) => to.startsWith('#') ? document.getElementById(to.slice(1))?.scrollIntoView({ behavior: 'smooth' }) : navigate(path(to))
   const trackerName = story.tracker === 'jira' ? 'Jira' : story.tracker === 'github' ? 'GitHub' : null
@@ -196,13 +215,18 @@ export default function StoryPage() {
             <Picker label="Link a project risk" options={risks.filter((r) => !riskIds.includes(r.id))} text={(r) => `${r.ref} · ${r.score} · ${r.title}`}
               onPick={(id) => act('risk', () => api.setStoryRisks(story.id, [...riskIds, id]))} />
             <button onClick={() => setAddingRisk(!addingRisk)} style={small}>{addingRisk ? 'Cancel' : 'New risk'}</button>
+            <button disabled={suggest.running || !!busy} onClick={() => suggest.start({ story_id: story.id })} style={small}
+              title="The project's risks this story touches, and new ones it brings in. Everything is a proposal.">
+              {suggest.running ? `Thinking… ${suggest.since}` : 'Suggest risks'}</button>
           </span>}>
+          <ErrorLine message={suggest.error} />
+          {suggested && <SuggestedRisks result={suggested} busy={!!busy} onDecide={decide} />}
           {addingRisk && <RiskForm label="Add risk to this story" save={async (r) => {
             const updated = await api.newStoryRisk(story.id, r)
             setStory(updated); setAddingRisk(false)
             api.listRisks(project.id).then(setRisks).catch(() => {})
           }} />}
-          {story.risk_list.length === 0 && !addingRisk && <p style={quiet}>What could this change break, and for whom? Link a project risk or add a new one.</p>}
+          {story.risk_list.length === 0 && !addingRisk && <p style={quiet}>What could this change break, and for whom? Link a project risk, add a new one, or let Mirmera suggest some.</p>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {story.risk_list.map((r) => (
               <div key={r.id} role="article" aria-label={`${r.ref} ${r.title}`} style={{ ...row, opacity: r.status === 'retired' ? 0.6 : 1 }}>
@@ -216,6 +240,11 @@ export default function StoryPage() {
                       <span key={s.id}>{i > 0 && ', '}<Link to={path(`/stories/${s.id}`)}>{s.key ?? s.title}</Link></span>))}</>}
                   </div>
                 </div>
+                {r.status === 'proposed' && <>
+                  <button disabled={!!busy} onClick={() => review(r.id, true)} style={small} aria-label={`Accept ${r.ref}`}>Accept</button>
+                  <button disabled={!!busy} onClick={() => review(r.id, false)} style={small} aria-label={`Drop ${r.ref}`}
+                    title="Retire the risk and take it off this story">Drop</button>
+                </>}
                 <button disabled={!!busy} onClick={() => act('risk', () => api.setStoryRisks(story.id, riskIds.filter((x) => x !== r.id)))} style={small}
                   aria-label={`Unlink ${r.ref}`}>Unlink</button>
               </div>

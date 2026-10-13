@@ -28,13 +28,16 @@ INTERRUPTED = "Interrupted: the backend stopped while the AI was working. Start 
 
 def _kinds():
     from app.agent import survey
-    from app.routers import risks
+    from app.routers import risks, stories
     return {
         "product_model": ("Build the product model", risks.build_product_model, schemas.ProductModelRequest),
         "risk_analysis": ("Propose risks", risks.analyze_risks, schemas.RiskAnalyzeRequest),
         "charters_from_risks": ("Draft charters from risks", risks.charters_from_risks, schemas.ChartersFromRisksRequest),
         "app_map": ("Survey the app", survey.survey, schemas.AppMapRequest),
+        "story_risks": ("Suggest risks for a story", stories.suggest_story_risks, schemas.StoryRisksRequest),
     }
+
+SCOPED = {"story_risks": "story_id"}  # kinds that run once per story, not once per project
 
 
 def label(kind: str) -> str:
@@ -61,10 +64,13 @@ def validate(kind: str, request: dict):
 
 
 def start(db: DBSession, project_id: str, kind: str, request: dict, started_by: str | None) -> tuple[models.AiJob, bool]:
-    """(job, new). One job of a kind per project at a time: a second click gets the running one."""
-    running = (db.query(models.AiJob)
-               .filter(models.AiJob.project_id == project_id, models.AiJob.kind == kind, models.AiJob.status == "running")
-               .order_by(models.AiJob.created_at.desc()).first())
+    """(job, new). One job of a kind per project (per story, for story kinds) at a time: a second
+    click gets the running one."""
+    running = next((j for j in (db.query(models.AiJob)
+                                .filter(models.AiJob.project_id == project_id, models.AiJob.kind == kind,
+                                        models.AiJob.status == "running")
+                                .order_by(models.AiJob.created_at.desc()).all())
+                    if _scope(kind, j.request) == _scope(kind, request)), None)
     if settle(db, running) and running.status == "running":
         return running, False
     job = models.AiJob(project_id=project_id, kind=kind, request=request, started_by=started_by)
@@ -99,9 +105,15 @@ async def run(job_id: str) -> None:
         ACTIVE.discard(job_id)
 
 
-def latest(db: DBSession, project_id: str, kind: str) -> models.AiJob | None:
-    job = (db.query(models.AiJob).filter(models.AiJob.project_id == project_id, models.AiJob.kind == kind)
-           .order_by(models.AiJob.created_at.desc()).first())
+def _scope(kind: str, request: dict | None):
+    return (request or {}).get(SCOPED[kind]) if kind in SCOPED else None
+
+
+def latest(db: DBSession, project_id: str, kind: str, story_id: str | None = None) -> models.AiJob | None:
+    """The newest job of a kind; for a story kind, the newest for that story."""
+    q = (db.query(models.AiJob).filter(models.AiJob.project_id == project_id, models.AiJob.kind == kind)
+         .order_by(models.AiJob.created_at.desc()))
+    job = next((j for j in q.limit(200) if _scope(kind, j.request) == story_id), None) if kind in SCOPED else q.first()
     return settle(db, job)
 
 

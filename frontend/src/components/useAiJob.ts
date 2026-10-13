@@ -6,16 +6,17 @@ import { AiJob, AiJobKind, api } from '../api/client'
 import { errorText } from './ui'
 import { utcDate } from './Evidence'
 
-export function useAiJob<T>(projectId: string, kind: AiJobKind, onDone?: (job: AiJob<T>) => void) {
+export function useAiJob<T>(projectId: string, kind: AiJobKind, onDone?: (job: AiJob<T>) => void, storyId?: string) {
   const [job, setJob] = useState<AiJob<T> | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
   const [startedHere, setStartedHere] = useState(false)
 
   useEffect(() => {
     let stopped = false
-    api.latestAiJob(projectId, kind).then((j) => { if (!stopped) setJob(j as AiJob<T> | null) }).catch(() => {})
+    setJob(null)
+    api.latestAiJob(projectId, kind, storyId).then((j) => { if (!stopped) setJob(j as AiJob<T> | null) }).catch(() => {})
     return () => { stopped = true }
-  }, [projectId, kind])
+  }, [projectId, kind, storyId])
 
   const running = job?.status === 'running'
   useEffect(() => {
@@ -35,6 +36,7 @@ export function useAiJob<T>(projectId: string, kind: AiJobKind, onDone?: (job: A
   }, [projectId, kind])
 
   return {
+    setJob: setJob as (job: AiJob<T> | null) => void,  // after a change to the job's result made elsewhere
     job, running, start,
     // A failure is news only if it was started here or ended lately, not an old one found on load.
     error: startError ?? (job?.status === 'failed' && (startedHere || recent(job.finished_at)) ? job.error : null),

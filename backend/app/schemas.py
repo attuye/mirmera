@@ -531,6 +531,27 @@ class LLMRiskList(BaseModel):
         return data
 
 
+class LLMStoryRiskLink(BaseModel):
+    risk_ref: str
+    reason: str = Field(min_length=3)
+
+
+class LLMStoryRisks(BaseModel):
+    """A story's risks: the project's risks it touches, and the ones it brings in."""
+    touches: list[LLMStoryRiskLink] = []
+    new_risks: list[LLMRisk] = []
+    thin: Optional[str] = None  # the story says too little: what is missing
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_broken_items(cls, data):
+        data, dropped = keep_valid(data, "new_risks", LLMRisk)
+        _log_dropped("risk", dropped)
+        data, dropped = keep_valid(data, "touches", LLMStoryRiskLink)
+        _log_dropped("risk link", dropped)
+        return data
+
+
 class LLMRiskCharter(BaseModel):
     target: str
     resources: str
@@ -579,6 +600,17 @@ class ProductModelOut(BaseModel):
 class RiskAnalyzeRequest(BaseModel):
     provider: Optional[str] = None
     max_risks: int = Field(default=12, ge=3, le=30)
+
+
+class StoryRisksRequest(BaseModel):
+    """Suggest risks for one story: the project's risks it touches, and new ones."""
+    story_id: str
+    provider: Optional[str] = None
+    max_risks: int = Field(default=5, ge=1, le=10)
+
+
+class StoryRiskDecision(BaseModel):
+    action: Literal["link", "drop"]
 
 
 class RiskCreate(BaseModel):
@@ -2418,7 +2450,7 @@ class AgentActivityList(BaseModel):
 # ---------- AI jobs: AI steps that survive a refresh ----------
 
 class AiJobCreate(BaseModel):
-    kind: Literal["product_model", "risk_analysis", "charters_from_risks", "app_map"]
+    kind: Literal["product_model", "risk_analysis", "charters_from_risks", "app_map", "story_risks"]
     request: dict = Field(default_factory=dict)
 
 

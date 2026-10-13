@@ -26,8 +26,8 @@ def start_job(project_id: str, payload: schemas.AiJobCreate, request: Request, b
 
 
 @router.get("/projects/{project_id}/ai-jobs/latest", response_model=schemas.AiJobOut | None)
-def latest_job(project_id: str, kind: str, db: DBSession = Depends(get_db)):
-    job = ai_jobs.latest(db, project_id, kind)
+def latest_job(project_id: str, kind: str, story_id: str | None = None, db: DBSession = Depends(get_db)):
+    job = ai_jobs.latest(db, project_id, kind, story_id=story_id)
     return ai_jobs.out(job) if job else None
 
 

@@ -13,7 +13,7 @@ from app.ai.llm_json import complete_json
 from app.evidence_text import NOT_USED
 from app.schemas import (
     CharterSuggestion, CharterSuggestionList, LLMDebrief,
-    LLMBugDraft, LLMDuplicateList, LLMRegressionChecks, LLMRegressionPlan, LLMProductModel, LLMRiskUpdateList, LLMRisk, LLMRiskCharter, LLMRiskCharterList, LLMRiskList, LLMReportSummary,
+    LLMBugDraft, LLMDuplicateList, LLMRegressionChecks, LLMRegressionPlan, LLMProductModel, LLMRiskUpdateList, LLMRisk, LLMRiskCharter, LLMRiskCharterList, LLMRiskList, LLMReportSummary, LLMStoryRisks,
 )
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
@@ -32,6 +32,7 @@ PROMPT_VERSIONS = {
     "regression_checks": "regression-checks-v1",
     "report_summary": "report-summary-v1",
     "test_strategy": "test-strategy-v1",
+    "story_risks": "story-risks-v1",
 }
 PLANNING_TOKENS = 4000
 MAX_ARTIFACT_CHARS = 15_000
@@ -130,6 +131,27 @@ async def analyze_risks(
         task="risk_analysis", max_tokens=PLANNING_TOKENS,
     )
     return result.risks[:max_risks]
+
+
+async def story_risks(
+    provider: LLMProvider, *, project_name: str, testing_mission: str | None, story: dict,
+    product_model: dict | None, project_risks: list[dict], max_risks: int,
+) -> LLMStoryRisks:
+    """story: key, title, description. project_risks: ref, title, failure_mode, quality_criterion,
+    score, linked (already linked to this story)."""
+    user = (
+        f"{_context(project_name, testing_mission)}\n\n"
+        f"Return at most {max_risks} new risks.\n\n"
+        f"<story>\n{json.dumps(story, indent=2, ensure_ascii=False)}\n</story>\n\n"
+        f"<product_model>\n{json.dumps(product_model, indent=2, ensure_ascii=False) if product_model else '(none yet)'}\n</product_model>\n\n"
+        f"<project_risks>\n{json.dumps(project_risks, indent=2, ensure_ascii=False) if project_risks else '(none)'}\n</project_risks>"
+    )
+    result = await complete_json(
+        provider, load_prompt("story_risks.md"), user, LLMStoryRisks,
+        task="story_risks", max_tokens=PLANNING_TOKENS,
+    )
+    result.new_risks = result.new_risks[:max_risks]
+    return result
 
 
 async def charters_from_risks(
