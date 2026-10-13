@@ -42,7 +42,7 @@ def parse_ref(ref: str) -> tuple[str, str]:
 
 
 async def fetch(project: models.Project, ref: str) -> dict:
-    """The story as the tracker has it: key, title, description, address and status."""
+    """The story as the tracker has it: key, title, description, address, status and (Jira) its sprint."""
     tracker_name, key = parse_ref(ref)
     if tracker_name == "jira" and project.jira_project_key and not key.startswith(project.jira_project_key + "-"):
         raise StoryProblem(f"{key} is not in this project's Jira project ({project.jira_project_key}).")
@@ -51,7 +51,8 @@ async def fetch(project: models.Project, ref: str) -> dict:
     except TrackerError as err:
         raise StoryProblem(str(err))
     return {"key": issue.key, "title": issue.title[:300], "description": (issue.body or issue.snippet or "").strip() or None,
-            "url": issue.url, "tracker": tracker_name, "tracker_status": issue.status, "closed": issue.closed}
+            "url": issue.url, "tracker": tracker_name, "tracker_status": issue.status, "closed": issue.closed,
+            "sprint": issue.sprint}
 
 
 def _sessions(story: models.Story) -> list[models.Session]:

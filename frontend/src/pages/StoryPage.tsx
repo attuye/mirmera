@@ -77,7 +77,8 @@ export default function StoryPage() {
   const [risks, setRisks] = useState<Risk[]>([])
   const [charters, setCharters] = useState<Charter[]>([])
   const [sprints, setSprints] = useState<SprintSummary[]>([])
-  const { hash } = useLocation()
+  const { hash, state } = useLocation()
+  const [sprintNote, setSprintNote] = useState<string | null>((state as { sprintNote?: string } | null)?.sprintNote ?? null)
   const [addingRisk, setAddingRisk] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -103,7 +104,14 @@ export default function StoryPage() {
 
   async function act(what: string, fn: () => Promise<StoryDetail>) {
     setBusy(what); setError(null)
-    try { setStory(await fn()) } catch (e) { setError(errorText(e)) } finally { setBusy(null) }
+    try {
+      const s = await fn()
+      setStory(s)
+      if (what === 'refresh') {
+        setSprintNote(s.sprint_note ?? null)
+        if (s.sprint_note) api.listSprints(project.id).then(setSprints).catch(() => {})  // it may have made one
+      }
+    } catch (e) { setError(errorText(e)) } finally { setBusy(null) }
   }
   if (!story) return <div style={{ display: 'flex', minHeight: '100vh' }}><Sidebar /><main style={{ padding: '32px 40px' }}>{error ? <ErrorLine message={error} /> : 'Loading…'}</main></div>
 
@@ -156,6 +164,10 @@ export default function StoryPage() {
           )}
         </div>
         <ErrorLine message={error} />
+        {sprintNote && (
+          <p role="status" aria-label="Sprint from Jira" style={{ margin: '12px 0 0', fontSize: 12.5, color: 'var(--text-secondary)', padding: '7px 12px', borderLeft: '3px solid var(--info)', background: 'var(--panel)', borderRadius: 6, maxWidth: 820 }}>
+            {sprintNote}</p>
+        )}
         {activity && activity.items.length > 0 && (
           <section aria-label="Mirmera at work" style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 820 }}>
             {activity.items.map((i) => <AgentProgress key={i.id} item={i} />)}

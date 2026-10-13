@@ -217,6 +217,7 @@ class Sprint(Base):
     goal = Column(Text, nullable=True)
     starts_on = Column(Date, nullable=False)
     ends_on = Column(Date, nullable=False)  # included
+    jira_id = Column(String, nullable=True)  # the Jira sprint it came from, when a story import made or matched it
     created_at = Column(DateTime, default=utcnow)
 
     stories = relationship("Story", back_populates="sprint")

@@ -38,6 +38,7 @@ class TrackerIssue:
     closed: bool
     snippet: str = ""
     body: str = ""  # the whole description, when the tracker gave it
+    sprint: dict | None = None  # Jira only: {"id", "name", "state", "starts_on", "ends_on", "goal"}, see trackers.jira.pick_sprint
 
 
 def keywords(title: str, limit: int = 6) -> list[str]:

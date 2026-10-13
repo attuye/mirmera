@@ -146,3 +146,80 @@ def test_deleting_keeps_risks_and_charters(client, project):
     client.put(f"/stories/{again['id']}/charters", json={"ids": [charter["id"]]})
     out = client.delete(f"/projects/{pid}?confirm=ShopFlow").json()
     assert out["deleted"]["stories"] == 1
+
+
+# ---------- the sprint, from Jira ----------
+
+SPRINT_13 = {"id": 41, "name": "Sprint 13", "state": "closed", "startDate": "2026-09-14T06:00:00.000Z",
+             "endDate": "2026-09-27T15:00:00.000Z"}
+SPRINT_14 = {"id": 42, "name": "Sprint 14", "state": "active", "startDate": "2026-09-28T06:00:00.000Z",
+             "endDate": "2026-10-11T15:00:00.000Z", "goal": "Passports end to end"}
+
+
+def jira_story(client, title, sprints=None):
+    return client.post("/mock-trackers/issues", json={"tracker": "jira", "target": "KYC", "title": title,
+                                                      "body": "As a customer…", "sprints": sprints}).json()["issue_key"]
+
+
+def test_a_jira_story_comes_with_its_sprint(client, mocked):
+    pid = mocked["id"]
+    key = jira_story(client, "Upload a passport", [SPRINT_13, SPRINT_14])  # carried over: the active one counts
+    story = client.post(f"/projects/{pid}/stories/import", json={"ref": key}).json()
+    assert story["sprint"]["name"] == "Sprint 14"
+    assert story["sprint_note"] == "In Sprint 14, as in Jira: a new sprint here, 28 Sep – 11 Oct 2026."
+    sprint = client.get(f"/sprints/{story['sprint']['id']}").json()
+    assert (sprint["starts_on"], sprint["ends_on"], sprint["goal"]) == ("2026-09-28", "2026-10-11", "Passports end to end")
+
+    other = jira_story(client, "Upload a selfie", [SPRINT_14])  # the same Jira sprint: no second one
+    second = client.post(f"/projects/{pid}/stories/import", json={"ref": other}).json()
+    assert second["sprint"]["id"] == story["sprint"]["id"]
+    assert second["sprint_note"] == "In Sprint 14, as in Jira."
+    assert [s["name"] for s in client.get(f"/projects/{pid}/sprints").json()] == ["Sprint 14"]
+    with SessionLocal() as db:
+        assert db.get(models.Sprint, story["sprint"]["id"]).jira_id == "42"
+
+
+def test_a_sprint_made_here_first_is_matched_by_name(client, mocked):
+    pid = mocked["id"]
+    mine = client.post(f"/projects/{pid}/sprints", json={"name": "sprint 14", "starts_on": "2026-09-29",
+                                                        "ends_on": "2026-10-10"}).json()
+    key = jira_story(client, "Upload a passport", [SPRINT_14])
+    story = client.post(f"/projects/{pid}/stories/import", json={"ref": key}).json()
+    assert story["sprint"]["id"] == mine["id"]
+    sprint = client.get(f"/sprints/{mine['id']}").json()
+    assert (sprint["name"], sprint["starts_on"], sprint["ends_on"]) == ("Sprint 14", "2026-09-28", "2026-10-11")  # Jira's
+
+
+def test_no_sprint_github_and_an_undated_future_sprint(client, mocked):
+    pid = mocked["id"]
+    plain = client.post(f"/projects/{pid}/stories/import", json={"ref": jira_story(client, "In the backlog")}).json()
+    assert (plain["sprint"], plain["sprint_note"]) == (None, None)
+    gh = client.post(f"/projects/{pid}/stories/import", json={"ref": "#1"}).json()
+    assert (gh["sprint"], gh["sprint_note"]) == (None, None)
+
+    future = jira_story(client, "Pay in Birr", [{"id": 43, "name": "Sprint 15", "state": "future"}])
+    story = client.post(f"/projects/{pid}/stories/import", json={"ref": future}).json()
+    assert story["sprint"] is None
+    assert story["sprint_note"].startswith("In Jira it's in Sprint 15, which has no dates in Jira yet")
+    assert client.get(f"/projects/{pid}/sprints").json() == []
+
+    # Jira starts the sprint: Refresh from Jira puts the story in it
+    mock_trackers.MockTracker("jira", "KYC").set_sprints(future, [{**SPRINT_14, "id": 43, "name": "Sprint 15",
+                                                                    "startDate": "2026-10-12", "endDate": "2026-10-25"}])
+    refreshed = client.post(f"/stories/{story['id']}/refresh").json()
+    assert refreshed["sprint"]["name"] == "Sprint 15" and refreshed["sprint_note"].startswith("In Sprint 15, as in Jira: a new sprint")
+    assert client.post(f"/stories/{story['id']}/refresh").json()["sprint_note"] is None  # nothing changed
+
+    # back to the backlog in Jira: out of the Jira sprint here
+    mock_trackers.MockTracker("jira", "KYC").set_sprints(future, None)
+    out = client.post(f"/stories/{story['id']}/refresh").json()
+    assert (out["sprint"], out["sprint_note"]) == (None, "Not in a sprint in Jira any more, so taken out of Sprint 15 here.")
+
+
+def test_a_sprint_the_team_chose_here_stays_when_jira_has_none(client, mocked):
+    pid = mocked["id"]
+    story = client.post(f"/projects/{pid}/stories/import", json={"ref": jira_story(client, "In the backlog")}).json()
+    mine = client.post(f"/projects/{pid}/sprints", json={"name": "Hardening", "starts_on": "2026-10-01",
+                                                        "ends_on": "2026-10-14", "story_ids": [story["id"]]}).json()
+    refreshed = client.post(f"/stories/{story['id']}/refresh").json()
+    assert refreshed["sprint"]["id"] == mine["id"] and refreshed["sprint_note"] is None
