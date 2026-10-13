@@ -60,9 +60,50 @@ def add_missing_columns(bind=None) -> list[str]:
                         "it needs a real migration."
                     )
                 column_type = column.type.compile(dialect=bind.dialect)
-                conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {column_type}'))
+                conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {column_type}{_default_sql(column)}'))
                 added.append(f"{table.name}.{column.name}")
+    fill_missing_flags(bind)
     return added
+
+
+def _default_sql(column) -> str:
+    """' DEFAULT 0' for a column with a plain default (False, 0, 'medium'), so the rows already
+    there get it too. Without it they hold NULL: the model's default only applies to new rows,
+    and an API that promises a true/false answer then fails on them."""
+    d = column.default
+    if d is None or not d.is_scalar or d.arg is None:
+        return ""
+    v = d.arg
+    if isinstance(v, bool):
+        return f" DEFAULT {int(v)}"
+    if isinstance(v, (int, float)):
+        return f" DEFAULT {v}"
+    if isinstance(v, str):
+        return " DEFAULT '" + v.replace("'", "''") + "'"
+    return ""
+
+
+def fill_missing_flags(bind=None) -> list[str]:
+    """True/false columns left NULL by an earlier upgrade (one that added the column without its
+    default, such as projects.ethiopia) get their default. NULL never means anything for these.
+    Safe on every start: once filled, nothing matches. Returns "table.column" for each one filled."""
+    bind = bind or engine
+    filled: list[str] = []
+    with bind.begin() as conn:
+        inspector = inspect(conn)
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue
+            existing = {c["name"] for c in inspector.get_columns(table.name)}
+            for column in table.columns:
+                d = column.default
+                if column.name not in existing or d is None or not d.is_scalar or not isinstance(d.arg, bool):
+                    continue
+                r = conn.execute(text(f'UPDATE "{table.name}" SET "{column.name}" = :v WHERE "{column.name}" IS NULL'),
+                                 {"v": d.arg})
+                if r.rowcount:
+                    filled.append(f"{table.name}.{column.name}")
+    return filled
 
 
 # Renames done by later steps, applied before create_all() so existing data
