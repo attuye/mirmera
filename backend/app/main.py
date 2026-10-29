@@ -46,7 +46,8 @@ async def lifespan(_: FastAPI):
     runner_manager.stop_all()
 
 
-app = FastAPI(title="Mirmera API", lifespan=lifespan)
+app = FastAPI(title="Mirmera API", lifespan=lifespan,  # API_DOCS=false hides /docs and /openapi.json on a server
+              **({} if settings.api_docs else {"docs_url": None, "redoc_url": None, "openapi_url": None}))
 
 app.add_middleware(
     CORSMiddleware,

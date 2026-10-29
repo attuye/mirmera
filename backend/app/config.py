@@ -112,6 +112,8 @@ class Settings(BaseSettings):
     retest_poll_minutes: int = 0
     # Where testers open Mirmera; when set, filed issues link back to the bug.
     public_app_url: str | None = None
+    # The API's own pages (/docs, /openapi.json). Handy locally; set false on a public server.
+    api_docs: bool = True
 
     # The Mirmera app for Jira (jira-app/, built on Atlassian Forge). Its requests carry a token
     # signed by Atlassian; it is accepted only when its audience is this app's ID, which

@@ -53,7 +53,8 @@ class LocalProvider(LLMProvider):
             except httpx.ConnectError as err:
                 raise ProviderNotConfigured(
                     f"Couldn't reach Ollama at {self.base_url}. Is it running? "
-                    "Start it with `ollama serve` or open the Ollama app."
+                    "Start it with `ollama serve` or open the Ollama app. If Mirmera runs on a server and "
+                    "the model on your computer, start the tunnel there (scripts/qwen-tunnel)."
                 ) from err
             except httpx.HTTPError as err:
                 raise ProviderError(f"Ollama: {err}") from err

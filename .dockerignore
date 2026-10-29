@@ -1,0 +1,16 @@
+# Never in an image: secrets, data, dependencies installed elsewhere, test output
+**/.env
+**/secret.key
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/evidence/
+**/node_modules/
+**/.venv/
+**/__pycache__/
+**/dist/
+e2e/
+practice-app/
+jira-app/
+extension/
+.git/
