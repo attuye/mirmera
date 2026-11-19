@@ -224,6 +224,7 @@ async def _step_frame(page, folder: Path, run_id: str, n: int, a: schemas.Explor
 @dataclass
 class CharterContext:
     mission: str
+    focus: list[str] = field(default_factory=list)  # the form fields the charter is about (see focus_fields)
     test_ideas: list[str] = field(default_factory=list)
     oracles: list[str] = field(default_factory=list)
     risks: list[dict] = field(default_factory=list)  # ref, title, failure_mode
@@ -862,6 +863,9 @@ def _user_message(ctx: CharterContext, history: list[dict], observation: str, st
         charter["app_map"] = ctx.app_map
     if ctx.signed_in_as:
         charter["signed_in"] = f"Mirmera signed you in as {ctx.signed_in_as}. Test as this user and stay signed in: never sign out."
+    if ctx.focus:
+        charter["focus"] = (f"The charter is about: {', '.join(ctx.focus)}. Try its ideas first. Other fields are beyond "
+                            "the charter: explore them once its ideas are tried, and they are marked as beyond it.")
     return (
         f"<charter>\n{defang(json.dumps(charter, indent=2, ensure_ascii=False))}\n</charter>\n\n"
         f"<history>\n{chr(10).join(lines) or '(no steps yet)'}\n</history>\n\n"
@@ -1371,6 +1375,33 @@ def first_step(fault: str) -> str:
 FIELD_ACTIONS = ("fill", "select", "check", "uncheck")
 
 
+def charter_target(mission: str) -> str:
+    """The charter's target: "the expiry date" in "Explore the expiry date with … to discover …"."""
+    m = re.match(r"\s*explore\s+(.*?)(?:\s+with\s+|\s+to discover\s+|\.?\s*$)", mission, re.I | re.S)
+    return (m.group(1) if m else mission).strip()
+
+
+def _focus_stems(text: str) -> set[str]:
+    """Content words of a label or target, without words every field shares ("date", "number")."""
+    return {w for w in _stems(text) if w not in LABEL_NOISE}
+
+
+def focus_fields(mission: str, fields: list[dict]) -> list[str]:
+    """The form fields the charter is about: those named in its target ("Expiry date" for "the expiry
+    date"). Only the target counts: "…to discover whether expired documents are rejected" doesn't
+    make "Document type" part of it."""
+    target = _focus_stems(charter_target(mission))
+    return [f["label"] for f in fields if f["type"] not in ("hidden",) and _focus_stems(f["label"]) & target]
+
+
+def beyond_charter(changed: list[str], focus: list[str]) -> bool:
+    """A step that changed only fields the charter isn't about. Unknown focus: never beyond."""
+    if not changed or not focus:
+        return False
+    on = set().union(*(_focus_stems(f) for f in focus))
+    return not any(_focus_stems(c) & on for c in changed)
+
+
 def shortest(steps: list[dict]) -> list[dict]:
     """A draft's steps, short enough to replay. A long run's journey is every fill and click since it
     began (a Ge'ez refusal at step 24 had more than the 60 steps a replay takes, so it was drafted
@@ -1828,6 +1859,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
     bug_ids: list[str] = []
     reported: set[tuple[str, str]] = set()
     ideas_seen: dict = {}  # test ideas tried and not, for the summary Mirmera writes when the AI wrote none
+    charter_steps = {"on": 0, "beyond": []}  # tests on the charter's focus, and those beyond it: (n, fields, bug ids)
     steps: list[dict] = [{"type": "goto", "url": start_url}]
     started = time.monotonic()
     run_timeout = max(RUN_TIMEOUT_S, max_steps * STEP_TIME_S)
@@ -1932,6 +1964,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     before = await form_state(page)
                     if before.fields:
                         last_fields = before.fields
+                        if not ctx.focus:  # the fields the charter is about, once a form is seen
+                            ctx.focus = focus_fields(ctx.mission, before.fields)
                     if before.text():
                         observation += "\n" + defang(before.text())
                     drain_signals()
@@ -2062,6 +2096,9 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         tried[(action_key(a), page.url, before.values())] = entry["n"]
                     failed_before, page_errors_before = len(signals.failed), len(signals.page_errors)
                     acted_at = time.monotonic()
+                    bugs_before = len(bug_ids)
+                    changed = (list((a.values or {}).keys()) if a.kind == "try"
+                               else [n] if a.kind in FIELD_ACTIONS and (n := field_name(a)) else [])
                     done_actions: list[dict] | None = None  # what was done, when Mirmera did it its own way
                     try:
                         if a.kind == "try":
@@ -2375,6 +2412,16 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                     await keep(prob, ("layout", url_path, prob.symptom.value),
                                                f". Seen at 390 px wide ({'the run itself is on a phone' if (conditions or {}).get('device') == 'phone' else 'Mirmera narrowed the browser for a moment'}).")
                     # Slow answers: a tester notices waiting.
+                    if a.kind == "try" and entry["status"] in ("ok", "drafted"):  # a test: on the charter or beyond it
+                        if beyond_charter(changed, ctx.focus):
+                            if not charter_steps["beyond"]:
+                                _note(session_id, "test", f"From step {entry['n']} the agent went beyond the charter "
+                                      f"({charter_target(ctx.mission)}): {', '.join(changed)}. Kept, and marked as beyond it.")
+                            entry["beyond_charter"] = True
+                            entry["detail"] = (entry["detail"] + " " if entry["detail"] else "") + "(beyond the charter)"
+                            charter_steps["beyond"].append((entry["n"], changed, bug_ids[bugs_before:]))
+                        elif changed and ctx.focus:
+                            charter_steps["on"] += 1
                     if is_submit and app_took > 5:
                         _note(session_id, "issue", f"Slow: after {entry['action']} the app took {app_took:.1f} s to answer.")
                     history.append(entry)
@@ -2487,6 +2534,14 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
         try:
             if final.get("status") == "finished" and not final.get("summary"):
                 final["summary"] = facts_summary(history, _titles(bug_ids), ideas_seen, final.get("detail", ""))
+            if final.get("status") == "finished" and charter_steps["beyond"]:
+                line = beyond_line(ctx, charter_steps)
+                follow = follow_up_charters(charter_id, ctx, charter_steps)
+                final["summary"] = (final.get("summary") or "").rstrip() + " " + line + (
+                    " Suggested follow-up charters: " + "; ".join(f'"{m}"' for m in follow) + "." if follow else "")
+                if follow:
+                    _note(session_id, "test", "Suggested follow-up charters, for what was found beyond the charter: "
+                          + "; ".join(f'"{m}"' for m in follow))
             _wrap_up(session_id, final, history, bug_ids)
             if ctx.project_id:
                 from app import test_data
@@ -2528,6 +2583,51 @@ def facts_summary(history: list[dict], bug_titles: list[str], ideas: dict, why_i
         out.append(f"Test ideas tried: {ideas['done']} of {ideas['total']}"
                    + (f"; not tried: {'; '.join(left[:6])}" + ("…" if len(left) > 6 else "") if left else "") + ".")
     return " ".join(out)[:2000]
+
+
+def beyond_line(ctx: CharterContext, charter_steps: dict) -> str:
+    """On the charter, and beyond it, in one sentence for the summary."""
+    beyond = charter_steps["beyond"]
+    fields = list(dict.fromkeys(f for _, changed, _ in beyond for f in changed))
+    found = _titles([b for _, _, ids in beyond for b in ids])
+    return (f"On the charter ({charter_target(ctx.mission)}): {charter_steps['on']} test{'s' if charter_steps['on'] != 1 else ''}. "
+            f"Beyond it: {len(beyond)} ({', '.join(fields[:6])})"
+            + (f", which found: {'; '.join(t[:100] for t in found[:4])}." if found else ", nothing found there."))
+
+
+def follow_up_charters(charter_id: str, ctx: CharterContext, charter_steps: dict) -> list[str]:
+    """A proposed charter for each field where something was found beyond the charter: an unplanned
+    find deserves its own session. Linked to the same stories; not made twice."""
+    by_field: dict[str, list[str]] = {}
+    for _, changed, ids in charter_steps["beyond"]:
+        if ids:
+            for f in changed:
+                by_field.setdefault(f, []).extend(ids)
+    if not by_field:
+        return []
+    rules = rules_of(ctx)
+    made: list[str] = []
+    with SessionLocal() as db:
+        charter = db.get(models.Charter, charter_id)
+        if not charter:
+            return []
+        have = [c.mission_statement.lower() for c in db.query(models.Charter).filter(models.Charter.project_id == charter.project_id)]
+        for f in list(by_field)[:3]:
+            if any(f.lower() in m for m in have):
+                continue
+            rid = next((k for k, v in rules.items() if _focus_stems(f) & _focus_stems(v)), None)
+            info = f"whether it works as {rid} says" if rid else "how it handles unusual values"
+            mission = f"Explore {f[:1].lower() + f[1:]} with its test ideas, everything else valid, to discover {info}"
+            follow = models.Charter(project_id=charter.project_id, mission_statement=mission, source="follow-up",
+                                    priority="high", rationale=(f"Mirmera found something here while exploring "
+                                                                f"\"{charter.mission_statement[:120]}\", beyond that charter."),
+                                    test_ideas=[], oracles=[])
+            follow.stories = list(charter.stories)
+            db.add(follow)
+            have.append(mission.lower())
+            made.append(mission)
+        db.commit()
+    return made
 
 
 def _wrap_up(session_id: str, final: dict, history: list[dict], bug_ids: list[str]) -> None:

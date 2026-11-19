@@ -684,3 +684,57 @@ def test_a_short_journey_is_kept_as_it_was():
     assert shortest(short) == short  # an earlier submit can matter: kept when it fits
     long = [go] + [x for i in range(40) for x in (fill(f"N{i}"), click)]
     assert shortest(long) == [go, fill("N39"), click]
+
+
+def test_steps_beyond_the_charter_are_marked_and_a_find_there_gets_its_own_charter(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """Seen with qwen3:8b on the practice app: a charter about the expiry date spent half its steps on
+    document types and names (and found two bugs there). It may go on, but the session says so, and
+    what it found there gets a follow-up charter."""
+    project, existing = kyc
+    # the project's other charter is about document types: no follow-up is suggested for them while it is
+    client.patch(f"/charters/{existing['id']}", json={"mission_statement": "Explore the home page to discover what it offers"})
+    charter = client.post(f"/projects/{project['id']}/charters", json={
+        "mission_statement": "Explore the expiry date with today, yesterday and tomorrow, everything else valid, "
+                             "to discover whether expired documents are rejected"}).json()
+    story_for(client, project, charter, ["All three document types are verified the same way",
+                                          "Expired documents must be rejected"])
+    provider = Reading([
+        step("Past", kind="try", values={"Expiry date": "2020-01-01"}),
+        step("Future", kind="try", values={"Expiry date": "2030-01-01"}),
+        step("A passport", kind="try", values={"Document type": "Passport"}),
+        step("Done", kind="done", summary="Expiry dates, then a passport."),
+    ])
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 8}).json())
+
+    assert '"focus": "The charter is about: Expiry date.' in provider.users[0]  # the agent is told
+    tries = [s for s in run["steps"] if s["kind"] == "try"]
+    assert [bool(s.get("beyond_charter")) for s in tries] == [False, False, True]
+    assert tries[2]["detail"].endswith("(beyond the charter)")
+    assert run["summary"].startswith("Expiry dates, then a passport. On the charter (the expiry date): 2 tests. Beyond it: 1 (Document type), which found: ")
+    mission = "Explore document type with its test ideas, everything else valid, to discover whether it works as AC1 says"
+    assert f'Suggested follow-up charters: "{mission}".' in run["summary"]
+    follow = next(c for c in client.get(f"/projects/{project['id']}/charters").json() if c["mission_statement"] == mission)
+    assert (follow["source"], follow["status"], follow["priority"]) == ("follow-up", "proposed", "high")
+    assert [s["title"] for s in follow["stories"]] == ["Sender verifies identity"]  # on the same story
+    notes = [n["content"] for n in client.get(f"/sessions/{run['session_id']}/notes").json()]
+    assert any(n.startswith("From step 3 the agent went beyond the charter (the expiry date): Document type.") for n in notes)
+
+    # explored again: the follow-up isn't suggested twice
+    second = Reading([step("A passport", kind="try", values={"Document type": "Passport"}), step("Done", kind="done", summary="Again.")])
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: second)
+    again = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 4}).json())
+    assert "Beyond it: 1 (Document type)" in again["summary"]  # beyond again…
+    assert "Suggested follow-up charters" not in again["summary"]  # …but its follow-up already exists
+
+
+def test_the_charter_target_decides_its_focus():
+    from app.agent.explore import beyond_charter, focus_fields
+    fields = [{"label": l, "type": "text"} for l in ("Full name", "Document type", "Document number", "Expiry date")]
+    # "…to discover whether expired documents are rejected" doesn't make the document fields its focus
+    mission = "Explore the expiry date with today, yesterday and tomorrow to discover whether expired documents are rejected"
+    assert focus_fields(mission, fields) == ["Expiry date"]
+    assert focus_fields("Explore Ge'ez names with real names to discover whether they are kept", fields) == ["Full name"]
+    assert focus_fields("Explore My documents after verifying to discover whether all are listed", fields) == ["Document type", "Document number"]
+    assert beyond_charter(["Full name"], ["Expiry date"]) and not beyond_charter(["Expiry date"], ["Expiry date"])
+    assert not beyond_charter(["Full name"], [])  # no focus known: nothing is beyond it

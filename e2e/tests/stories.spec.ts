@@ -211,3 +211,16 @@ test('stories: charter suggestions stay, show their progress, and missions can b
     await page.screenshot({ path: 'test-results/charter-edited.png' })
   })
 })
+
+test('stories: a follow-up charter from Mirmera says so', async ({ page, api, request }) => {
+  const project = await api.newProject('AddisVerify Follow-ups')
+  const story = await (await request.post(`${API_URL}/projects/${project.id}/stories`, { data: { title: 'Identity verification (v1.4)', description: 'Customers verify their identity.' } })).json()
+  await request.post(`${API_URL}/projects/${project.id}/charters`, { data: {
+    mission_statement: 'Explore document type with its test ideas, everything else valid, to discover whether it works as AC1 says',
+    source: 'follow-up', priority: 'high', story_ids: [story.id],
+    rationale: 'Mirmera found something here while exploring "Explore the expiry date…", beyond that charter.' } })
+  await page.goto(`/projects/${project.id}/stories/${story.id}`)
+  const charter = page.getByRole('region', { name: 'Charters' }).getByRole('article').first()
+  await expect(charter.getByText('follow-up from Mirmera')).toHaveAttribute('title', /beyond that charter/)
+  await page.screenshot({ path: 'test-results/follow-up-charter.png' })
+})

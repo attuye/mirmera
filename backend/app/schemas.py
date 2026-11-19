@@ -1991,7 +1991,7 @@ class StoryDetail(StorySummary):
     description: Optional[str]
     artifact_id: Optional[str]
     risk_list: list[dict]  # [{"id", "ref", "title", "failure_mode", "score", "status", "quality_criterion", "charters", "other_stories"}]
-    charter_list: list[dict]  # [{"id", "mission_statement", "status", "priority", "risk_refs", "sessions", "minutes", "bugs"}]
+    charter_list: list[dict]  # [{"id", "mission_statement", "status", "priority", "source", "rationale", "risk_refs", "sessions", "minutes", "bugs"}]
     session_list: list[dict]  # [{"id", "charter_id", "mission_statement", "tester", "started_at", "ended_at", "minutes", "bugs", "debrief"}]
     bug_list: list[dict]  # [{"id", "title", "kind", "severity", "session_id", "issue_key", "issue_url"}]
     pages: list[dict]  # [{"page", "sessions", "actions"}]
