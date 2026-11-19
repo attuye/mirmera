@@ -6,6 +6,9 @@ test('charters: suggest from a pull request, keep where it came from, start a se
   await request.patch(`${API_URL}/projects/${project.id}`, { data: { github_repo: 'addisverify/charters', default_tester: 'Attu' } })
   await page.goto(`/projects/${project.id}/charters/suggest`)
   await expect(page.getByRole('heading', { name: 'Charters', level: 1 })).toBeVisible()
+  const note = page.getByRole('note', { name: 'Charters for a story' })
+  await expect(note).toContainText("its charters are suggested there, from the story's accepted risks")
+  await expect(note.getByRole('link', { name: 'Stories' })).toHaveAttribute('href', `/projects/${project.id}/stories`)
   const suggestions = page.getByRole('region', { name: 'Suggestions' })
   const yours = page.getByRole('region', { name: 'Your charters' })
 
