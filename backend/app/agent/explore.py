@@ -449,6 +449,12 @@ def action_key(a: schemas.ExploreAction) -> str:
     return a.model_dump_json(include={"kind", "locator", "value", "values", "key", "url"})
 
 
+def baseline_key(url: str) -> tuple[str, str, str]:
+    """The form sent with valid data on this page: done once, it shows what success looks like.
+    The form's current values don't tell two of them apart (they hold the last try's values)."""
+    return ("try the form with valid data", (url or "").split("#")[0], "")
+
+
 def pointless(a: schemas.ExploreAction, url: str, before: FormState, tried: dict[tuple[str, str, str], int]) -> str | None:
     """Why a step would learn nothing, or None. A small model loops: it submits the same form
     again and again, or fills a field with the value it already holds. Such a step isn't run.
@@ -463,6 +469,9 @@ def pointless(a: schemas.ExploreAction, url: str, before: FormState, tried: dict
         if current is not None and current == a.value:
             return (f'that field already holds "{a.value}". Change a different field, or change this one to a '
                     "different value, then submit")
+    if a.kind == "try" and not a.values and baseline_key(url) in tried:
+        return (f"you sent the form with valid data at step {tried[baseline_key(url)]} on this page, and nothing has "
+                "failed since, so it can't show anything new. Give the field and value you mean in values")
     if a.kind in SUBMITS:
         key = (action_key(a), url, before.values())
         if key in tried:
@@ -2094,6 +2103,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         continue
                     if a.kind in SUBMITS:
                         tried[(action_key(a), page.url, before.values())] = entry["n"]
+                    if a.kind == "try" and not a.values:
+                        tried[baseline_key(page.url)] = entry["n"]
                     failed_before, page_errors_before = len(signals.failed), len(signals.page_errors)
                     acted_at = time.monotonic()
                     bugs_before = len(bug_ids)
@@ -2424,6 +2435,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             charter_steps["on"] += 1
                     if is_submit and app_took > 5:
                         _note(session_id, "issue", f"Slow: after {entry['action']} the app took {app_took:.1f} s to answer.")
+                    if broke or entry["status"] in ("drafted", "failed"):  # something failed: valid data may be sent again, to re-check
+                        tried.pop(baseline_key(entry["url"]), None)
                     history.append(entry)
                     stuck = stuck + 1 if entry["status"] in ("refused", "failed", "not verified") else 0
                     _save(run_id, steps=list(history), bug_ids=list(bug_ids))

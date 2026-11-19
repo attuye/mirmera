@@ -750,3 +750,25 @@ def test_a_follow_up_checks_the_rule_its_field_is_about():
     assert rule_for_field(rules, "Document type", ["Passport", "Driver's licence"]) == "AC1"
     assert rule_for_field(rules, "Full name", ["አበበ ከበደ", "O'Brien-Smith"]) == "AC2"
     assert rule_for_field(rules, "Phone number", ["0911223344"]) is None
+
+
+def test_valid_data_is_sent_again_only_after_something_failed(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """Seen with qwen3:8b: four "try the form with valid data" in a run, three of them meant as other
+    tests (its thought said "Document number = 0", its values were empty). The baseline is sent once
+    per page; again only to re-check after a failure."""
+    project, charter = kyc
+    valid = step("Valid", kind="try", values={})
+    scripted(monkeypatch, [
+        valid,                                                   # 1. the baseline
+        step("Future", kind="try", values={"Expiry date": "2030-01-01"}),
+        valid,                                                   # 3. nothing failed since: refused
+        step("Passport", kind="try", values={"Document type": "Passport"}),  # a 500
+        valid,                                                   # 5. a re-check after the failure: run
+        valid,                                                   # 6. refused again
+        step("Done", kind="done", summary="Done."),
+    ])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 10}).json())
+    tries = [(s["n"], s["status"]) for s in run["steps"] if s["kind"] == "try"]
+    assert [st for _, st in tries] == ["ok", "ok", "refused", "drafted", "ok", "refused"]
+    refused = next(s for s in run["steps"] if s["status"] == "refused")
+    assert refused["detail"].startswith("not run: you sent the form with valid data at step 1 on this page, and nothing has failed since")
