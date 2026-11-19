@@ -31,6 +31,22 @@ def latest_job(project_id: str, kind: str, story_id: str | None = None, db: DBSe
     return ai_jobs.out(job) if job else None
 
 
+@router.post("/ai-jobs/{job_id}/items", response_model=schemas.AiJobOut)
+def mark_item(job_id: str, payload: schemas.AiJobItemUpdate, db: DBSession = Depends(get_db)):
+    """A suggestion accepted (with the charter made from it) or dropped: it isn't offered again."""
+    job = ai_jobs.settle(db, db.get(models.AiJob, job_id))
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if payload.charter_id:
+        charter = db.get(models.Charter, payload.charter_id)
+        if not charter or charter.project_id != job.project_id:
+            raise HTTPException(404, "Charter not found in this project")
+    try:
+        return ai_jobs.out(ai_jobs.mark_item(db, job, payload.index, payload.status, payload.charter_id))
+    except LookupError as err:
+        raise HTTPException(404, str(err))
+
+
 @router.get("/ai-jobs/{job_id}", response_model=schemas.AiJobOut)
 def get_job(job_id: str, db: DBSession = Depends(get_db)):
     job = ai_jobs.settle(db, db.get(models.AiJob, job_id))

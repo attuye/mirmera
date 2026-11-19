@@ -53,4 +53,12 @@ button {
 @keyframes mm-pulse { 50% { opacity: 0.45; } }
 .mm-spin { animation: mm-spin 1s linear infinite; }
 .mm-pulse { animation: mm-pulse 1.6s ease-in-out infinite; }
-@media (prefers-reduced-motion: reduce) { .mm-spin, .mm-pulse { animation: none; } }
+@keyframes mm-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+/* A placeholder bar while the AI works (see components/SuggestionSkeleton.tsx) */
+.mm-skeleton {
+  border-radius: 5px;
+  background: linear-gradient(90deg, var(--panel) 25%, var(--border) 50%, var(--panel) 75%);
+  background-size: 200% 100%;
+  animation: mm-shimmer 1.6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .mm-spin, .mm-pulse, .mm-skeleton { animation: none; } }

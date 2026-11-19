@@ -28,16 +28,19 @@ INTERRUPTED = "Interrupted: the backend stopped while the AI was working. Start 
 
 def _kinds():
     from app.agent import survey
-    from app.routers import risks, stories
+    from app.routers import charters, risks, stories
     return {
         "product_model": ("Build the product model", risks.build_product_model, schemas.ProductModelRequest),
         "risk_analysis": ("Propose risks", risks.analyze_risks, schemas.RiskAnalyzeRequest),
         "charters_from_risks": ("Draft charters from risks", risks.charters_from_risks, schemas.ChartersFromRisksRequest),
         "app_map": ("Survey the app", survey.survey, schemas.AppMapRequest),
         "story_risks": ("Suggest risks for a story", stories.suggest_story_risks, schemas.StoryRisksRequest),
+        "story_charters": ("Suggest charters for a story", stories.suggest_story_charters, schemas.StoryChartersRequest),
+        "charter_suggestions": ("Suggest charters from a change", charters.suggest_charters_job, schemas.CharterSuggestRequest),
     }
 
-SCOPED = {"story_risks": "story_id"}  # kinds that run once per story, not once per project
+SCOPED = {"story_risks": "story_id", "story_charters": "story_id"}  # kinds that run once per story, not once per project
+ITEMS = {"story_charters": "drafts", "charter_suggestions": "suggestions"}  # kinds whose suggestions are accepted one by one
 
 
 def label(kind: str) -> str:
@@ -103,6 +106,20 @@ async def run(job_id: str) -> None:
                 job.status, job.result, job.error, job.finished_at = status, result, error, utcnow()
                 db.commit()
         ACTIVE.discard(job_id)
+
+
+def mark_item(db: DBSession, job: models.AiJob, index: int, status: str, charter_id: str | None) -> models.AiJob:
+    """One suggestion of a finished job accepted or dropped, remembered in the job's result so it
+    isn't offered again after leaving the page."""
+    key = ITEMS.get(job.kind)
+    items = list((job.result or {}).get(key) or []) if key and job.status == "done" else []
+    if not 0 <= index < len(items):
+        raise LookupError("No such suggestion in this job")
+    items[index] = {**items[index], "status": status, **({"charter_id": charter_id} if charter_id else {})}
+    job.result = {**job.result, key: items}
+    db.commit()
+    db.refresh(job)
+    return job
 
 
 def _scope(kind: str, request: dict | None):

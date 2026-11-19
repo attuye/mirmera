@@ -3,17 +3,20 @@
  *  request or local diff, or something already imported. The slower, whole-
  *  product path (model, risks, charters) lives on the Risks page. */
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import Sidebar from '../components/Sidebar'
 import TesterField, { useTesterName } from '../components/TesterField'
 import ArtifactImport from '../components/ArtifactImport'
 import HeuristicChips from '../components/HeuristicChips'
 import StoryChips from '../components/StoryChips'
+import SuggestionSkeleton from '../components/SuggestionSkeleton'
+import CharterDrafts from '../components/CharterDrafts'
+import MissionEditor from '../components/MissionEditor'
+import { useAiJob } from '../components/useAiJob'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton } from '../components/ui'
-import { API_URL, api, Artifact, Charter, CharterSuggestion, StoryDetail } from '../api/client'
+import { api, Artifact, ChangeSuggestionsResult, Charter } from '../api/client'
 import { useProject, useProjectPath } from '../project'
 
-const PRIORITY_COLOR: Record<string, string> = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-tertiary)' }
 const KIND: Record<Artifact['type'], string> = { spec: 'Spec', diff: 'Diff', bug_import: 'Bug history', openapi: 'OpenAPI' }
 type Mode = 'paste' | 'import' | 'earlier'
 
@@ -34,6 +37,15 @@ function nameFor(text: string): string {
 }
 
 export default function CharterSuggestions() {
+  const [params] = useSearchParams()
+  const path = useProjectPath()
+  const storyId = params.get('story')
+  // A story's charters are planned on its own page now, from its accepted risks.
+  if (storyId) return <Navigate to={path(`/stories/${storyId}#charters`)} replace />
+  return <ChartersPage />
+}
+
+function ChartersPage() {
   const { project } = useProject()
   const path = useProjectPath()
   const navigate = useNavigate()
@@ -43,61 +55,62 @@ export default function CharterSuggestions() {
   const [mode, setMode] = useState<Mode>('paste')
   const [pasted, setPasted] = useState({ name: '', text: '' })
   const [earlier, setEarlier] = useState('')
-  const [source, setSource] = useState<Artifact | null>(null)  // what the suggestions came from
-  const [suggestions, setSuggestions] = useState<CharterSuggestion[]>([])
-  const [busy, setBusy] = useState(false)
+  const [saving, setSaving] = useState(false)  // creating the artifact, accepting, dropping
   const [error, setError] = useState<string | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
-  const [params] = useSearchParams()
-  const storyId = params.get('story')
-  const [story, setStory] = useState<StoryDetail | null>(null)  // suggestions for this story are linked to it
+  // The suggestions are an AI job: they keep coming if the page is left, and are still here after.
+  const job = useAiJob<ChangeSuggestionsResult>(project.id, 'charter_suggestions')
+  const result = job.job?.status === 'done' ? job.job.result : null
+  const source = result?.source ?? null
+  const busy = saving || job.running
 
   useEffect(() => {
     api.listCharters(project.id).then(setCharters).catch(console.error)
     api.listArtifacts(project.id).then((a) => { setArtifacts(a); setEarlier(a[a.length - 1]?.id ?? '') }).catch(console.error)
   }, [project.id])
-  useEffect(() => {  // from a story's page: suggest charters for the story straight away
-    if (!storyId) { setStory(null); return }
-    api.getStory(storyId).then(async (s) => { const a = await api.storyArtifact(s.id); setStory({ ...s, artifact_id: a.id }); await suggestFrom(a) })
-      .catch((e) => setError(errorText(e)))
-  }, [storyId])  // eslint-disable-line react-hooks/exhaustive-deps
-
   async function suggestFrom(artifact: Artifact) {
-    setBusy(true); setError(null); setSuggestions([]); setSource(artifact)
+    setError(null)
     setArtifacts((prev) => prev.some((a) => a.id === artifact.id) ? prev : [...prev, artifact])
-    try {
-      setSuggestions(await api.suggestCharters(project.id, [artifact.id]))
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      setError(message === 'Failed to fetch' ? `Could not reach the backend. Is it running on ${API_URL}?` : `Could not suggest charters: ${message}`)
-    } finally { setBusy(false) }
+    await job.start({ artifact_ids: [artifact.id] })
   }
 
   async function fromPaste() {
     if (!pasted.text.trim()) return
-    setBusy(true); setError(null)
+    setSaving(true); setError(null)
     try {
       const type: Artifact['type'] = /^(diff --git|@@ |--- a\/)/m.test(pasted.text) ? 'diff' : 'spec'
       const artifact = await api.createArtifact(project.id, { type, label: pasted.name.trim() || nameFor(pasted.text), raw_content: pasted.text })
       setPasted({ name: '', text: '' })
       await suggestFrom(artifact)
-    } catch (e) { setError(errorText(e)); setBusy(false) }
+    } catch (e) { setError(errorText(e)) } finally { setSaving(false) }
   }
 
   async function loadFile(file: File) {
     setPasted({ name: pasted.name || file.name, text: await file.text() })
   }
 
-  async function accept(s: CharterSuggestion, index: number) {
+  async function accept(index: number, mission: string) {
+    const s = result!.suggestions[index], current = job.job!
+    setSaving(true); setError(null)
     try {
       const charter = await api.saveCharter(project.id, {
-        mission_statement: s.mission_statement, rationale: s.rationale, risk_areas: s.risk_areas, priority: s.priority,
+        mission_statement: mission, rationale: s.rationale, risk_areas: s.risk_areas, priority: s.priority,
         source: 'ai-suggested', source_artifact_id: source?.id ?? null,
-        story_ids: story && source?.id === story.artifact_id ? [story.id] : [],
       })
       setCharters((prev) => [...prev, charter])
-      setSuggestions((prev) => prev.filter((_, i) => i !== index))
-    } catch (e) { setError(errorText(e)) }
+      job.setJob(await api.markJobItem(current.id, index, 'accepted', charter.id) as typeof current)
+    } catch (e) { setError(errorText(e)) } finally { setSaving(false) }
+  }
+
+  async function drop(index: number) {
+    const current = job.job!
+    setSaving(true); setError(null)
+    try { job.setJob(await api.markJobItem(current.id, index, 'dropped') as typeof current) } catch (e) { setError(errorText(e)) } finally { setSaving(false) }
+  }
+
+  async function editMission(c: Charter, mission: string) {
+    const saved = await api.updateCharter(c.id, { mission_statement: mission })
+    setCharters((prev) => prev.map((x) => x.id === c.id ? saved : x))
   }
 
   async function open(c: Charter) {
@@ -131,15 +144,6 @@ export default function CharterSuggestions() {
           from the whole product's risks, use the <Link to={path('/risks')}>Risks</Link> page.
         </p>
 
-        {story && (
-          <div role="note" aria-label="For a story" style={{
-            marginTop: 16, maxWidth: 760, padding: '10px 14px', borderRadius: 9, background: 'var(--accent-bg)', fontSize: 13,
-            display: 'flex', gap: 12, alignItems: 'center',
-          }}>
-            <span style={{ flex: 1 }}>Suggesting charters for <b>{story.key ? `${story.key}: ` : ''}{story.title}</b>. Accepted ones are linked to the story.</span>
-            <Link to={path(`/stories/${story.id}`)} style={{ whiteSpace: 'nowrap', fontWeight: 600 }}>Back to the story →</Link>
-          </div>
-        )}
 
         <section aria-label="Your charters" style={{ marginTop: 22 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', maxWidth: 760, marginBottom: 10 }}>
@@ -154,8 +158,9 @@ export default function CharterSuggestions() {
                 border: '1px solid var(--border)', borderRadius: 9, padding: '10px 14px', display: 'flex', justifyContent: 'space-between',
                 alignItems: 'center', gap: 12, cursor: c.status === 'active' || c.status === 'proposed' ? 'pointer' : 'default',
               }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13 }}>{c.mission_statement}</div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <MissionEditor value={c.mission_statement} style={{ fontSize: 13 }} canEdit={c.status === 'proposed'}
+                    why="A session has used this charter: its mission stays as they explored it." onSave={(m) => editMission(c, m)} />
                   <SourceTag label={c.source_label} url={c.source_url} />
                   <StoryChips stories={c.stories} />
                   <HeuristicChips heuristics={c.heuristics} oracles={c.oracles} />
@@ -216,38 +221,25 @@ export default function CharterSuggestions() {
                     style={primaryButton(busy || !earlier)}>{busy ? 'Suggesting…' : 'Suggest charters'}</button></div>
                 </>
               )}
-              <ErrorLine message={error} />
+              <ErrorLine message={error ?? job.error} />
             </div>
 
             <div aria-label="Suggestions" role="region" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-              {busy && <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Asking the AI…</div>}
-              {!busy && suggestions.length === 0 && (
-                <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>{source ? 'All suggestions handled.' : 'Suggestions will appear here.'}</div>
-              )}
-              {source && suggestions.length > 0 && (
-                <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
-                  Suggestions for <SourceTag label={source.label} url={source.file_ref?.startsWith('http') ? source.file_ref : null} prefix="" />
-                </div>
-              )}
-              {suggestions.map((s, i) => (
-                <article key={i} aria-label={s.mission_statement} style={{ border: '1px solid var(--border)', borderRadius: 11, padding: '16px 18px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600 }}>{s.mission_statement}</div>
-                    <span className="mono" style={{ fontSize: 10, color: PRIORITY_COLOR[s.priority], flexShrink: 0 }}>{s.priority.toUpperCase()}</span>
+              {job.running && <SuggestionSkeleton
+                label={`Suggesting charters… ${job.since}. A local model can take a few minutes: you can leave this page, the suggestions will be here when you come back.`} />}
+              {!job.running && !result && <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>Suggestions will appear here.</div>}
+              {!job.running && result && (
+                <>
+                  <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                    Suggestions for <SourceTag label={source?.label ?? 'a change'} url={source?.file_ref?.startsWith('http') ? source.file_ref : null} prefix="" />
                   </div>
-                  <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.5 }}>{s.rationale}</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, gap: 12 }}>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      {s.risk_areas.map((r) => (
-                        <span key={r} className="mono" style={{ fontSize: 9.5, color: 'var(--danger)', background: 'var(--danger-bg)', padding: '3px 7px', borderRadius: 5 }}>{r}</span>
-                      ))}
-                    </div>
-                    <button onClick={() => accept(s, i)} style={{ fontSize: 12, fontWeight: 600, color: '#0C0D0F', background: 'var(--accent)', padding: '5px 14px', borderRadius: 6 }}>
-                      Accept
-                    </button>
-                  </div>
-                </article>
-              ))}
+                  {result.suggestions.every((x) => x.status !== 'suggested')
+                    ? <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>All suggestions handled.</div>
+                    : <CharterDrafts jobId={job.job!.id} busy={busy} onAccept={accept} onDrop={drop}
+                        items={result.suggestions.map((x) => ({ mission: x.mission_statement, rationale: x.rationale, priority: x.priority,
+                          status: x.status, areas: x.risk_areas }))} />}
+                </>
+              )}
             </div>
           </div>
         </section>

@@ -29,16 +29,18 @@ test('stories: import one, add a risk, suggest charters for it, see what is left
     await expect(page.getByRole('list', { name: "What's left" })).toContainText('R1 Expired passports pass: no charter in this story investigates it.')
   })
 
-  await test.step('suggest charters for the story and accept one', async () => {
-    await page.getByRole('region', { name: 'Charters' }).getByRole('link', { name: 'Suggest charters' }).click()
-    await expect(page.getByRole('note', { name: 'For a story' })).toContainText(`${issue.issue_key}: As a customer I can upload my passport`)
-    const first = page.getByRole('region', { name: 'Suggestions' }).getByRole('article').first()
-    const mission = await first.getByRole('button', { name: 'Accept' }).evaluate((b) => b.closest('article')?.getAttribute('aria-label') ?? '')
+  await test.step('suggest charters from the story\'s risk and accept one', async () => {
+    const charters = page.getByRole('region', { name: 'Charters' })
+    await charters.getByRole('button', { name: 'Suggest charters' }).click()
+    const first = charters.getByRole('list', { name: 'Suggested charters' }).getByRole('listitem').first()
+    await expect(first).toContainText('investigates R1')
+    const mission = (await first.getAttribute('aria-label'))!
+    expect(mission).toMatch(/^Explore .+ with .+ to discover .+/)
     await first.getByRole('button', { name: 'Accept' }).click()
-    const charter = page.getByRole('region', { name: 'Your charters' }).getByRole('listitem', { name: mission })
-    await expect(charter.getByRole('link', { name: `${issue.issue_key}: As a customer I can upload my passport`, exact: true })).toBeVisible()
-    await page.getByRole('link', { name: 'Back to the story →' }).click()
-    await expect(page.getByRole('region', { name: 'Charters' }).getByRole('article', { name: mission })).toContainText('not explored yet')
+    await expect(charters.getByRole('article', { name: mission })).toContainText('not explored yet')
+    await expect(charters.getByRole('list', { name: 'Suggested charters' })).toHaveCount(0)
+    await expect(page.getByRole('region', { name: 'Risks' }).getByRole('article', { name: 'R1 Expired passports pass' }))
+      .toContainText('1 charter here investigates it')
     await expect(page.getByRole('list', { name: "What's left" })).toContainText(`Not explored yet: ${mission}`)
   })
 
@@ -154,4 +156,58 @@ test('stories: a story with no description can\'t be analysed', async ({ page, a
   await page.goto(`/projects/${project.id}/stories/${story.id}`)
   await page.getByRole('region', { name: 'Risks' }).getByRole('button', { name: 'Suggest risks' }).click()
   await expect(page.getByRole('region', { name: 'Risks' })).toContainText('The story has no description to find risks in.')
+})
+
+test('stories: charter suggestions stay, show their progress, and missions can be edited', async ({ page, api, request }) => {
+  const project = await api.newProject('AddisVerify Charter Drafts')
+  const story = await (await request.post(`${API_URL}/projects/${project.id}/stories`, { data: {
+    title: 'Identity verification (v1.4)', description: 'Customers verify with a National ID, a Passport or a Driver\'s licence.\nExpired documents must be rejected.' } })).json()
+  for (const [title, impact] of [['Expired documents accepted', 5], ['Passports refused', 4], ["Ge'ez names refused", 4]] as const) {
+    await request.post(`${API_URL}/stories/${story.id}/risks/new`, { data: {
+      title, failure_mode: `${title}, for customers`, quality_criterion: 'capability', impact, likelihood: 3 } })
+  }
+  await page.goto(`/projects/${project.id}/stories/${story.id}`)
+  const charters = page.getByRole('region', { name: 'Charters' })
+  const drafts = charters.getByRole('list', { name: 'Suggested charters' }).locator(':scope > li')  // not their test ideas
+
+  await test.step('while the AI works: a skeleton and how long it has taken', async () => {
+    await charters.getByRole('button', { name: 'Suggest charters' }).click()
+    await expect(charters.getByRole('status', { name: 'Working on suggestions' })).toContainText('Planning charters from the story\'s accepted risks')
+    await page.screenshot({ path: 'test-results/charter-skeleton.png' })
+    await expect(drafts).toHaveCount(2)
+  })
+
+  await test.step('leave the page and come back: the suggestions are still there', async () => {
+    await page.getByRole('navigation', { name: 'Project pages' }).getByRole('link', { name: 'Risks' }).click()
+    await page.goBack()
+    await expect(drafts).toHaveCount(2)
+    await page.screenshot({ path: 'test-results/charter-drafts.png' })
+  })
+
+  await test.step('edit a suggestion before accepting it: a hint names the missing parts', async () => {
+    await drafts.first().getByRole('button', { name: /^Edit mission/ }).click()
+    const box = charters.getByRole('textbox', { name: 'Mission' })
+    await box.fill('Investigate the expiry date validation logic')
+    await expect(charters.getByRole('note', { name: 'Template hint' })).toContainText('Missing: with … (what you will use); to discover … (the question it answers)')
+    const mission = 'Explore expiry dates with a past date, today and a future date, everything else valid, to discover whether expired documents are rejected'
+    await box.fill(mission)
+    await expect(charters.getByRole('note', { name: 'Template hint' })).toHaveCount(0)
+    await charters.getByRole('button', { name: 'Save' }).click()
+    await drafts.first().getByRole('button', { name: 'Accept' }).click()
+    await expect(charters.getByRole('article', { name: mission })).toContainText('not explored yet')
+    await drafts.first().getByRole('button', { name: 'Drop' }).click()
+    await expect(charters.getByRole('list', { name: 'Suggested charters' })).toHaveCount(0)
+  })
+
+  await test.step('edit an accepted charter that no session has used', async () => {
+    const row = charters.getByRole('article').first()
+    await row.getByRole('button', { name: /^Edit mission/ }).click()
+    const better = 'Explore expiry dates with yesterday, today and tomorrow, everything else valid, to discover where the cut-off really is'
+    await charters.getByRole('textbox', { name: 'Mission' }).fill(better)
+    await charters.getByRole('button', { name: 'Save' }).click()
+    await expect(charters.getByRole('article', { name: better })).toBeVisible()
+    await page.reload()
+    await expect(charters.getByRole('article', { name: better })).toBeVisible()
+    await page.screenshot({ path: 'test-results/charter-edited.png' })
+  })
 })
