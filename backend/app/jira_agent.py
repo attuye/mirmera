@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session as DBSession
 
 from app import jira_app, models, story_risks
+from app.routers.risks import mission_of
 from app.ai import tasks as ai_tasks
 from app.ai.base import ProviderError
 from app.ai.routing import provider_for
@@ -270,7 +271,7 @@ async def plan(db: DBSession, t: models.JiraAgentTask) -> str:
             if not covered:
                 continue  # the model may only use the risks it was given
             charter = models.Charter(
-                project_id=project.id, mission_statement=f"Explore {d.target} with {d.resources} to discover {d.information}",
+                project_id=project.id, mission_statement=mission_of(d.target, d.resources, d.information),
                 rationale=d.rationale, priority=d.priority, source="risk-based", status="proposed",
                 risk_areas=[r.title for r in covered], test_ideas=d.test_ideas, oracles=list(d.oracles))
             charter.risks = covered

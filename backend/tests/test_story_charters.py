@@ -93,3 +93,14 @@ def test_edit_a_charter_until_a_session_uses_it(client, project):
     assert refused.status_code == 409 and "1 session has used this charter" in refused.json()["detail"]
     with SessionLocal() as db:
         assert db.get(models.Charter, charter["id"]).mission_statement == mission
+
+
+def test_the_charter_sentence_reads_as_one_sentence():
+    from app.routers.risks import mission_of
+    assert mission_of("Document expiry date validation", "Test data with known expiry dates.",
+                      "Whether expired documents are rejected.") == (
+        "Explore document expiry date validation with test data with known expiry dates "
+        "to discover whether expired documents are rejected")
+    # names and acronyms keep their capitals
+    assert mission_of("Ge'ez script names", "KYC examples", "Whether they're kept") == (
+        "Explore Ge'ez script names with KYC examples to discover whether they're kept")

@@ -24,7 +24,7 @@ PROMPT_VERSIONS = {
     "artifact_summary": "artifact-summary-v1",
     "product_model": "product-model-v1",
     "risk_analysis": "risk-analysis-v1",
-    "risk_charters": "risk-charters-v1",
+    "risk_charters": "risk-charters-v2",
     "bug_report": "bug-report-v2",
     "risk_update": "risk-update-v1",
     "duplicate_check": "duplicate-check-v1",

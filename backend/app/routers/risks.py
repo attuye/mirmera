@@ -217,6 +217,22 @@ async def charters_from_risks(project_id: str, payload: schemas.ChartersFromRisk
                                 max_charters=payload.max_charters, provider_override=payload.provider)
 
 
+def _phrase(text: str) -> str:
+    """A part of the charter sentence as it reads mid-sentence: no full stop, and a capital first
+    letter lowered when it's an ordinary word ("Test data" -> "test data"), not a name or an
+    acronym ("Ge'ez", "KYC", "National ID" keeps its "ID")."""
+    t = text.strip().rstrip(".")
+    first = t.split(" ", 1)[0]
+    if first[:1].isupper() and first[1:].isalpha() and first[1:].islower():
+        t = t[0].lower() + t[1:]
+    return t
+
+
+def mission_of(target: str, resources: str, information: str) -> str:
+    """Elisabeth Hendrickson's template, as one sentence."""
+    return f"Explore {_phrase(target)} with {_phrase(resources)} to discover {_phrase(information)}"
+
+
 async def draft_charters(project: models.Project, risks: list[models.Risk], *, product_summary: str, max_charters: int,
                          provider_override: str | None = None) -> schemas.ChartersFromRisksOut:
     """Charter drafts for these accepted risks, in the template "Explore <target> with <resources>
@@ -251,7 +267,7 @@ async def draft_charters(project: models.Project, risks: list[models.Risk], *, p
             warnings.append(f"Dropped charter on '{d.target}': it covers none of the given risks")
             continue
         charters.append(schemas.RiskCharterDraft(
-            mission_statement=f"Explore {d.target} with {d.resources} to discover {d.information}",
+            mission_statement=mission_of(d.target, d.resources, d.information),
             rationale=d.rationale,
             priority=d.priority,
             risk_ids=[by_ref[ref].id for ref in refs],

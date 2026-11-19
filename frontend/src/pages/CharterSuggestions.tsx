@@ -143,6 +143,12 @@ function ChartersPage() {
           Missions for exploratory sessions. Start one here, or get quick suggestions from a change below. For charters
           from the whole product's risks, use the <Link to={path('/risks')}>Risks</Link> page.
         </p>
+        <div role="note" aria-label="Charters for a story" style={{
+          marginTop: 14, maxWidth: 760, padding: '10px 14px', borderRadius: 9, background: 'var(--accent-bg)', fontSize: 13, lineHeight: 1.5,
+        }}>
+          Planning charters for a story? Open it from <Link to={path('/stories')}>Stories</Link>: its charters are suggested
+          there, from the story's accepted risks, and stay on its page until you accept or drop them.
+        </div>
 
 
         <section aria-label="Your charters" style={{ marginTop: 22 }}>

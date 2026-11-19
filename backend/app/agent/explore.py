@@ -245,28 +245,66 @@ CRITERIA_HEADING = re.compile(r"^\W*acceptance criteria\W*$", re.I)
 BULLET = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
 
 
+OUT_OF_SCOPE = re.compile(r"out of scope|not in scope|non-goals?|later\b", re.I)
+
+
+def _items(lines: list[str], loose: bool = False) -> list[str]:
+    """Bulleted or numbered items, each with its wrapped lines joined ("…in\n   Latin or Ge'ez
+    script." is one item). A blank line or a heading ends an item. loose: a plain line that
+    doesn't continue an item is an item too (under an "Acceptance criteria" heading)."""
+    items: list[list[str]] = []
+    cur: list[str] | None = None
+    for raw in lines:
+        line = raw.strip()
+        if BULLET.match(line):
+            cur = [BULLET.sub("", line)]
+            items.append(cur)
+        elif not line or line.startswith("#"):
+            cur = None
+        elif cur is not None:
+            cur.append(line)
+        elif loose:
+            cur = [line]
+            items.append(cur)
+    return [" ".join(i) for i in items]
+
+
+def _clean(criterion: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"\*\*|__|`", "", criterion)).strip()
+
+
 def criteria_from(story: str | None) -> list[str]:
-    """The story's acceptance criteria: the lines under an "Acceptance criteria" heading
-    (bulleted or not), or else its bulleted lines."""
+    """The story's acceptance criteria, whole: the lines under an "Acceptance criteria" heading
+    (bulleted or not), or else its bulleted or numbered items, leaving out what is out of scope.
+    An item wrapped over several lines is one criterion: cut at the first line, "names in Latin
+    or Ge'ez script" lost its "Ge'ez", and "expired" lost what expired means."""
     if not story:
         return []
-    lines = [l.strip() for l in story.splitlines()]
-    out, inside = [], False
-    for line in lines:
+    story = re.sub(r"<!--.*?-->", "", story, flags=re.S)  # commented-out text isn't the story
+    lines = story.splitlines()
+    out: list[str] = []
+    for i, raw in enumerate(lines):
+        line = raw.strip()
         if CRITERIA_HEADING.match(line) or re.match(r"^\W*acceptance criteria\s*:", line, re.I):
-            inside = True
             rest = line.split(":", 1)[1].strip() if ":" in line else ""
-            if rest:
-                out.append(rest)
-            continue
-        if inside:
-            if line.startswith("#") or (line.endswith(":") and not BULLET.match(line)):
-                break  # the next section
-            if line:
-                out.append(BULLET.sub("", line))
+            section: list[str] = []
+            for nxt in lines[i + 1:]:
+                n = nxt.strip()
+                if n.startswith("#") or (n.endswith(":") and not BULLET.match(n)):
+                    break  # the next section
+                section.append(nxt)
+            out = ([rest] if rest else []) + _items(section, loose=True)
+            break
     if not out:
-        out = [BULLET.sub("", l) for l in lines if BULLET.match(l)]
-    return [c[:300] for c in out if len(c) > 3][:20]
+        kept, skipping = [], False
+        for raw in lines:
+            line = raw.strip()
+            if line.startswith("#") or (line.endswith(":") and not BULLET.match(line) and len(line) < 60):
+                skipping = bool(OUT_OF_SCOPE.search(line))
+            if not skipping:
+                kept.append(raw)
+        out = _items(kept)
+    return [c[:300] for c in map(_clean, out) if len(c) > 3][:20]
 
 
 def _save(run_id: str, **fields) -> None:
@@ -1211,6 +1249,46 @@ def rule_cases(rules: dict[str, str], sent: FormState, today) -> list[tuple[str,
     return out
 
 
+def checked_by_mirmera(rules: dict[str, str], sent: FormState) -> set[str]:
+    """The rules Mirmera reads itself for what this form sends (see rule_cases): an expiry rule
+    when an expiry date was sent, a no-past-dates rule for its date, a Ge'ez or apostrophe rule
+    when such a name was sent. For these, the AI's verdict is only a note: a small model once
+    called a future expiry date "expired" and so hid the real bug a step later."""
+    ids: set[str] = set()
+    for f in sent.fields:
+        v, label = f["value"] or "", f["label"].lower()
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", v) and not ETHIOPIC.search(v) and "name" not in label:
+            continue
+        for rid, text in rules.items():
+            t = text.lower()
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v) and (
+                    (re.search(r"expir", label) and re.search(r"expir", t)) or past_rule({rid: text}, f["label"])):
+                ids.add(rid)
+            if ETHIOPIC.search(v) and any(w in t for w in ("ge'ez", "ge’ez", "geez", "ethiopic", "amharic", "fidel")):
+                ids.add(rid)
+            if "name" in label and re.search(r"[A-Za-z]['’][A-Za-z]|[A-Za-z]-[A-Za-z]", v) and re.search(r"apostroph|hyphen", t):
+                ids.add(rid)
+    return ids
+
+
+def own_verdict(rule_id: str, rules: dict[str, str], sent: FormState, said: list[str], did: str, today) -> tuple[str, str] | None:
+    """Mirmera's verdict on a rule it checks itself, or None when it doesn't check that rule for
+    this form (then the AI's facts decide, as before)."""
+    rid = next((k for k in rules if k.upper() == rule_id.upper()), None)
+    if not rid or rid not in checked_by_mirmera(rules, sent):
+        return None
+    cases = [c for c in rule_cases(rules, sent, today) if c[0] == rid]
+    if not cases:
+        return "consistent", f"Mirmera's own check: nothing sent falls under {rid}"
+    _, _, expects, first, kind, tested = cases[0]
+    if (did == "accepted" and expects == "refuse") or (did == "refused" and expects == "accept"
+                                                       and not refusal_about_a_gap(sent, said, tested)):
+        return "breaks", f"Mirmera's own check: {kind} is {did}, but {rid} says it must be {'refused' if expects == 'refuse' else 'accepted'}"
+    if did in ("accepted", "refused"):
+        return "consistent", f"Mirmera's own check: {kind}, {did}, as {rid} expects"
+    return None
+
+
 PAST_RULE = re.compile(r"\b(today or later|today or after|not (?:be )?in the past|can(?:not|'t|’t) be in the past|"
                        r"no past dates?|past dates? (?:are|is) (?:refused|not allowed|not accepted|rejected)|"
                        r"must be (?:in the future|after today|a future date)|from today on)\b", re.I)
@@ -2026,6 +2104,9 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             rules = rules_of(ctx)
                             verdict, why = decide(j, rules, before, said)
                             rule_id = (j.rule or "").strip().upper()
+                            own = own_verdict(rule_id, rules, before, said, outcome_of(said, broke), today)
+                            if own:  # a rule Mirmera reads itself: its verdict, and its draft below
+                                verdict, why = own
                             rule_text = next((v for k, v in rules.items() if k.upper() == rule_id), "")
                             entry["judged"] = verdict
                             entry["judged_why"] = why
@@ -2035,7 +2116,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             if verdict == "breaks":
                                 note += f" Breaks {rule_id} (\"{rule_text[:160]}\"): {why}. {j.because}".rstrip()
                                 key = ("rule", rule_id)
-                                if key not in reported and not broke:  # a crash is drafted below, once
+                                if key not in reported and not broke and not own:  # a crash is drafted below, once
                                     must = "refused" if j.rule_expects == "refuse" else "accepted"
                                     problem = schemas.ExploreProblem(
                                         title=(j.title or f"{j.answer_means.capitalize()} although {rule_id} says it must be {must}")[:200],
@@ -2121,8 +2202,11 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                       and not refusal_about_a_gap(before, said, tested))
                             ruled = ("rule", rid, kind) if tested in {x["label"] for x in before.fields if x["type"] == "file"} \
                                 else ("rule", rid)  # each way a file breaks the rule is its own bug
-                            if not breaks or ruled in reported:
+                            if not breaks:
                                 continue
+                            entry["judged"] = "breaks"  # a break, even when it was drafted at an earlier step
+                            if ruled in reported:
+                                break
                             should, got = ("refused", "accepted") if expects == "refuse" else ("accepted", "refused")
                             await keep(schemas.ExploreProblem(
                                 title=f"{kind[:1].upper() + kind[1:]} is {got} although {rid} says it is {should}"[:200],
