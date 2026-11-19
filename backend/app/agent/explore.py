@@ -1368,6 +1368,34 @@ def first_step(fault: str) -> str:
     return f"Make {fault} (e.g. stop the API, or block the request in the browser's dev tools)"
 
 
+FIELD_ACTIONS = ("fill", "select", "check", "uncheck")
+
+
+def shortest(steps: list[dict]) -> list[dict]:
+    """A draft's steps, short enough to replay. A long run's journey is every fill and click since it
+    began (a Ge'ez refusal at step 24 had more than the 60 steps a replay takes, so it was drafted
+    with none, and couldn't be confirmed). Too long, it becomes: the last page opened, each field
+    set to its last value, in order, and the action that showed the problem. Short journeys stay
+    as they are: the order of earlier submits can matter."""
+    from app.regression.steps import MAX_EDITED_STEPS
+    if len(steps) <= MAX_EDITED_STEPS:
+        return steps
+    last_goto = max((i for i, s in enumerate(steps) if s.get("type") == "goto"), default=-1)
+    head, rest = (steps[:1], steps) if last_goto < 0 else ([steps[last_goto]], steps[last_goto + 1:])
+    if not rest:
+        return head
+    *before, final = rest
+    fields: dict[str, dict] = {}
+    for s in before:
+        act = s.get("action") or {}
+        if s.get("type") == "action" and act.get("action") in FIELD_ACTIONS:
+            key = json.dumps(act.get("locator", {}), sort_keys=True)
+            fields.pop(key, None)  # keep the field where it was last set
+            fields[key] = s
+    out = head + list(fields.values()) + [final]
+    return out[-MAX_EDITED_STEPS:] if len(out) > MAX_EDITED_STEPS else out
+
+
 def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evidence: str, steps: list[dict],
                page_url: str, screenshot: Path | None, provider: LLMProvider) -> tuple[str, bool]:
     """(bug id, new?): a bug draft, or, when the project already has a draft of the same problem, a sighting
@@ -1409,8 +1437,9 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
             db.commit()
             return same.id, False
     try:
-        edited = clean_steps(steps)
-    except StepError:
+        edited = clean_steps(shortest(steps))
+    except StepError as err:  # drafted without steps to replay: say why, so it isn't a silent gap
+        logger.info("A draft's steps couldn't be kept: %s", err)
         edited = None
     with SessionLocal() as db:
         trail = [{"tag": n.tag, "content": n.content, "timestamp": n.timestamp.isoformat()}
@@ -1798,6 +1827,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
     history: list[dict] = []
     bug_ids: list[str] = []
     reported: set[tuple[str, str]] = set()
+    ideas_seen: dict = {}  # test ideas tried and not, for the summary Mirmera writes when the AI wrote none
     steps: list[dict] = [{"type": "goto", "url": start_url}]
     started = time.monotonic()
     run_timeout = max(RUN_TIMEOUT_S, max_steps * STEP_TIME_S)
@@ -2058,6 +2088,10 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     # A submit's answer can take a while (a document check, a slow API): wait for what
                     # it sent to come back, up to 10 s, so the answer is read, not "Checking…".
                     await signals.settle(timeout_ms=10_000 if a.kind in SUBMITS else 3_000)
+                    # How long the app took: until what the step sent came back. Measured here, before
+                    # Mirmera's own checks (asking the AI about the answer took ~9 s with qwen3:8b and
+                    # was reported as "the app took 9.7 s").
+                    app_took = time.monotonic() - acted_at
                     if not page.is_closed() and not in_app(page.url, origins):
                         left = page.url
                         await _back_into_app(page, entry["url"], signals)
@@ -2341,9 +2375,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                     await keep(prob, ("layout", url_path, prob.symptom.value),
                                                f". Seen at 390 px wide ({'the run itself is on a phone' if (conditions or {}).get('device') == 'phone' else 'Mirmera narrowed the browser for a moment'}).")
                     # Slow answers: a tester notices waiting.
-                    took = time.monotonic() - acted_at
-                    if is_submit and took > 5:
-                        _note(session_id, "issue", f"Slow: after {entry['action']} the app took {took:.1f} s to answer.")
+                    if is_submit and app_took > 5:
+                        _note(session_id, "issue", f"Slow: after {entry['action']} the app took {app_took:.1f} s to answer.")
                     history.append(entry)
                     stuck = stuck + 1 if entry["status"] in ("refused", "failed", "not verified") else 0
                     _save(run_id, steps=list(history), bug_ids=list(bug_ids))
@@ -2379,6 +2412,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                 if not is_tried(f, v, tried_values)]
                         _note(session_id, "setup", f"Test ideas tried: {done} of {total}."
                               + (f" Not tried: {'; '.join(left[:8])}" + ("…" if len(left) > 8 else "") if left else ""))
+                        ideas_seen.update(done=done, total=total, left=left)
             finally:
                 video = await _keep_recording(context, folder, run_id)
                 await browser.close()
@@ -2451,6 +2485,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
         final = {"status": "error", "detail": f"The run failed: {_first_line(err)}"}
     finally:
         try:
+            if final.get("status") == "finished" and not final.get("summary"):
+                final["summary"] = facts_summary(history, _titles(bug_ids), ideas_seen, final.get("detail", ""))
             _wrap_up(session_id, final, history, bug_ids)
             if ctx.project_id:
                 from app import test_data
@@ -2463,6 +2499,35 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
         finally:
             ACTIVE.discard(run_id)
             LIVE.pop(run_id, None)  # from here on, its steps' frames show what it did
+
+
+def _titles(bug_ids: list[str]) -> list[str]:
+    if not bug_ids:
+        return []
+    with SessionLocal() as db:
+        by_id = {b.id: b.title for b in db.query(models.Bug).filter(models.Bug.id.in_(bug_ids))}
+    return [by_id[b] for b in bug_ids if b in by_id]
+
+
+def facts_summary(history: list[dict], bug_titles: list[str], ideas: dict, why_it_ended: str) -> str:
+    """The run's summary when the agent didn't write one (it ran out of steps): what Mirmera knows
+    for a fact, written by Mirmera. Pages, tests actually run, bug drafts, test ideas left."""
+    ran = [h for h in history if h.get("by") != "Mirmera" and h["status"] not in ("refused", "failed")
+           and h["kind"] not in ("note", "problem", "done", "invalid", "goto")]
+    sent = sum(1 for h in ran if h["kind"] == "try" or h.get("detail", "").startswith(("the page now says", "the page still says")))
+    pages = list(dict.fromkeys(urlsplit_path(h["url"]) for h in history if h.get("url")))
+    out = [f"Written by Mirmera: the agent didn't finish with a summary ({why_it_ended.rstrip('.').lower()})."]
+    out.append(f"It ran {len(ran)} action{'s' if len(ran) != 1 else ''}, {sent} of them sending a form, "
+               f"on {', '.join(pages[:6]) or 'no page'}.")
+    if bug_titles:
+        out.append(f"Bug drafts ({len(bug_titles)}): " + "; ".join(t[:120] for t in bug_titles[:8]) + ".")
+    else:
+        out.append("No bug drafts.")
+    if ideas.get("total"):
+        left = ideas.get("left") or []
+        out.append(f"Test ideas tried: {ideas['done']} of {ideas['total']}"
+                   + (f"; not tried: {'; '.join(left[:6])}" + ("…" if len(left) > 6 else "") if left else "") + ".")
+    return " ".join(out)[:2000]
 
 
 def _wrap_up(session_id: str, final: dict, history: list[dict], bug_ids: list[str]) -> None:
