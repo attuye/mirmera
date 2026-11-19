@@ -148,7 +148,12 @@ def test_leftovers_from_an_older_mirmera_are_removed_on_start(client, project, c
     with engine.begin() as conn:  # and its charter stayed active, as it did on that laptop
         conn.exec_driver_sql("DELETE FROM sessions WHERE id = ?", (kept["id"],))
         conn.exec_driver_sql("UPDATE charters SET status = 'active' WHERE id = ?", (charter["id"],))
-    assert remove_orphans(engine) == ["exploration_runs: 2", "charters left active: 1"]
+    assert remove_orphans(engine) == ["exploration_runs: 2", "charters whose sessions were deleted: 1"]
+    assert client.get(f"/charters/{charter['id']}").json()["status"] == "proposed"
+    # ended, then deleted: "done" with no sessions left (as on that laptop) becomes proposed too
+    with engine.begin() as conn:
+        conn.exec_driver_sql("UPDATE charters SET status = 'done' WHERE id = ?", (charter["id"],))
+    assert remove_orphans(engine) == ["charters whose sessions were deleted: 1"]
     assert client.get(f"/charters/{charter['id']}").json()["status"] == "proposed"
     assert remove_orphans(engine) == []  # nothing left to do
 
@@ -201,3 +206,12 @@ def test_archiving_hides_nothing_on_the_server_and_can_be_undone(client, project
     assert listed["archived_at"] and listed["charter_count"] == 1  # the page decides what to show
     assert client.get(f"/projects/{project['id']}/charters").json()[0]["id"] == charter["id"]  # still usable
     assert client.post(f"/projects/{project['id']}/unarchive").json()["archived_at"] is None
+
+
+def test_a_done_charter_with_sessions_is_left_alone_on_start(client, charter):
+    from app.database import engine, remove_orphans
+    s = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+    client.post(f"/sessions/{s['id']}/end", json={})
+    assert client.get(f"/charters/{charter['id']}").json()["status"] == "done"
+    assert remove_orphans(engine) == []
+    assert client.get(f"/charters/{charter['id']}").json()["status"] == "done"

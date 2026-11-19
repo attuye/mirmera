@@ -102,13 +102,15 @@ def remove_orphans(bind=None) -> list[str]:
             if r.rowcount:
                 removed.append(f"{table}: {r.rowcount}")
         if inspector.has_table("charters") and inspector.has_table("sessions"):
-            # A charter left "active" by a deleted session: done if it has ended sessions, else proposed.
+            # A charter a deleted session left "active" (none open now: done if one has ended, else
+            # proposed), or "done" with no sessions left at all (proposed: explore it again).
             r = conn.execute(text(
                 "UPDATE charters SET status = CASE WHEN EXISTS (SELECT 1 FROM sessions s WHERE s.charter_id = charters.id) "
-                "THEN 'done' ELSE 'proposed' END WHERE status = 'active' AND NOT EXISTS "
-                "(SELECT 1 FROM sessions s WHERE s.charter_id = charters.id AND s.ended_at IS NULL)"))
+                "THEN 'done' ELSE 'proposed' END WHERE "
+                "(status = 'active' AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.charter_id = charters.id AND s.ended_at IS NULL)) "
+                "OR (status = 'done' AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.charter_id = charters.id))"))
             if r.rowcount:
-                removed.append(f"charters left active: {r.rowcount}")
+                removed.append(f"charters whose sessions were deleted: {r.rowcount}")
     return removed
 
 
