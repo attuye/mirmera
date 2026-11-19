@@ -2419,7 +2419,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                       f"({charter_target(ctx.mission)}): {', '.join(changed)}. Kept, and marked as beyond it.")
                             entry["beyond_charter"] = True
                             entry["detail"] = (entry["detail"] + " " if entry["detail"] else "") + "(beyond the charter)"
-                            charter_steps["beyond"].append((entry["n"], changed, bug_ids[bugs_before:]))
+                            charter_steps["beyond"].append((entry["n"], changed, bug_ids[bugs_before:], dict(a.values or {})))
                         elif changed and ctx.focus:
                             charter_steps["on"] += 1
                     if is_submit and app_took > 5:
@@ -2588,20 +2588,37 @@ def facts_summary(history: list[dict], bug_titles: list[str], ideas: dict, why_i
 def beyond_line(ctx: CharterContext, charter_steps: dict) -> str:
     """On the charter, and beyond it, in one sentence for the summary."""
     beyond = charter_steps["beyond"]
-    fields = list(dict.fromkeys(f for _, changed, _ in beyond for f in changed))
-    found = _titles([b for _, _, ids in beyond for b in ids])
+    fields = list(dict.fromkeys(f for _, changed, _, _ in beyond for f in changed))
+    found = _titles([b for _, _, ids, _ in beyond for b in ids])
     return (f"On the charter ({charter_target(ctx.mission)}): {charter_steps['on']} test{'s' if charter_steps['on'] != 1 else ''}. "
             f"Beyond it: {len(beyond)} ({', '.join(fields[:6])})"
             + (f", which found: {'; '.join(t[:100] for t in found[:4])}." if found else ", nothing found there."))
+
+
+def rule_for_field(rules: dict[str, str], label: str, values: list[str]) -> str | None:
+    """The rule a field's follow-up checks: the one naming the values tried there (AC1 names
+    "Passport" for Document type) counts most, then its label's words. The first rule sharing a
+    word was picked before: "…as written on the document" made the name rule Document type's."""
+    label_words = _focus_stems(label)
+    value_words = set().union(*(_focus_stems(v) for v in values)) if values else set()
+    best, score = None, 0
+    for rid, text in rules.items():
+        words = _focus_stems(text)
+        s = 2 * len(value_words & words) + len(label_words & words)
+        if s > score:
+            best, score = rid, s
+    return best
 
 
 def follow_up_charters(charter_id: str, ctx: CharterContext, charter_steps: dict) -> list[str]:
     """A proposed charter for each field where something was found beyond the charter: an unplanned
     find deserves its own session. Linked to the same stories; not made twice."""
     by_field: dict[str, list[str]] = {}
-    for _, changed, ids in charter_steps["beyond"]:
-        if ids:
-            for f in changed:
+    tried: dict[str, list[str]] = {}  # the values sent to each field beyond the charter
+    for _, changed, ids, values in charter_steps["beyond"]:
+        for f in changed:
+            tried.setdefault(f, []).append(str(values.get(f, "")))
+            if ids:
                 by_field.setdefault(f, []).extend(ids)
     if not by_field:
         return []
@@ -2615,7 +2632,7 @@ def follow_up_charters(charter_id: str, ctx: CharterContext, charter_steps: dict
         for f in list(by_field)[:3]:
             if any(f.lower() in m for m in have):
                 continue
-            rid = next((k for k, v in rules.items() if _focus_stems(f) & _focus_stems(v)), None)
+            rid = rule_for_field(rules, f, tried.get(f, []))
             info = f"whether it works as {rid} says" if rid else "how it handles unusual values"
             mission = f"Explore {f[:1].lower() + f[1:]} with its test ideas, everything else valid, to discover {info}"
             follow = models.Charter(project_id=charter.project_id, mission_statement=mission, source="follow-up",

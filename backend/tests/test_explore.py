@@ -738,3 +738,15 @@ def test_the_charter_target_decides_its_focus():
     assert focus_fields("Explore My documents after verifying to discover whether all are listed", fields) == ["Document type", "Document number"]
     assert beyond_charter(["Full name"], ["Expiry date"]) and not beyond_charter(["Expiry date"], ["Expiry date"])
     assert not beyond_charter(["Full name"], [])  # no focus known: nothing is beyond it
+
+
+def test_a_follow_up_checks_the_rule_its_field_is_about():
+    """Seen on the practice app: Document type's follow-up said "as AC2 says", the name rule, because
+    AC2 mentions "the document". AC1 names the values tried there."""
+    from app.agent.explore import rule_for_field
+    rules = {"AC1": "Customers can verify with a National ID, a Passport or a Driver's licence. All three are supported equally.",
+             "AC2": "The customer's full name is entered as written on the document, in Latin or Ge'ez script.",
+             "AC3": "Expired documents must be rejected. A document is expired if its expiry date is before today."}
+    assert rule_for_field(rules, "Document type", ["Passport", "Driver's licence"]) == "AC1"
+    assert rule_for_field(rules, "Full name", ["አበበ ከበደ", "O'Brien-Smith"]) == "AC2"
+    assert rule_for_field(rules, "Phone number", ["0911223344"]) is None
