@@ -96,6 +96,45 @@ def test_a_session_with_its_browser_open_cannot_be_deleted(client, session, monk
     assert r.status_code == 409 and "Stop it first" in r.json()["detail"]
 
 
+def test_deleting_a_session_takes_its_agent_runs_and_comparisons(client, project, charter):
+    """Seen on a laptop: a session deleted from its debrief left its exploration run, so the
+    charter's "Open the session" led to a session that was gone (a blank page)."""
+    s = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+    add(models.ExplorationRun(project_id=project["id"], charter_id=charter["id"], session_id=s["id"], status="finished",
+                              start_url="http://x/"),
+        models.Comparison(session_id=s["id"], env_a={"name": "a", "url": "http://a"}, env_b={"name": "b", "url": "http://b"}))
+    assert client.get(f"/charters/{charter['id']}/exploration").json()["session_id"] == s["id"]
+    deleted = client.delete(f"/sessions/{s['id']}").json()["deleted"]
+    assert (deleted["exploration_runs"], deleted["comparisons"]) == (1, 1)
+    assert client.get(f"/charters/{charter['id']}/exploration").json() is None  # "Let Mirmera explore" again
+    assert count(models.ExplorationRun) == count(models.Comparison) == 0
+
+
+def test_a_session_mirmera_is_exploring_in_cannot_be_deleted(client, project, charter, monkeypatch):
+    from app.agent import explore
+    s = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+    add(models.ExplorationRun(id="run-1", project_id=project["id"], charter_id=charter["id"], session_id=s["id"],
+                              status="running", start_url="http://x/"))
+    monkeypatch.setattr(explore, "ACTIVE", {"run-1"})
+    r = client.delete(f"/sessions/{s['id']}")
+    assert r.status_code == 409 and r.json()["detail"].startswith("Mirmera is exploring in this session")
+
+
+def test_leftovers_from_an_older_mirmera_are_removed_on_start(client, project, charter):
+    """A database where a session was deleted before this fix: its run still points at it."""
+    from app.database import engine, remove_orphans
+    s = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+    kept = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+    add(models.ExplorationRun(project_id=project["id"], charter_id=charter["id"], session_id=s["id"], start_url="http://x/"),
+        models.ExplorationRun(project_id=project["id"], charter_id=charter["id"], session_id=kept["id"], start_url="http://x/"))
+    with engine.begin() as conn:  # the old delete: the session went, its run stayed
+        for table in ("notes", "sessions"):
+            conn.exec_driver_sql(f"DELETE FROM {table} WHERE {'session_id' if table == 'notes' else 'id'} = ?", (s["id"],))
+    assert remove_orphans(engine) == ["exploration_runs: 1"]
+    assert remove_orphans(engine) == []  # nothing left to do
+    assert count(models.ExplorationRun, session_id=kept["id"]) == 1
+
+
 def test_a_bug_the_agent_is_working_on_cannot_be_deleted(client, session, monkeypatch):
     bug = client.post(f"/sessions/{session['id']}/bugs", json={"title": "Busy"}).json()
     run = models.ReproductionRun(id="busy-run", bug_id=bug["id"], status="running", base_url="http://x", start_url="http://x/", max_steps=5, runs=1)

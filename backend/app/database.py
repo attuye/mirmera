@@ -63,6 +63,7 @@ def add_missing_columns(bind=None) -> list[str]:
                 conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {column_type}{_default_sql(column)}'))
                 added.append(f"{table.name}.{column.name}")
     fill_missing_flags(bind)
+    remove_orphans(bind)
     return added
 
 
@@ -81,6 +82,26 @@ def _default_sql(column) -> str:
     if isinstance(v, str):
         return " DEFAULT '" + v.replace("'", "''") + "'"
     return ""
+
+
+ORPHANS = (("exploration_runs", "session_id", "sessions"), ("comparisons", "session_id", "sessions"))
+
+
+def remove_orphans(bind=None) -> list[str]:
+    """Rows left pointing at a deleted session by an older Mirmera, which didn't delete a session's
+    agent runs and comparisons with it. Safe on every start: once removed, nothing matches."""
+    bind = bind or engine
+    removed: list[str] = []
+    with bind.begin() as conn:
+        inspector = inspect(conn)
+        for table, column, parent in ORPHANS:
+            if not (inspector.has_table(table) and inspector.has_table(parent)):
+                continue
+            r = conn.execute(text(f'DELETE FROM "{table}" WHERE "{column}" IS NOT NULL '
+                                  f'AND "{column}" NOT IN (SELECT id FROM "{parent}")'))
+            if r.rowcount:
+                removed.append(f"{table}: {r.rowcount}")
+    return removed
 
 
 def fill_missing_flags(bind=None) -> list[str]:

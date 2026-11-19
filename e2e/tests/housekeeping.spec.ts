@@ -57,3 +57,23 @@ test('housekeeping: delete a bug and a session, archive and delete a project', a
     expect((await request.get(`${API_URL}/projects/${project.id}`)).status()).toBe(404)
   })
 })
+
+test('housekeeping: a deleted session says so, and its charter can be explored again', async ({ page, api, request, appErrors }) => {
+  const project = await api.newProject('AddisVerify Deleted Session')
+  const charter = await api.charter(project.id, 'Explore expiry dates with today, yesterday and tomorrow to discover whether expired documents are rejected')
+  const session = await (await request.post(`${API_URL}/sessions`, { data: { charter_id: charter.id, tester_id: 'Attu' } })).json()
+  await page.goto(`/projects/${project.id}/sessions/${session.id}`)
+  await expect(page.getByText(/Explore expiry dates/).first()).toBeVisible()
+
+  await request.delete(`${API_URL}/sessions/${session.id}`)  // e.g. "Delete session" on its debrief, in another tab
+  await page.reload()
+  const gone = page.getByRole('alert', { name: 'Session not found' })
+  await expect(gone).toContainText("This session doesn't exist any more: it was deleted")
+  await page.screenshot({ path: 'test-results/session-deleted.png' })
+  await gone.getByRole('link', { name: 'Stories' }).click()
+  await expect(page).toHaveURL(new RegExp(`/projects/${project.id}/stories$`))
+  // The page asked for the deleted session on purpose: those 404s are the test, not a failure.
+  const expected = appErrors.filter((e) => e.includes(`/sessions/${session.id}`) && e.endsWith('-> 404'))
+  expect(expected.length).toBeGreaterThan(0)
+  appErrors.splice(0, appErrors.length, ...appErrors.filter((e) => !expected.includes(e)))
+})

@@ -12,6 +12,7 @@ from collections import Counter
 from sqlalchemy.orm import Session as DBSession
 
 from app import models, stories
+from app.database import SessionLocal
 from app.agent import reproduce as agent
 from app.regression import isolate
 from app.routers.runner import session_folder
@@ -40,9 +41,16 @@ def _check_bugs_idle(db: DBSession, bug_ids: list[str]) -> None:
 
 
 def _check_sessions_idle(session_ids: list[str]) -> None:
+    from app.agent import explore
     for sid in session_ids:
         if manager.get(sid) is not None:  # a runner exists only while its browser is open
             raise BusyError("The recorded browser is still open for a session here. Stop it first.")
+    if session_ids and explore.ACTIVE:
+        with SessionLocal() as db:
+            running = db.query(models.ExplorationRun.id).filter(models.ExplorationRun.session_id.in_(session_ids),
+                                                                models.ExplorationRun.status == "running").all()
+        if any(r.id in explore.ACTIVE for r in running):
+            raise BusyError("Mirmera is exploring in this session. Stop it under its charter, or let it finish, first.")
 
 
 def _delete_bugs(db: DBSession, bug_ids: list[str], counts: Counter) -> None:
@@ -64,8 +72,12 @@ def _delete_sessions(db: DBSession, session_ids: list[str], counts: Counter) -> 
         return
     bug_ids = [b.id for b in db.query(models.Bug.id).filter(models.Bug.session_id.in_(session_ids))]
     _delete_bugs(db, bug_ids, counts)
-    for model in (models.Note, models.Debrief, models.Evidence):
-        counts[model.__tablename__] += db.query(model).filter(model.session_id.in_(session_ids)).delete(synchronize_session=False)
+    # The session's own records, and the agent runs and comparisons made in it: left behind, a
+    # charter's "Open the session" led to a session that was gone.
+    for model in (models.Note, models.Debrief, models.Evidence, models.ExplorationRun, models.Comparison):
+        n = db.query(model).filter(model.session_id.in_(session_ids)).delete(synchronize_session=False)
+        if n or model not in (models.ExplorationRun, models.Comparison):  # those two only listed when there were any
+            counts[model.__tablename__] += n
     # Risk re-scores the tester decided on changed the risk: they stay in its history,
     # without the session. Undecided suggestions from the session go with it.
     q = db.query(models.RiskChange).filter(models.RiskChange.session_id.in_(session_ids))

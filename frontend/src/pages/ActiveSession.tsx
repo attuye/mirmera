@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Bot } from 'lucide-react'
 import { api, ExplorationRun, Note } from '../api/client'
 import Sidebar from '../components/Sidebar'
@@ -125,6 +125,7 @@ export default function ActiveSession() {
   const runner = useRunner(sessionId)
   const box = useRef<HTMLTextAreaElement>(null)
   const [charterId, setCharterId] = useState<string | null>(null)
+  const [missing, setMissing] = useState(false)  // deleted, or never existed: said, not a blank page
   const agentRun = useAgentRun(charterId, sessionId, () => {
     // Mirmera finished: show its last notes, and the pause it left the session in.
     if (!sessionId) return
@@ -157,7 +158,7 @@ export default function ActiveSession() {
         setCharterMission(charter.mission_statement)
         setCharterHeuristics({ heuristics: charter.heuristics, oracles: charter.oracles })
       }).catch(console.error)
-    }).catch(console.error)
+    }).catch((e: Error) => { if (e.message === 'Session not found') setMissing(true); else console.error(e) })
   }, [sessionId])
 
   // Log the current text as a note, or as a bug (a bug also appears in the timeline).
@@ -216,6 +217,20 @@ export default function ActiveSession() {
     ...notes.map((note) => ({ type: 'note' as const, at: note.timestamp, note })),
     ...runner.evidence.filter((e) => e.kind === 'screenshot').map((shot) => ({ type: 'shot' as const, at: shot.captured_at, shot })),
   ].sort((a, b) => a.at.localeCompare(b.at))
+
+  if (missing) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex' }}>
+        <Sidebar />
+        <main role="alert" aria-label="Session not found" style={{ flex: 1, padding: '80px 40px', textAlign: 'center', color: 'var(--text-secondary)', fontSize: 14 }}>
+          <p style={{ margin: 0 }}>This session doesn't exist any more: it was deleted, with its notes, bugs and debrief.</p>
+          <p style={{ marginTop: 10 }}>
+            <Link to={path('/stories')}>Stories</Link> · <Link to={path('/debriefs')}>Debriefs</Link> · <Link to={path('/dashboard')}>Dashboard</Link>
+          </p>
+        </main>
+      </div>
+    )
+  }
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex' }}>
