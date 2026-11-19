@@ -110,6 +110,21 @@ def test_deleting_a_session_takes_its_agent_runs_and_comparisons(client, project
     assert count(models.ExplorationRun) == count(models.Comparison) == 0
 
 
+def test_a_charter_follows_its_sessions_when_one_is_deleted(client, charter):
+    """Seen on the Dashboard: the charter stayed ACTIVE after its only session was deleted, and
+    clicking it said "No active session for this charter"."""
+    first = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+    assert client.get(f"/charters/{charter['id']}").json()["status"] == "active"
+    client.delete(f"/sessions/{first['id']}")
+    assert client.get(f"/charters/{charter['id']}").json()["status"] == "proposed"  # explore it again
+
+    ended = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+    client.post(f"/sessions/{ended['id']}/end", json={})
+    other = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+    client.delete(f"/sessions/{other['id']}")
+    assert client.get(f"/charters/{charter['id']}").json()["status"] == "done"  # its ended session is still there
+
+
 def test_a_session_mirmera_is_exploring_in_cannot_be_deleted(client, project, charter, monkeypatch):
     from app.agent import explore
     s = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
@@ -130,9 +145,12 @@ def test_leftovers_from_an_older_mirmera_are_removed_on_start(client, project, c
     with engine.begin() as conn:  # the old delete: the session went, its run stayed
         for table in ("notes", "sessions"):
             conn.exec_driver_sql(f"DELETE FROM {table} WHERE {'session_id' if table == 'notes' else 'id'} = ?", (s["id"],))
-    assert remove_orphans(engine) == ["exploration_runs: 1"]
+    with engine.begin() as conn:  # and its charter stayed active, as it did on that laptop
+        conn.exec_driver_sql("DELETE FROM sessions WHERE id = ?", (kept["id"],))
+        conn.exec_driver_sql("UPDATE charters SET status = 'active' WHERE id = ?", (charter["id"],))
+    assert remove_orphans(engine) == ["exploration_runs: 2", "charters left active: 1"]
+    assert client.get(f"/charters/{charter['id']}").json()["status"] == "proposed"
     assert remove_orphans(engine) == []  # nothing left to do
-    assert count(models.ExplorationRun, session_id=kept["id"]) == 1
 
 
 def test_a_bug_the_agent_is_working_on_cannot_be_deleted(client, session, monkeypatch):

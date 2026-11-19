@@ -100,13 +100,25 @@ def delete_bug(db: DBSession, bug: models.Bug) -> dict:
     return dict(counts)
 
 
+def charter_status(db: DBSession, charter_id: str) -> str:
+    """A charter's status from the sessions it has: active while one is open, done once one has
+    ended, proposed when it has none (all deleted): ready to explore again."""
+    sessions = db.query(models.Session.ended_at).filter(models.Session.charter_id == charter_id).all()
+    if any(s.ended_at is None for s in sessions):
+        return "active"
+    return "done" if sessions else "proposed"
+
+
 def delete_session(db: DBSession, session: models.Session) -> dict:
-    sid = session.id  # the object expires once the row is gone
+    sid, charter_id = session.id, session.charter_id  # the object expires once the row is gone
     bug_ids = [b.id for b in db.query(models.Bug.id).filter(models.Bug.session_id == sid)]
     _check_sessions_idle([sid])
     _check_bugs_idle(db, bug_ids)
     counts: Counter = Counter()
     _delete_sessions(db, [sid], counts)
+    charter = db.get(models.Charter, charter_id)
+    if charter:  # left "active", the Dashboard offered a session that was gone
+        charter.status = charter_status(db, charter_id)
     db.commit()
     _remove_files([sid])
     return dict(counts)

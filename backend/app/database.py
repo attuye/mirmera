@@ -88,8 +88,8 @@ ORPHANS = (("exploration_runs", "session_id", "sessions"), ("comparisons", "sess
 
 
 def remove_orphans(bind=None) -> list[str]:
-    """Rows left pointing at a deleted session by an older Mirmera, which didn't delete a session's
-    agent runs and comparisons with it. Safe on every start: once removed, nothing matches."""
+    """What an older Mirmera left behind when a session was deleted: its agent runs and comparisons,
+    and its charter still marked active. Safe on every start: once repaired, nothing matches."""
     bind = bind or engine
     removed: list[str] = []
     with bind.begin() as conn:
@@ -101,6 +101,14 @@ def remove_orphans(bind=None) -> list[str]:
                                   f'AND "{column}" NOT IN (SELECT id FROM "{parent}")'))
             if r.rowcount:
                 removed.append(f"{table}: {r.rowcount}")
+        if inspector.has_table("charters") and inspector.has_table("sessions"):
+            # A charter left "active" by a deleted session: done if it has ended sessions, else proposed.
+            r = conn.execute(text(
+                "UPDATE charters SET status = CASE WHEN EXISTS (SELECT 1 FROM sessions s WHERE s.charter_id = charters.id) "
+                "THEN 'done' ELSE 'proposed' END WHERE status = 'active' AND NOT EXISTS "
+                "(SELECT 1 FROM sessions s WHERE s.charter_id = charters.id AND s.ended_at IS NULL)"))
+            if r.rowcount:
+                removed.append(f"charters left active: {r.rowcount}")
     return removed
 
 
