@@ -47,6 +47,36 @@ async def suggest_charters(project_id: str, payload: schemas.CharterSuggestReque
     )
 
 
+@router.post("/projects/{project_id}/charters/suggest-job")
+async def suggest_charters_job(project_id: str, payload: schemas.CharterSuggestRequest, db: DBSession = Depends(get_db)):
+    """The same suggestions as /charters/suggest, as an AI job's result (kind charter_suggestions):
+    with where they came from and each one's status, so they are still there after leaving the page."""
+    suggestions = await suggest_charters(project_id, payload, db)
+    first = db.get(models.Artifact, payload.artifact_ids[0])
+    return {"artifact_ids": payload.artifact_ids,
+            "source": {"id": first.id, "label": first.label, "file_ref": first.file_ref} if first else None,
+            "suggestions": [{**s.model_dump(), "status": "suggested"} for s in suggestions]}
+
+
+@router.patch("/charters/{charter_id}", response_model=schemas.CharterOut)
+def update_charter(charter_id: str, payload: schemas.CharterUpdate, db: DBSession = Depends(get_db)):
+    """Edit a charter's mission, rationale or priority, until a session uses it: after that, the
+    sessions' record says what they explored, so a changed mission is a new charter."""
+    charter = db.get(models.Charter, charter_id)
+    if not charter:
+        raise HTTPException(404, "Charter not found")
+    used = db.query(models.Session).filter(models.Session.charter_id == charter_id).count()
+    if used:
+        raise HTTPException(409, f"{used} session{'s have' if used > 1 else ' has'} used this charter, so its mission "
+                                 "stays as they explored it. Write a new charter for the new mission.")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        if value is not None:
+            setattr(charter, field, value.strip() if isinstance(value, str) else value)
+    db.commit()
+    db.refresh(charter)
+    return charter
+
+
 @router.post("/projects/{project_id}/charters", response_model=schemas.CharterOut)
 def save_charter(project_id: str, payload: schemas.CharterCreate, db: DBSession = Depends(get_db)):
     project = db.get(models.Project, project_id)

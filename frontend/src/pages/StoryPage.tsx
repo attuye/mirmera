@@ -8,10 +8,13 @@ import ExploreButton from '../components/ExploreButton'
 import AgentProgress, { useAgentActivity } from '../components/AgentProgress'
 import RiskForm from '../components/RiskForm'
 import SuggestedRisks from '../components/SuggestedRisks'
+import SuggestionSkeleton from '../components/SuggestionSkeleton'
+import CharterDrafts from '../components/CharterDrafts'
+import MissionEditor from '../components/MissionEditor'
 import { useAiJob } from '../components/useAiJob'
 import { utcDate } from '../components/Evidence'
 import { ConfirmDelete, ErrorLine, errorText, input, quietButton } from '../components/ui'
-import { api, Charter, Risk, SprintSummary, StoryDetail, StoryRisksResult } from '../api/client'
+import { api, Charter, Risk, SprintSummary, StoryChartersResult, StoryDetail, StoryRisksResult } from '../api/client'
 import { useProject, useProjectPath } from '../project'
 import { StoryStatus, timeText } from './Stories'
 
@@ -87,6 +90,7 @@ export default function StoryPage() {
   const [watch, setWatch] = useState(0)  // bumped when an exploration starts here: look again at once
   const activity = useAgentActivity(() => api.storyActivity(storyId), `${storyId}-${watch}`)
   const wasRunning = useRef(0)
+  const charterJob = useAiJob<StoryChartersResult>(project.id, 'story_charters', undefined, storyId)
   const suggest = useAiJob<StoryRisksResult>(project.id, 'story_risks', () => {  // new proposed risks are on the story now
     api.getStory(storyId).then(setStory).catch(() => {})
     api.listRisks(project.id).then(setRisks).catch(() => {})
@@ -127,6 +131,24 @@ export default function StoryPage() {
     await act('suggest', () => api.decideRiskSuggestion(story!.id, riskId, action))
     if (suggest.job?.result) suggest.setJob({ ...suggest.job, result: { ...suggest.job.result,
       links: suggest.job.result.links.map((l) => l.risk_id === riskId ? { ...l, status: action === 'link' ? 'linked' : 'dropped' } : l) } })
+  }
+  const drafts = charterJob.job?.status === 'done' && charterJob.job.result?.story_id === story.id ? charterJob.job.result : null
+  async function acceptDraft(index: number, mission: string) {  // a charter planned from the story's risks
+    const d = drafts!.drafts[index], job = charterJob.job!
+    await act('charter', async () => {
+      const charter = await api.saveCharter(project.id, {
+        mission_statement: mission, rationale: d.rationale, priority: d.priority, source: 'risk-based',
+        risk_ids: d.risk_ids, test_ideas: d.test_ideas, oracles: d.oracles, story_ids: [story!.id],
+        risk_areas: story!.risk_list.filter((r) => d.risk_ids.includes(r.id)).map((r) => r.title),
+      })
+      charterJob.setJob(await api.markJobItem(job.id, index, 'accepted', charter.id) as typeof job)
+      return api.getStory(story!.id)
+    })
+  }
+  async function dropDraft(index: number) {
+    const job = charterJob.job!
+    setBusy('charter'); setError(null)
+    try { charterJob.setJob(await api.markJobItem(job.id, index, 'dropped') as typeof job) } catch (e) { setError(errorText(e)) } finally { setBusy(null) }
   }
   async function review(riskId: string, accept: boolean) {  // a proposed risk on this story: accept it, or drop it from the project
     await act('review', async () => {
@@ -256,14 +278,34 @@ export default function StoryPage() {
           <span style={{ display: 'inline-flex', gap: 8 }}>
             <Picker label="Link a charter" options={charters.filter((c) => !charterIds.includes(c.id))} text={(c) => c.mission_statement.slice(0, 80)}
               onPick={(id) => act('charter', () => api.setStoryCharters(story.id, [...charterIds, id]))} />
-            <Link to={path(`/charters/suggest?story=${story.id}`)} style={{ ...small, display: 'inline-block' }}>Suggest charters</Link>
+            <button disabled={charterJob.running || !!busy} onClick={() => charterJob.start({ story_id: story.id })} style={small}
+              title="Charters planned from the story's accepted risks, in the template Explore … with … to discover ….">
+              {charterJob.running ? `Thinking… ${charterJob.since}` : 'Suggest charters'}</button>
           </span>}>
-          {story.charter_list.length === 0 && <p style={quiet}>No charters yet. Suggest some from the story, or link one the project already has.</p>}
+          <ErrorLine message={charterJob.error} />
+          {charterJob.running && <SuggestionSkeleton count={2}
+            label={`Planning charters from the story's accepted risks… ${charterJob.since}. A local model can take a few minutes: you can leave this page, the suggestions will be here when you come back.`} />}
+          {drafts && (
+            <div style={{ marginBottom: 12 }}>
+              {drafts.drafts.some((d) => d.status === 'suggested') && (
+                <p style={{ ...quiet, marginBottom: 8 }}>Suggested from the accepted risks: edit the mission if it needs it, then accept or drop each one.
+                  {drafts.uncovered_risk_refs.length > 0 && ` Not covered: ${drafts.uncovered_risk_refs.join(', ')}.`}</p>
+              )}
+              <CharterDrafts jobId={charterJob.job!.id} busy={!!busy}
+                items={drafts.drafts.map((d) => ({ mission: d.mission_statement, rationale: d.rationale, priority: d.priority, status: d.status,
+                  investigates: d.risk_refs, ideas: d.test_ideas }))}
+                onAccept={acceptDraft} onDrop={dropDraft} />
+              {drafts.drafts.length === 0 && <p style={quiet}>No new charters: the story's charters already cover its accepted risks.</p>}
+            </div>
+          )}
+          {story.charter_list.length === 0 && !drafts && <p style={quiet}>No charters yet. Accept the story's risks, then suggest charters from them, or link one the project already has.</p>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {story.charter_list.map((c) => (
               <div key={c.id} role="article" aria-label={c.mission_statement} style={row}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13 }}>{c.mission_statement}</div>
+                  <MissionEditor value={c.mission_statement} style={{ fontSize: 13 }} canEdit={c.sessions === 0}
+                    why="A session has used this charter: its mission stays as they explored it."
+                    onSave={async (m) => { await api.updateCharter(c.id, { mission_statement: m }); setStory(await api.getStory(story.id)) }} />
                   <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 4, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                     <span className="mono" style={{ fontSize: 9.5, color: c.status === 'active' ? 'var(--accent)' : 'var(--text-tertiary)' }}>{c.status.toUpperCase()}</span>
                     {c.risk_refs.length > 0 && <span>investigates {c.risk_refs.join(', ')}</span>}

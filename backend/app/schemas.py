@@ -609,6 +609,27 @@ class StoryRisksRequest(BaseModel):
     max_risks: int = Field(default=5, ge=1, le=10)
 
 
+class StoryChartersRequest(BaseModel):
+    """Charters for one story, from its accepted risks."""
+    story_id: str
+    provider: Optional[str] = None
+    max_charters: int = Field(default=4, ge=1, le=10)
+
+
+class AiJobItemUpdate(BaseModel):
+    """A suggestion in a finished job, accepted (with the charter made from it) or dropped."""
+    index: int = Field(ge=0)
+    status: Literal["accepted", "dropped"]
+    charter_id: Optional[str] = None
+
+
+class CharterUpdate(BaseModel):
+    """Edit a charter that no session has used yet."""
+    mission_statement: Optional[str] = Field(default=None, min_length=10, max_length=600)
+    rationale: Optional[str] = None
+    priority: Optional[Literal["high", "medium", "low"]] = None
+
+
 class StoryRiskDecision(BaseModel):
     action: Literal["link", "drop"]
 
@@ -2450,7 +2471,8 @@ class AgentActivityList(BaseModel):
 # ---------- AI jobs: AI steps that survive a refresh ----------
 
 class AiJobCreate(BaseModel):
-    kind: Literal["product_model", "risk_analysis", "charters_from_risks", "app_map", "story_risks"]
+    kind: Literal["product_model", "risk_analysis", "charters_from_risks", "app_map", "story_risks",
+                  "story_charters", "charter_suggestions"]
     request: dict = Field(default_factory=dict)
 
 

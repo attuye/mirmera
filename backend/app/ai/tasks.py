@@ -19,7 +19,7 @@ from app.schemas import (
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
 PROMPT_VERSIONS = {
-    "charter_suggestions": "charter-suggestion-v2",
+    "charter_suggestions": "charter-suggestion-v3",
     "debrief": "debrief-proof-v2",
     "artifact_summary": "artifact-summary-v1",
     "product_model": "product-model-v1",

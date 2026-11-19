@@ -91,6 +91,33 @@ async def suggest_story_risks(project_id: str, payload: schemas.StoryRisksReques
         raise HTTPException(409, str(err))
 
 
+@router.post("/projects/{project_id}/story-charters")
+async def suggest_story_charters(project_id: str, payload: schemas.StoryChartersRequest, db: DBSession = Depends(get_db)):
+    """Charter drafts for a story, from its accepted risks: each in the template "Explore ...
+    with ... to discover ...", linked to the risks it investigates. Nothing is saved: the tester
+    edits, accepts or drops each one. Usually run as an AI job (kind story_charters), so the
+    drafts are still there after leaving the page."""
+    from app.routers.risks import _latest_model, draft_charters
+    from app.story_risks import same_risk
+    project = _project_or_404(db, project_id)
+    story = db.get(models.Story, payload.story_id)
+    if not story or story.project_id != project_id:
+        raise HTTPException(404, "Story not found in this project")
+    risks = sorted((r for r in story.risks if r.status == "accepted"), key=lambda r: -r.score)
+    if not risks:
+        raise HTTPException(409, "Accept at least one of the story's risks first: charters are planned from them.")
+    snapshot = _latest_model(db, project_id)
+    summary = (f"The story{f' {story.key}' if story.key else ''}: {story.title}\n{story.description or ''}".strip()
+               + (f"\n\nThe product: {snapshot.summary}" if snapshot else ""))
+    have = [c.mission_statement for c in story.charters]
+    db.commit()  # nothing held open while the AI thinks
+    out = await draft_charters(project, risks, product_summary=summary, max_charters=payload.max_charters,
+                               provider_override=payload.provider)
+    drafts = [d for d in out.charters if not any(same_risk(d.mission_statement, m) for m in have)]
+    return {"story_id": story.id, "drafts": [{**d.model_dump(), "status": "suggested"} for d in drafts],
+            "uncovered_risk_refs": out.uncovered_risk_refs, "warnings": out.warnings}
+
+
 @router.post("/stories/{story_id}/risk-suggestions/{risk_id}", response_model=schemas.StoryDetail)
 def decide_risk_suggestion(story_id: str, risk_id: str, payload: schemas.StoryRiskDecision, db: DBSession = Depends(get_db)):
     """A suggested link to a project risk: link it to the story, or drop the suggestion. Remembered on

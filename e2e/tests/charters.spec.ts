@@ -15,15 +15,27 @@ test('charters: suggest from a pull request, keep where it came from, start a se
     await panel.getByLabel('Pull request').fill('42')
     await panel.getByRole('button', { name: 'Import and suggest' }).click()
     await expect(suggestions).toContainText('Suggestions for PR #42: Check passports against the MRZ (mock PR 42)')
-    await expect(suggestions.getByRole('article').first()).toBeVisible()
+    await expect(suggestions.getByRole('listitem').first()).toBeVisible()
   })
 
   await test.step('an accepted suggestion remembers the pull request', async () => {
-    const first = suggestions.getByRole('article').first()
-    const mission = (await first.getByRole('button', { name: 'Accept' }).evaluate((b) => b.closest('article')!.getAttribute('aria-label')))!
+    const first = suggestions.getByRole('listitem').first()
+    const mission = (await first.getAttribute('aria-label'))!
     await first.getByRole('button', { name: 'Accept' }).click()
     const charter = yours.getByRole('listitem', { name: mission })
     await expect(charter.getByRole('link', { name: /from PR #42/ })).toHaveAttribute('href', 'https://mock-github.local/addisverify/charters/pull/42')
+  })
+
+  await test.step('suggestions are still there after leaving the page; one is dropped', async () => {
+    const before = await suggestions.getByRole('listitem').count()
+    await page.getByRole('navigation', { name: 'Project pages' }).getByRole('link', { name: 'Risks' }).click()
+    await page.getByRole('navigation', { name: 'Project pages' }).getByRole('link', { name: 'Charters' }).click()
+    await expect(suggestions).toContainText('Suggestions for PR #42')
+    await expect(suggestions.getByRole('listitem')).toHaveCount(before)
+    await suggestions.getByRole('listitem').first().getByRole('button', { name: 'Drop' }).click()
+    await expect(suggestions.getByRole('listitem')).toHaveCount(before - 1)
+    await page.reload()
+    await expect(suggestions.getByRole('listitem')).toHaveCount(before - 1)
   })
 
   await test.step('pasted text gets a readable name, and earlier imports can be reused', async () => {

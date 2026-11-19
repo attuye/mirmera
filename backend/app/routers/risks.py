@@ -213,12 +213,21 @@ async def charters_from_risks(project_id: str, payload: schemas.ChartersFromRisk
         raise HTTPException(400, "No accepted risks to plan from. Accept at least one risk first.")
 
     snapshot = _latest_model(db, project_id)
-    provider = provider_for(project, "risk_charters", payload.provider)
+    return await draft_charters(project, risks, product_summary=snapshot.summary if snapshot else "(no product model yet)",
+                                max_charters=payload.max_charters, provider_override=payload.provider)
+
+
+async def draft_charters(project: models.Project, risks: list[models.Risk], *, product_summary: str, max_charters: int,
+                         provider_override: str | None = None) -> schemas.ChartersFromRisksOut:
+    """Charter drafts for these accepted risks, in the template "Explore <target> with <resources>
+    to discover <information>", each linked to the risks it investigates. Used by the Risks page
+    and by a story's Suggest charters (with the story as the product summary)."""
+    provider = provider_for(project, "risk_charters", provider_override)
     drafts = await tasks.charters_from_risks(
         provider,
         project_name=project.name,
         testing_mission=project.testing_mission,
-        product_summary=snapshot.summary if snapshot else "(no product model yet)",
+        product_summary=product_summary,
         risks=[
             {
                 "ref": r.ref, "title": r.title, "failure_mode": r.failure_mode,
@@ -227,7 +236,7 @@ async def charters_from_risks(project_id: str, payload: schemas.ChartersFromRisk
             }
             for r in risks
         ],
-        max_charters=payload.max_charters,
+        max_charters=max_charters,
     )
 
     # The model may only reference risks we sent; anything else is dropped.

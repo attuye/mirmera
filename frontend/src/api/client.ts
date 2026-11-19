@@ -858,6 +858,22 @@ export interface AgentActivity {
   } | null
 }
 export type AiJobKind = 'product_model' | 'risk_analysis' | 'charters_from_risks' | 'app_map' | 'story_risks'
+  | 'story_charters' | 'charter_suggestions'
+/** A suggestion kept in a job's result: still offered, accepted (into a charter) or dropped. */
+export type SuggestionStatus = { status: 'suggested' | 'accepted' | 'dropped'; charter_id?: string }
+/** Charter drafts for a story, from its accepted risks (backend: suggest_story_charters). */
+export interface StoryChartersResult {
+  story_id: string
+  drafts: (RiskCharterDraft & SuggestionStatus)[]
+  uncovered_risk_refs: string[]
+  warnings: string[]
+}
+/** Charter suggestions from a change (a spec, a diff…), kept as a job's result. */
+export interface ChangeSuggestionsResult {
+  artifact_ids: string[]
+  source: { id: string; label: string; file_ref: string | null } | null
+  suggestions: (CharterSuggestion & SuggestionStatus)[]
+}
 /** What Suggest risks found for a story (backend/app/story_risks.py). */
 export interface StoryRisksResult {
   story_id: string
@@ -1221,6 +1237,12 @@ export const api = {
     request<Charter>(`/charters/${charterId}/heuristics`, { method: 'PUT', body: JSON.stringify({ keys }) }),
   saveCharter: (projectId: string, charter: CharterInput) =>
     request<Charter>(`/projects/${projectId}/charters`, { method: 'POST', body: JSON.stringify(charter) }),
+  /** Edit a charter no session has used yet (409 once one has). */
+  updateCharter: (charterId: string, change: { mission_statement?: string; rationale?: string; priority?: 'high' | 'medium' | 'low' }) =>
+    request<Charter>(`/charters/${charterId}`, { method: 'PATCH', body: JSON.stringify(change) }),
+  /** A suggestion in a finished job accepted (with the charter made from it) or dropped. */
+  markJobItem: (jobId: string, index: number, status: 'accepted' | 'dropped', charterId?: string) =>
+    request<AiJob>(`/ai-jobs/${jobId}/items`, { method: 'POST', body: JSON.stringify({ index, status, charter_id: charterId ?? null }) }),
 
   startSession: (charter_id: string, tester_id: string) =>
     request<SessionRecord>('/sessions', { method: 'POST', body: JSON.stringify({ charter_id, tester_id }) }),
