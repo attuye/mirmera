@@ -313,7 +313,8 @@ def test_each_answer_is_checked_against_the_story_and_a_broken_rule_becomes_a_bu
     [bug_id] = run["bug_ids"]
     bug = client.get(f"/sessions/{run['session_id']}/bugs").json()[0]
     assert bug["id"] == bug_id and bug["kind"] is None and bug["severity"] == "high"
-    assert bug["title"] == "Expired document is accepted" and "2020-01-01" in bug["actual"]
+    assert bug["title"] == "An expiry date in the past is accepted although AC2 says it is refused"  # Mirmera reads expiry rules itself
+    assert "2020-01-01" in bug["actual"]
     assert "Breaks AC2: An expired document is refused" in bug["description"]
     notes = [n["content"] for n in client.get(f"/sessions/{run['session_id']}/notes").json()]
     assert any(n.startswith("Sent:") and "2020-01-01" in n and "Breaks" in n for n in notes)  # coverage, in the tester's words
@@ -391,15 +392,17 @@ def test_the_ai_reports_facts_and_mirmera_decides_so_a_misreading_drafts_no_bug(
     run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 10}).json())
     judged = [s.get("judged") for s in run["steps"] if s.get("judged")]
     # The first submit already sent an expired date and got "Verified". The AI misread it (note 1), but
-    # AC1 names expired documents, so Mirmera checks that itself and drafts it there, once.
-    assert judged == ["breaks", "unclear", "breaks"]
+    # AC1 names expired documents, so Mirmera checks that itself and drafts it there, once. The form
+    # keeps the expired date, so the later submits break AC1 too (Mirmera's own reading, whatever the
+    # AI quoted); they aren't drafted again.
+    assert judged == ["breaks", "breaks", "breaks"]
     assert run["steps"][1]["status"] == "drafted" and run["steps"][5]["status"] == "ok"  # the same rule: not drafted twice
     [bug] = client.get(f"/sessions/{run['session_id']}/bugs").json()
     assert bug["title"] == "An expiry date in the past is accepted although AC1 says it is refused" and bug["severity"] == "high"
     assert 'Per AC1 ("An expired document is refused' in bug["expected"] and "2020-01-01" in bug["actual"]
     notes = [n["content"] for n in client.get(f"/sessions/{run['session_id']}/notes").json() if n["content"].startswith("Sent:")]
     assert "As AC2 expects." in notes[0]
-    assert "Not judged: the words it quoted aren't in the app's answer." in notes[1]
+    assert "Breaks AC1" in notes[1] and "Mirmera's own check" in notes[1]  # not the AI's misquote
     assert "Breaks AC1" in notes[2]
 
 
@@ -552,3 +555,71 @@ def test_a_file_size_in_a_rule_is_not_a_number_range():
     assert file_cases(rule, photo) == []  # the ordinary photo keeps the rule
     assert [c[4] for c in file_cases(rule, {**photo, "value": "phone-photo.heic"})] == ["a .heic file, not JPG or PNG"]
     assert [c[4] for c in file_cases(rule, {**photo, "value": "tiny.png"})] == []
+
+
+def test_requirements_are_read_whole():
+    """Seen on the practice spec: each requirement was cut at its first line, so AC2 lost
+    "Ge'ez" and AC3 lost what "expired" means."""
+    from app.agent.explore import criteria_from
+    spec = ("# Identity verification (v1.4)\n\n## Requirements\n"
+            "1. Customers can verify with a **National ID, a Passport or a Driver's licence**.\n"
+            "   All three are supported equally.\n"
+            "2. The customer's **full name is entered as written on the document**, in\n"
+            "   Latin or Ge'ez script.\n"
+            "3. **Expired documents must be rejected** (KYC directive). A document is expired if its\n"
+            "   expiry date is before today.\n\n"
+            "## Out of scope for v1.4\n- Selfie and liveness checks; document photo upload.\n\n"
+            "<!-- 1. An old requirement\n- another -->\n")
+    assert criteria_from(spec) == [
+        "Customers can verify with a National ID, a Passport or a Driver's licence. All three are supported equally.",
+        "The customer's full name is entered as written on the document, in Latin or Ge'ez script.",
+        "Expired documents must be rejected (KYC directive). A document is expired if its expiry date is before today.",
+    ]
+    # an "Acceptance criteria" section still wins, and its wrapped bullets are joined too
+    assert criteria_from("Story\n\nAcceptance criteria\n- Expired documents are\n  refused\n- Phone is optional\n\nNotes:\n- x") == [
+        "Expired documents are refused", "Phone is optional"]
+
+
+def test_mirmera_decides_the_rules_it_reads_itself():
+    from datetime import date
+    from app.agent.explore import FormState, own_verdict
+    rules = {"AC2": "The full name is entered as written on the document, in Latin or Ge'ez script.",
+             "AC3": "Expired documents must be rejected. A document is expired if its expiry date is before today.",
+             "AC5": "The customer must accept the terms."}
+    today = date(2026, 11, 19)
+
+    def sent(**values):
+        return FormState(url="http://app/verify", fields=[{"label": k.replace("_", " "), "type": "text", "value": v}
+                                                          for k, v in values.items()])
+    # the AI called a future expiry date "expired": Mirmera's own check says it isn't
+    assert own_verdict("AC3", rules, sent(Expiry_date="2030-01-01"), ["Verified."], "accepted", today)[0] == "consistent"
+    assert own_verdict("AC3", rules, sent(Expiry_date="2026-11-19"), ["Verified."], "accepted", today)[0] == "consistent"  # today isn't before today
+    assert own_verdict("AC3", rules, sent(Expiry_date="2020-01-01"), ["Verified."], "accepted", today)[0] == "breaks"
+    assert own_verdict("AC2", rules, sent(Full_name="አበበ ከበደ"), ["Name must use letters only."], "refused", today)[0] == "breaks"
+    assert own_verdict("AC5", rules, sent(Expiry_date="2020-01-01"), ["Verified."], "accepted", today) is None  # not one it reads
+
+
+def test_a_wrong_ai_verdict_neither_drafts_a_bug_nor_hides_the_real_one(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """Seen with qwen3:8b on the practice app: a valid, future expiry date was judged "expired"
+    and drafted; the rule was then reported, so the real one (2020-01-01, "Verified") was skipped."""
+    project, charter = kyc
+    story_for(client, project, charter, ["Expired documents must be rejected. A document is expired if its expiry "
+                                          "date is before today."])
+    wrong = {"answer_means": "accepted", "answer_quote": "Verified", "rule": "AC1", "rule_expects": "refuse",
+             "because": "the expiry date is in the future", "title": "Accepted although expiry date is in the future"}
+    provider = Reading([
+        step("Valid first", kind="fill", locator=EXPIRY, value="2030-01-01"),
+        step("Submit", kind="click", locator=VERIFY),
+        step("Expired", kind="fill", locator=EXPIRY, value="2020-01-01"),
+        step("Submit", kind="click", locator=VERIFY),
+        step("Covered", kind="done", summary="Tried a future and a past date."),
+    ], facts=[wrong, {**wrong, "rule_expects": "accept", "because": "looks fine"}])  # wrong both times
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 8}).json())
+    steps = run["steps"]
+    assert (steps[1]["judged"], steps[1]["status"]) == ("consistent", "ok")
+    assert steps[1]["judged_why"].startswith("Mirmera's own check")
+    assert (steps[3]["judged"], steps[3]["status"]) == ("breaks", "drafted")
+    [bug] = client.get(f"/sessions/{run['session_id']}/bugs").json()
+    assert bug["title"] == "An expiry date in the past is accepted although AC1 says it is refused"
+    assert "2020-01-01" in bug["actual"]
