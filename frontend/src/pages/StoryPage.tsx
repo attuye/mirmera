@@ -308,6 +308,7 @@ export default function StoryPage() {
                     onSave={async (m) => { await api.updateCharter(c.id, { mission_statement: m }); setStory(await api.getStory(story.id)) }} />
                   <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 4, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                     <span className="mono" style={{ fontSize: 9.5, color: c.status === 'active' ? 'var(--accent)' : 'var(--text-tertiary)' }}>{c.status.toUpperCase()}</span>
+                    {c.source === 'follow-up' && <span title={c.rationale ?? undefined} style={{ color: 'var(--info)' }}>follow-up from Mirmera</span>}
                     {c.risk_refs.length > 0 && <span>investigates {c.risk_refs.join(', ')}</span>}
                     <span>{c.sessions ? `${c.sessions} session${c.sessions === 1 ? '' : 's'}, ${timeText(c.minutes)}` : 'not explored yet'}</span>
                     {c.bugs > 0 && <span>{c.bugs} bug{c.bugs === 1 ? '' : 's'}</span>}

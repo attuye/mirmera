@@ -130,6 +130,7 @@ def detail(db: DBSession, story: models.Story) -> dict:
     } for r in sorted(story.risks, key=lambda r: (r.status == "retired", -r.score))]
     charters = [{
         "id": c.id, "mission_statement": c.mission_statement, "status": c.status, "priority": c.priority,
+        "source": c.source, "rationale": c.rationale,  # a follow-up says why it was suggested
         "risk_refs": [r.ref for r in c.risks], "sessions": len(c.sessions),
         "minutes": round(sum(tested_seconds(s, now) for s in c.sessions) / 60),
         "bugs": len([b for s in c.sessions for b in s.bugs if b.kind != "question"]),

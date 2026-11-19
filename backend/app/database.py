@@ -63,6 +63,7 @@ def add_missing_columns(bind=None) -> list[str]:
                 conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {column_type}{_default_sql(column)}'))
                 added.append(f"{table.name}.{column.name}")
     fill_missing_flags(bind)
+    remove_orphans(bind)
     return added
 
 
@@ -81,6 +82,36 @@ def _default_sql(column) -> str:
     if isinstance(v, str):
         return " DEFAULT '" + v.replace("'", "''") + "'"
     return ""
+
+
+ORPHANS = (("exploration_runs", "session_id", "sessions"), ("comparisons", "session_id", "sessions"))
+
+
+def remove_orphans(bind=None) -> list[str]:
+    """What an older Mirmera left behind when a session was deleted: its agent runs and comparisons,
+    and its charter still marked active. Safe on every start: once repaired, nothing matches."""
+    bind = bind or engine
+    removed: list[str] = []
+    with bind.begin() as conn:
+        inspector = inspect(conn)
+        for table, column, parent in ORPHANS:
+            if not (inspector.has_table(table) and inspector.has_table(parent)):
+                continue
+            r = conn.execute(text(f'DELETE FROM "{table}" WHERE "{column}" IS NOT NULL '
+                                  f'AND "{column}" NOT IN (SELECT id FROM "{parent}")'))
+            if r.rowcount:
+                removed.append(f"{table}: {r.rowcount}")
+        if inspector.has_table("charters") and inspector.has_table("sessions"):
+            # A charter a deleted session left "active" (none open now: done if one has ended, else
+            # proposed), or "done" with no sessions left at all (proposed: explore it again).
+            r = conn.execute(text(
+                "UPDATE charters SET status = CASE WHEN EXISTS (SELECT 1 FROM sessions s WHERE s.charter_id = charters.id) "
+                "THEN 'done' ELSE 'proposed' END WHERE "
+                "(status = 'active' AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.charter_id = charters.id AND s.ended_at IS NULL)) "
+                "OR (status = 'done' AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.charter_id = charters.id))"))
+            if r.rowcount:
+                removed.append(f"charters whose sessions were deleted: {r.rowcount}")
+    return removed
 
 
 def fill_missing_flags(bind=None) -> list[str]:

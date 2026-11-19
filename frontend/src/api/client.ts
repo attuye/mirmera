@@ -957,7 +957,7 @@ export interface StoryDetail extends StorySummary {
   description: string | null
   artifact_id: string | null
   risk_list: { id: string; ref: string; title: string; failure_mode: string; score: number; status: Risk['status']; quality_criterion: string; charters: number; other_stories: StoryRef[] }[]
-  charter_list: { id: string; mission_statement: string; status: Charter['status']; priority: Charter['priority']; risk_refs: string[]; sessions: number; minutes: number; bugs: number }[]
+  charter_list: { id: string; mission_statement: string; status: Charter['status']; priority: Charter['priority']; source: string; rationale: string | null; risk_refs: string[]; sessions: number; minutes: number; bugs: number }[]
   session_list: { id: string; charter_id: string; mission_statement: string; tester: string; started_at: string; ended_at: string | null; minutes: number; bugs: number; debrief: boolean; paused?: boolean }[]
   bug_list: { id: string; title: string; kind: 'bug' | 'question' | null; severity: 'high' | 'medium' | 'low'; session_id: string; issue_key: string | null; issue_url: string | null }[]
   pages: { page: string; sessions: number; actions: number }[]

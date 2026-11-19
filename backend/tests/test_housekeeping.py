@@ -96,6 +96,68 @@ def test_a_session_with_its_browser_open_cannot_be_deleted(client, session, monk
     assert r.status_code == 409 and "Stop it first" in r.json()["detail"]
 
 
+def test_deleting_a_session_takes_its_agent_runs_and_comparisons(client, project, charter):
+    """Seen on a laptop: a session deleted from its debrief left its exploration run, so the
+    charter's "Open the session" led to a session that was gone (a blank page)."""
+    s = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+    add(models.ExplorationRun(project_id=project["id"], charter_id=charter["id"], session_id=s["id"], status="finished",
+                              start_url="http://x/"),
+        models.Comparison(session_id=s["id"], env_a={"name": "a", "url": "http://a"}, env_b={"name": "b", "url": "http://b"}))
+    assert client.get(f"/charters/{charter['id']}/exploration").json()["session_id"] == s["id"]
+    deleted = client.delete(f"/sessions/{s['id']}").json()["deleted"]
+    assert (deleted["exploration_runs"], deleted["comparisons"]) == (1, 1)
+    assert client.get(f"/charters/{charter['id']}/exploration").json() is None  # "Let Mirmera explore" again
+    assert count(models.ExplorationRun) == count(models.Comparison) == 0
+
+
+def test_a_charter_follows_its_sessions_when_one_is_deleted(client, charter):
+    """Seen on the Dashboard: the charter stayed ACTIVE after its only session was deleted, and
+    clicking it said "No active session for this charter"."""
+    first = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+    assert client.get(f"/charters/{charter['id']}").json()["status"] == "active"
+    client.delete(f"/sessions/{first['id']}")
+    assert client.get(f"/charters/{charter['id']}").json()["status"] == "proposed"  # explore it again
+
+    ended = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+    client.post(f"/sessions/{ended['id']}/end", json={})
+    other = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+    client.delete(f"/sessions/{other['id']}")
+    assert client.get(f"/charters/{charter['id']}").json()["status"] == "done"  # its ended session is still there
+
+
+def test_a_session_mirmera_is_exploring_in_cannot_be_deleted(client, project, charter, monkeypatch):
+    from app.agent import explore
+    s = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+    add(models.ExplorationRun(id="run-1", project_id=project["id"], charter_id=charter["id"], session_id=s["id"],
+                              status="running", start_url="http://x/"))
+    monkeypatch.setattr(explore, "ACTIVE", {"run-1"})
+    r = client.delete(f"/sessions/{s['id']}")
+    assert r.status_code == 409 and r.json()["detail"].startswith("Mirmera is exploring in this session")
+
+
+def test_leftovers_from_an_older_mirmera_are_removed_on_start(client, project, charter):
+    """A database where a session was deleted before this fix: its run still points at it."""
+    from app.database import engine, remove_orphans
+    s = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+    kept = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+    add(models.ExplorationRun(project_id=project["id"], charter_id=charter["id"], session_id=s["id"], start_url="http://x/"),
+        models.ExplorationRun(project_id=project["id"], charter_id=charter["id"], session_id=kept["id"], start_url="http://x/"))
+    with engine.begin() as conn:  # the old delete: the session went, its run stayed
+        for table in ("notes", "sessions"):
+            conn.exec_driver_sql(f"DELETE FROM {table} WHERE {'session_id' if table == 'notes' else 'id'} = ?", (s["id"],))
+    with engine.begin() as conn:  # and its charter stayed active, as it did on that laptop
+        conn.exec_driver_sql("DELETE FROM sessions WHERE id = ?", (kept["id"],))
+        conn.exec_driver_sql("UPDATE charters SET status = 'active' WHERE id = ?", (charter["id"],))
+    assert remove_orphans(engine) == ["exploration_runs: 2", "charters whose sessions were deleted: 1"]
+    assert client.get(f"/charters/{charter['id']}").json()["status"] == "proposed"
+    # ended, then deleted: "done" with no sessions left (as on that laptop) becomes proposed too
+    with engine.begin() as conn:
+        conn.exec_driver_sql("UPDATE charters SET status = 'done' WHERE id = ?", (charter["id"],))
+    assert remove_orphans(engine) == ["charters whose sessions were deleted: 1"]
+    assert client.get(f"/charters/{charter['id']}").json()["status"] == "proposed"
+    assert remove_orphans(engine) == []  # nothing left to do
+
+
 def test_a_bug_the_agent_is_working_on_cannot_be_deleted(client, session, monkeypatch):
     bug = client.post(f"/sessions/{session['id']}/bugs", json={"title": "Busy"}).json()
     run = models.ReproductionRun(id="busy-run", bug_id=bug["id"], status="running", base_url="http://x", start_url="http://x/", max_steps=5, runs=1)
@@ -144,3 +206,12 @@ def test_archiving_hides_nothing_on_the_server_and_can_be_undone(client, project
     assert listed["archived_at"] and listed["charter_count"] == 1  # the page decides what to show
     assert client.get(f"/projects/{project['id']}/charters").json()[0]["id"] == charter["id"]  # still usable
     assert client.post(f"/projects/{project['id']}/unarchive").json()["archived_at"] is None
+
+
+def test_a_done_charter_with_sessions_is_left_alone_on_start(client, charter):
+    from app.database import engine, remove_orphans
+    s = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "attu"}).json()
+    client.post(f"/sessions/{s['id']}/end", json={})
+    assert client.get(f"/charters/{charter['id']}").json()["status"] == "done"
+    assert remove_orphans(engine) == []
+    assert client.get(f"/charters/{charter['id']}").json()["status"] == "done"
