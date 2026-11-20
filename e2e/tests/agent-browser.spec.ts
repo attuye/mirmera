@@ -1,4 +1,5 @@
 import { API_URL, expect, test } from './fixtures'
+import { readFileSync } from 'fs'
 
 const EXPOSE = { 'Access-Control-Expose-Headers': 'X-Frame-Seq, X-Frame-Url' }  // as the backend sends them
 
@@ -42,6 +43,19 @@ test("Mirmera's browser: replay each step, and watch it live", async ({ page, ap
     await view.getByRole('button', { name: 'Speed' }).click()
     await expect(view.getByRole('button', { name: 'Speed' })).toHaveText('2×')
     await expect.poll(() => film.evaluate((v: HTMLVideoElement) => v.playbackRate)).toBe(2)
+  })
+
+  await test.step('its network log downloads as a HAR, with every request the browser made', async () => {
+    expect(run.har).toMatch(/^network-.*\.har$/)
+    const view = page.getByRole('region', { name: "Mirmera's browser" })
+    const link = view.getByRole('link', { name: 'Network log (HAR)' })
+    await expect(link).toBeVisible()
+    const [download] = await Promise.all([page.waitForEvent('download'), link.click()])
+    expect(download.suggestedFilename()).toMatch(/^mirmera-.*\.har$/)
+    const har = JSON.parse(readFileSync(await download.path(), 'utf-8'))
+    expect(har.log.creator.name).toBe('Mirmera')
+    expect(har.log.entries.some((e: { request: { url: string } }) => e.request.url.startsWith('http://localhost:5190'))).toBeTruthy()
+    if (process.env.SHOTS) await view.screenshot({ path: `${process.env.SHOTS}/network-log.png` })
   })
 
   await test.step('a run without a recording plays its step pictures one after another', async () => {

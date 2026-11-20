@@ -382,6 +382,7 @@ export const explorationLiveUrl = (runId: string, after: number) => `${BASE_URL}
 export const explorationStepFrameUrl = (runId: string, n: number) => `${BASE_URL}/exploration-runs/${runId}/steps/${n}/frame`
 /** The run's recording (WebM), played like a video. */
 export const explorationVideoUrl = (runId: string) => `${BASE_URL}/exploration-runs/${runId}/video`
+export const explorationHarUrl = (runId: string) => `${BASE_URL}/exploration-runs/${runId}/har`
 
 export type Reproducibility = 'always' | 'intermittent' | 'once' | 'unknown'
 
@@ -841,6 +842,7 @@ export interface ExplorationRun {
   bug_ids: string[]; summary: string | null; detail: string | null; started_by: string | null
   ai_provider: string | null; ai_model: string | null; created_at: string; finished_at: string | null
   video?: string | null
+  har?: string | null  // its network log, cleaned of secrets: explorationHarUrl
   /** What a tester (or Mirmera) asked it to try next; step = the step that took it up. */
   hints?: { id: string; text: string; by: string; at: string; step: number | null }[]
   conditions?: ExploreConditions | null

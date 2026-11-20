@@ -1535,6 +1535,7 @@ class ExplorationRunOut(BaseModel):
     ai_provider: Optional[str] = None
     ai_model: Optional[str] = None
     video: Optional[str] = None  # set when its recording was kept: GET /exploration-runs/{id}/video
+    har: Optional[str] = None  # set when its network log was kept: GET /exploration-runs/{id}/har
     hints: list[dict] = []  # what a tester (or Mirmera) asked it to try next, and the step that took it up
     conditions: Optional[dict] = None  # device, network, locale, timezone it browsed with
     created_at: datetime

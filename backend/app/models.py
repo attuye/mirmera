@@ -784,6 +784,7 @@ class ExplorationRun(Base):
     started_by = Column(String, nullable=True)  # a user's name, or "Jira KYC-12"
     cancel_requested = Column(Boolean, default=False)
     video = Column(String, nullable=True)  # its browser's recording (WebM), in the session's folder
+    har = Column(String, nullable=True)  # its network log (HAR, secrets taken out), in the session's folder
     conditions = Column(JSON, nullable=True)  # {"device": "phone", "network": "slow", "locale", "timezone"}: how it browsed
     hints = Column(JSON, nullable=True)  # [{"id", "text", "by", "at", "step"}]: what a tester (or Mirmera) asked it to try next
     journey = Column(JSON, nullable=True)  # its steps as a replay does them ({"type": "goto" | "action", ...}): to compare environments

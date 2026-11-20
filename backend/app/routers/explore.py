@@ -197,6 +197,17 @@ def video(run_id: str, request: Request, db: DBSession = Depends(get_db)):
         "Content-Range": f"bytes {start}-{end}/{size}", "Accept-Ranges": "bytes", "Content-Length": str(len(chunk))})
 
 
+@router.get("/exploration-runs/{run_id}/har")
+def network_log(run_id: str, db: DBSession = Depends(get_db)):
+    """The run's network log as a HAR file (cookies, authorization, passwords, tokens and pictures taken out)."""
+    run = _run_or_404(db, run_id)
+    folder = runner_api.session_folder(run.session_id) if run.session_id else None
+    path = (folder / run.har).resolve() if folder and run.har else None
+    if not path or not path.is_relative_to(runner_api.evidence_root()) or not path.is_file():
+        raise HTTPException(404, "No network log for this run")
+    return FileResponse(path, media_type="application/json", filename=f"mirmera-{run_id[:8]}.har")
+
+
 @router.post("/exploration-runs/{run_id}/hints", response_model=schemas.ExplorationRunOut)
 def hint(run_id: str, payload: schemas.ExploreHint, user: models.User = Depends(current_user), db: DBSession = Depends(get_db)):
     """Pair with the agent: it reads the hint before its next step and tries it."""

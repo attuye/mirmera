@@ -842,3 +842,25 @@ def test_a_server_error_comes_with_a_curl_command(client, kyc, monkeypatch, chro
     cmd = bug["description"].split("```\n")[1].split("\n```")[0]
     assert cmd.startswith("curl -X POST ") and "/api/verify" in cmd.splitlines()[0]
     assert "Passport" in cmd and "--data-raw" in cmd
+
+
+def test_the_run_keeps_its_network_log_without_secrets(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """Every request the browser made, as a HAR to download: the Passport 500 is in it; the password isn't."""
+    project, charter = kyc
+    monkeypatch.setenv("MIRMERA_SECRET_KYC_PASSWORD", "hunter2-not-in-the-log")
+    scripted(monkeypatch, [
+        step("The password", kind="fill_secret", locator={"method": "label", "value": "Password"}, secret="MIRMERA_SECRET_KYC_PASSWORD"),
+        step("A passport", kind="try", values={"Document type": "Passport"}),
+        step("Done", kind="done", summary="A passport.")])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 5}).json())
+    assert run["har"] == f"network-{run['id'][:8]}.har"
+    folder = runner_api.session_folder(run["session_id"])
+    assert not list(folder.glob("*.raw.har"))  # the uncleaned log is never left behind
+    r = client.get(f"/exploration-runs/{run['id']}/har")
+    assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
+    assert ".har" in r.headers["content-disposition"]
+    har = r.json()
+    verify = [e for e in har["log"]["entries"] if "/api/verify" in e["request"]["url"]]
+    assert verify and verify[-1]["request"]["method"] == "POST" and verify[-1]["response"]["status"] == 500
+    assert "hunter2-not-in-the-log" not in r.text
+    assert client.get("/exploration-runs/nope/har").status_code == 404

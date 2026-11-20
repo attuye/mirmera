@@ -16,6 +16,7 @@ before a draft is made, and it has a step budget, a time limit and can be cancel
 """
 import json
 import logging
+import os
 import re
 import time
 from contextvars import ContextVar
@@ -173,12 +174,38 @@ async def _start_screencast(page, live: Live, viewport: dict = VIEWPORT, slow: b
 async def _recording_context(browser, folder: Path, run_id: str, options: dict | None = None):
     """A browser context that films itself (a WebM video, written when the context closes)."""
     options = options or {"viewport": VIEWPORT}
+    har = {"record_har_path": str(_raw_har(folder, run_id)), "record_har_content": "embed"}  # cleaned when kept
     try:
-        return await browser.new_context(**options, record_video_dir=str(folder / f"video-{run_id[:8]}"),
+        return await browser.new_context(**options, **har, record_video_dir=str(folder / f"video-{run_id[:8]}"),
                                          record_video_size=options["viewport"])
     except Exception as err:  # e.g. Playwright's ffmpeg isn't installed: explore without a recording
         logger.info("No recording for this run: %s", _first_line(err))
-        return await browser.new_context(**options)
+        try:
+            return await browser.new_context(**options, **har)
+        except Exception:
+            return await browser.new_context(**options)
+
+
+def _raw_har(folder: Path, run_id: str) -> Path:
+    return folder / f"network-{run_id[:8]}.raw.har"
+
+
+def _keep_network(folder: Path, run_id: str, secrets: list[str]) -> str | None:
+    """Playwright's network log (written when the context closed), kept with cookies, authorization,
+    passwords, tokens and pictures taken out; the raw one is deleted. None when there is none."""
+    from app.har import clean_har_file
+    raw = _raw_har(folder, run_id)
+    if not raw.is_file():
+        return None
+    name = f"network-{run_id[:8]}.har"
+    try:
+        clean_har_file(raw, folder / name, secrets)
+        return name
+    except Exception as err:
+        logger.info("The run's network log could not be kept: %s", _first_line(err))
+        return None
+    finally:
+        raw.unlink(missing_ok=True)  # never leave the uncleaned log behind
 
 
 async def _keep_recording(context, folder: Path, run_id: str) -> str | None:
@@ -1917,6 +1944,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
     run_timeout = max(RUN_TIMEOUT_S, max_steps * STEP_TIME_S)
     final: dict = {}
     video: str | None = None  # the run's recording, kept in the session's folder
+    har: str | None = None  # its network log (HAR), cleaned of secrets, in the same folder
 
     def now() -> datetime:
         return utcnow()
@@ -2533,6 +2561,11 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         ideas_seen.update(done=done, total=total, left=left)
             finally:
                 video = await _keep_recording(context, folder, run_id)
+                try:
+                    known = secrets_of(sign_in_cfg) + [v for k, v in os.environ.items() if k.startswith("MIRMERA_SECRET_") and v]
+                except Exception:
+                    known = []
+                har = _keep_network(folder, run_id, known)
                 await browser.close()
             if ACCESS_CHECK and sign_in_cfg and final.get("status") not in ("cancelled", "error"):
                 # Who sees what: the user's own pages opened signed out and as the second user. (No AI.)
@@ -2620,7 +2653,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     test_data.after_run(ctx.project_id, visited_forms=bool(last_fields))
                 except Exception:
                     logger.exception("Test data: couldn't record which rows met their fields")
-            _save(run_id, steps=list(history), bug_ids=list(bug_ids), finished_at=utcnow(), video=video,
+            _save(run_id, steps=list(history), bug_ids=list(bug_ids), finished_at=utcnow(), video=video, har=har,
                   journey=list(steps)[:60], **final)
         finally:
             ACTIVE.discard(run_id)
