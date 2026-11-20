@@ -748,11 +748,43 @@ def _type_ideas(f: dict, today) -> list[tuple[str, str]]:
     if "name" in label:
         return [("Ge'ez script", GEEZ_NAME), ("apostrophe and hyphen", "O'Brien-Smith"), ("one letter", "A"),
                 ("very long", "@long300"), ("spaces around", "  John Smith  "), ("an emoji", "John 😀 Smith")]
-    return [("empty", ""), ("only spaces", "   "), ("very long", "@long300"), ("markup", "<b>bold</b>"),
+    return [("empty", ""), ("only spaces", "   "), ("very long, a counterstring", "@count300"), ("markup", "<b>bold</b>"),
             ("quotes", "It's \"quoted\"")]
 
 
 LONG = re.compile(r"@long(\d{1,5})")
+COUNT = re.compile(r"@count(\d{1,5})")
+
+
+def counterstring(n: int, mark: str = "*") -> str:
+    """James Bach's counterstring (PerlClip): "*3*5*7*9*12*15*…", where each number says the position
+    of the * after it. Cut anywhere, the text says how long it still is: "…*47*49*" was kept to 50."""
+    parts, pos = [], n
+    while pos > 0:
+        piece = f"{pos}{mark}"
+        piece = piece[-pos:] if len(piece) > pos else piece
+        parts.append(piece)
+        pos -= len(piece)
+    return "".join(reversed(parts))
+
+
+def counter_cut(sent: str, kept: str | None, page_text: str) -> list[str]:
+    """What a counterstring shows after a step, without AI: the field kept fewer characters than were
+    sent, or the page shows it back cut short. Plain sentences for the notes; none when it's whole."""
+    out = []
+    if kept is not None and kept != sent and sent.startswith(kept):
+        out.append(f"took {len(kept)} of {len(sent)} characters")
+    whole = kept if kept and sent.startswith(kept) else sent
+    lo, hi = 0, len(whole)  # the longest start of it the page shows (a shorter start is shown whenever a longer one is)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if whole[:mid] in page_text:
+            lo = mid
+        else:
+            hi = mid - 1
+    if 12 <= lo < len(whole):
+        out.append(f"is shown cut at {lo} characters")
+    return out
 
 
 def expand(value: str | None, f: dict | None = None) -> str:
@@ -763,6 +795,8 @@ def expand(value: str | None, f: dict | None = None) -> str:
     if value and "{" in value:
         from app import test_data
         value = test_data.resolve(value)  # {data:…} typed into the browser only; {email}, {unique}… made fresh
+    if value and "@count" in value:
+        value = COUNT.sub(lambda m: counterstring(min(int(m.group(1)), 20_000)), value)
     if not value or "@long" not in value:
         return value or ""
     name = f is not None and "name" in f["label"].lower()
@@ -789,7 +823,8 @@ def ideas_text(fields: list[dict], tried: dict[str, set[str]], today, limit_fiel
         if left:
             lines.append(f'- {f["label"]}: ' + "; ".join(f'{w} ("{v[:40]}")' for w, v in left[:3]))
     head = (f"Test ideas not tried yet ({done} of {total} tried), each with the rest of the form valid "
-            '("@long300" stands for 300 characters: send it as written, Mirmera types them):')
+            '("@long300" stands for 300 characters and "@count300" for a 300-character counterstring: send them as '
+            'written, Mirmera types them):')
     return (head + "\n" + "\n".join(lines)) if lines else "", done, total
 
 
@@ -1037,22 +1072,28 @@ def kept_values(before: FormState) -> list[str]:
             if f["type"] in ("text", "email", "tel", "number", "search", "textarea") and len(f["value"]) >= 4][:4]
 
 
-def crashes(failed: list[str], page_errors: list[str]) -> list[schemas.ExploreProblem]:
+def crashes(failed: list[str], page_errors: list[str], requests: list[dict] | None = None,
+            secrets: list[str] | None = None) -> list[schemas.ExploreProblem]:
     """Bug drafts for what broke during a step: a server error (5xx) or an uncaught error in
-    the page. Wrong whatever the rules say, so no AI is asked."""
+    the page. Wrong whatever the rules say, so no AI is asked. With the requests' details, a
+    server error comes with the curl command that sends it again."""
     from urllib.parse import urlsplit
+    from app.curl import curl_of
     out = []
     for f in failed:
         m = re.match(r"(\w+) (\S+) -> (5\d\d)$", f)
         if m:
             method, url, status = m.groups()
             path = urlsplit(url).path or "/"
+            req = next((r for r in reversed(requests or []) if r["method"] == method and r["url"] == url
+                        and str(r["status"]) == status), None)
             out.append(schemas.ExploreProblem(
                 title=f"{method} {path} fails with {status}", severity="high",
                 expected="The app handles the request and answers it (accepted or refused with a reason); a server error is never the answer.",
                 actual=f"{method} {path} answered {status}.",
                 symptom=schemas.Symptom(kind="failed_request", value=path,
-                                        explanation="A server error, seen by Mirmera in the browser's network log.")))
+                                        explanation="A server error, seen by Mirmera in the browser's network log."),
+                reproduce=curl_of(method, url, req["headers"], req["body"], secrets) if req else None))
     for e in page_errors:
         first = e.strip().splitlines()[0][:150] if e.strip() else "error"
         out.append(schemas.ExploreProblem(
@@ -1487,7 +1528,9 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
         bug = models.Bug(
             session_id=session_id, charter_id=charter_id, title=p.title[:200], severity=p.severity,
             description=(f"{p.actual}\n\nExpected: {p.expected}\n\nWhat Mirmera checked: {evidence}\n\n"
-                         f"Found by the Mirmera exploration agent ({provider.name}/{provider.model}). "
+                         + (f"Reproduce without the UI (the request as the browser sent it; use your own session):\n"
+                            f"```\n{p.reproduce}\n```\n\n" if p.reproduce else "")
+                         + f"Found by the Mirmera exploration agent ({provider.name}/{provider.model}). "
                          "A draft: review it before filing." + before),
             expected=p.expected, actual=p.actual,
             steps_to_reproduce=([clock_line()] if CLOCK_AT.get() else []) + ([first_step(p.fault)] if p.fault else []) + [s["action"]["summary"] if s["type"] == "action"
@@ -1537,7 +1580,7 @@ async def flow_tour(page, context, signals, form_url: str, answer_url: str, sent
 
     async def check(pg, sigs, f0: int, e0: int, how: str, rec: list[dict]) -> None:
         nonlocal found
-        for c in crashes(sigs.failed[f0:], sigs.page_errors[e0:]):
+        for c in crashes(sigs.failed[f0:], sigs.page_errors[e0:], sigs.failed_requests):
             c.actual = f"{how}: {c.actual}"[:600]
             if await keep(c, (c.symptom.kind, c.symptom.value), (pg, sigs, rec)):
                 found += 1
@@ -2145,7 +2188,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         await _back_into_app(page, entry["url"], signals)
                         entry["detail"] = (entry["detail"] + "; " if entry["detail"] else "") + \
                             f"that left the app ({origin(left)}), so the browser went back"
-                    broke = crashes(signals.failed[failed_before:], signals.page_errors[page_errors_before:])
+                    broke = crashes(signals.failed[failed_before:], signals.page_errors[page_errors_before:],
+                                    signals.failed_requests, secrets_of(sign_in_cfg))
                     said: list[str] = []  # what the app answered this step
                     after = FormState()
                     toggled = False
@@ -2423,6 +2467,20 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                     await keep(prob, ("layout", url_path, prob.symptom.value),
                                                f". Seen at 390 px wide ({'the run itself is on a phone' if (conditions or {}).get('device') == 'phone' else 'Mirmera narrowed the browser for a moment'}).")
                     # Slow answers: a tester notices waiting.
+                    if a.kind == "try" and entry["status"] in ("ok", "drafted") and not page.is_closed():
+                        for name, code in (a.values or {}).items():  # a counterstring says where text was cut
+                            if "@count" not in (code or ""):
+                                continue
+                            f = find_field(before, name)
+                            try:
+                                text = await page.locator("body").inner_text(timeout=3_000)
+                            except Exception:
+                                text = ""
+                            label = f["label"] if f else name
+                            for found in counter_cut(expand(code, f), f["value"] if f else None, text):
+                                entry["detail"] = (entry["detail"] + "; " if entry["detail"] else "") + f"{label} {found}"
+                                _note(session_id, "test", f"Counterstring: {label} {found} (each number in it is the "
+                                                          "position of the * after it).")
                     if a.kind == "try" and entry["status"] in ("ok", "drafted"):  # a test: on the charter or beyond it
                         if beyond_charter(changed, ctx.focus):
                             if not charter_steps["beyond"]:

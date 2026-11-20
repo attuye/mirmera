@@ -147,6 +147,7 @@ class Signals:
         self.console_errors: list[str] = []
         self.page_errors: list[str] = []
         self.failed: list[str] = []
+        self.failed_requests: list[dict] = []  # each failed answer's request (method, url, status, headers, body): "copy as curl"
         self.in_flight = 0  # requests sent and not yet answered
         self.requested: list[str] = []  # every request URL, to check a test reaches the bug
 
@@ -157,9 +158,18 @@ class Signals:
         page.on("console", lambda m: m.type == "error" and not m.text.startswith("Failed to load resource")
                 and self.console_errors.append(m.text))
         page.on("pageerror", lambda e: self.page_errors.append(str(e)))
-        page.on("response", lambda r: r.status >= 400 and self.failed.append(f"{r.request.method} {r.url} -> {r.status}"))
+        page.on("response", lambda r: r.status >= 400 and self._failed(r))
         page.on("requestfailed", lambda r: "ERR_ABORTED" not in (r.failure or "")
                 and self.failed.append(f"{r.method} {r.url} -> {r.failure}"))
+
+    def _failed(self, r) -> None:
+        self.failed.append(f"{r.request.method} {r.url} -> {r.status}")
+        try:
+            headers, body = dict(r.request.headers), r.request.post_data
+        except Exception:  # a body that isn't text
+            headers, body = {}, None
+        self.failed_requests.append({"method": r.request.method, "url": r.url, "status": r.status,
+                                     "headers": headers, "body": body})
 
     def _count(self, change: int) -> None:
         self.in_flight = max(0, self.in_flight + change)

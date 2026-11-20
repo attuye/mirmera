@@ -117,3 +117,25 @@ test('a bug the agent met again shows where, and how often it shows from its ste
   if (process.env.SHOTS) await bug.screenshot({ path: `${process.env.SHOTS}/seen-again.png` })
   await page.unrouteAll({ behavior: 'ignoreErrors' })  // a list refresh still in flight must not fail the test
 })
+
+test('bugs: a curl command in a report is shown as code, with Copy', async ({ page, api, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const project = await api.project()
+  const session = await api.session((await api.charter(project.id, 'Explore document types to discover which fail')).id)
+  const bug = await api.bug(session.id, 'POST /api/verify fails with 500')
+  const curl = "curl -X POST http://localhost:4100/api/verify \\\n  -H 'content-type: application/json' \\\n  --data-raw '{\"documentType\": \"Passport\"}'"
+  await api.reviewBug(bug.id, {
+    kind: 'bug', expected: 'The app answers', actual: 'POST /api/verify answered 500.',
+    description: `POST /api/verify answered 500.\n\nReproduce without the UI (the request as the browser sent it; use your own session):\n\`\`\`\n${curl}\n\`\`\`\n\nFound by the Mirmera exploration agent.`,
+    oracle_heuristic: 'purpose', oracle_explanation: 'A server error is never the answer',
+  })
+  await page.goto(`/projects/${project.id}/bugs`)
+  const row = page.getByRole('article', { name: 'POST /api/verify fails with 500' })
+  await row.getByRole('button', { name: /POST \/api\/verify fails/ }).first().click()
+  const command = row.getByLabel('Command')
+  await expect(command).toHaveText(curl)
+  await row.getByRole('button', { name: 'Copy' }).click()
+  await expect(row.getByRole('button', { name: 'Copied' })).toBeVisible()
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(curl)
+  await page.screenshot({ path: 'test-results/curl-in-report.png' })
+})

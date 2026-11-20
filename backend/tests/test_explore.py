@@ -772,3 +772,73 @@ def test_valid_data_is_sent_again_only_after_something_failed(client, kyc, monke
     assert [st for _, st in tries] == ["ok", "ok", "refused", "drafted", "ok", "refused"]
     refused = next(s for s in run["steps"] if s["status"] == "refused")
     assert refused["detail"].startswith("not run: you sent the form with valid data at step 1 on this page, and nothing has failed since")
+
+
+PROFILE = b"""<!doctype html><html><body><h1>Profile</h1>
+<form id="f"><label>Nickname <input name="nick" maxlength="50"></label>
+<label>Bio <textarea name="bio"></textarea></label><button>Save</button></form><p id="out"></p>
+<script>document.getElementById('f').onsubmit = (e) => { e.preventDefault()
+  const f = e.target; document.getElementById('out').textContent = 'Saved. Bio: ' + f.bio.value.slice(0, 80) }</script>
+</body></html>"""
+
+
+@pytest.fixture
+def profile_app():
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class App(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(PROFILE)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+def test_a_counterstring_says_where_text_was_cut(client, project, profile_app, monkeypatch, chromium_available):  # noqa: F811
+    """James Bach's counterstring: a field that keeps 50 characters, and a saved text shown cut at 80,
+    each said with the exact number, without AI."""
+    client.patch(f"/projects/{project['id']}", json={"app_url": profile_app})
+    charter = client.post(f"/projects/{project['id']}/charters", json={"mission_statement": "Explore the profile with long text to discover where it is cut"}).json()
+    scripted(monkeypatch, [step("Nickname", kind="try", values={"Nickname": "@count300"}),
+                           step("Bio", kind="try", values={"Bio": "@count300"}),
+                           step("Done", kind="done", summary="Both fields.")])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 5}).json())
+    tries = [s for s in run["steps"] if s["kind"] == "try"]
+    assert tries[0]["action"] == 'try Nickname = "@count300", then submit'  # the code, not 300 characters
+    assert "Nickname took 50 of 300 characters" in tries[0]["detail"]
+    assert "Bio is shown cut at 80 characters" in tries[1]["detail"]
+    notes = [n["content"] for n in client.get(f"/sessions/{run['session_id']}/notes").json()]
+    assert "Counterstring: Nickname took 50 of 300 characters (each number in it is the position of the * after it)." in notes
+
+
+def test_counterstrings():
+    from app.agent.explore import counter_cut, counterstring, expand
+    assert counterstring(10) == "*3*5*7*10*"
+    s = counterstring(300)
+    assert len(s) == 300 and s.endswith("*300*") and expand("@count300") == s
+    assert all(s[int(m.group(1)) - 1] == "*" for m in __import__("re").finditer(r"(\d+)\*", s))  # each number: where its * is
+    assert counter_cut(s, s[:50], "") == ["took 50 of 300 characters"]
+    assert counter_cut(s, s, "Saved: " + s[:120]) == ["is shown cut at 120 characters"]
+    assert counter_cut(s, s, "Saved: " + s) == [] and counter_cut(s, s, "Thanks!") == []  # whole, or not shown at all
+
+
+def test_a_server_error_comes_with_a_curl_command(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """The Passport 500: the draft says how to send the same request without the UI."""
+    project, charter = kyc
+    scripted(monkeypatch, [step("A passport", kind="try", values={"Document type": "Passport"}),
+                           step("Done", kind="done", summary="A passport.")])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 4}).json())
+    bug = next(b for b in client.get(f"/sessions/{run['session_id']}/bugs").json() if "500" in b["title"])
+    assert "Reproduce without the UI" in bug["description"]
+    cmd = bug["description"].split("```\n")[1].split("\n```")[0]
+    assert cmd.startswith("curl -X POST ") and "/api/verify" in cmd.splitlines()[0]
+    assert "Passport" in cmd and "--data-raw" in cmd
