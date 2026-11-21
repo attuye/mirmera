@@ -358,6 +358,7 @@ class BugOut(BaseModel):
     filings: list["BugFilingOut"] = []
     # The exploration agent met the same problem again: where and when
     sightings: list[dict] = []
+    reproduce: Optional[str] = None  # the failing request as curl, secrets masked
     # Mirmera replayed the draft's steps in fresh browsers: {"runs", "reproduced", "results", "at"}
     confirmation: Optional[dict] = None
     # A tester dismissed it: {"reason", "note", "by", "at"}. Mirmera won't draft the same problem again.

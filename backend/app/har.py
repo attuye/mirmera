@@ -118,4 +118,9 @@ def clean_har_file(source, target, secrets: list[str] | None = None) -> int:
     har = json.loads(source.read_text(encoding="utf-8"))
     cleaned = clean_har(har, secrets)
     target.write_text(json.dumps(cleaned, ensure_ascii=False, indent=1), encoding="utf-8")
+    try:  # read back: a log that doesn't open in DevTools is worse than none
+        json.loads(target.read_text(encoding="utf-8"))
+    except ValueError:
+        target.unlink(missing_ok=True)
+        raise
     return len(cleaned["log"]["entries"])

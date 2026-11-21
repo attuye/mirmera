@@ -172,6 +172,7 @@ function BugDetail({ bug, onSaved, onDeleted, project, onProject }: {
       <Trail bug={bug} />
       <Confirmation bug={bug} />
       <Sightings bug={bug} />
+      <Reproduce bug={bug} />
       <BugEvidence bug={bug} />
       {editing ? (
         <ReviewForm bug={bug} onCancel={() => setEditing(false)} onSaved={(b) => { onSaved(b); setEditing(false) }}
@@ -353,26 +354,45 @@ function Trail({ bug }: { bug: BugListItem }) {
   )
 }
 
+/** A command with a Copy button. */
+function CodeBlock({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div style={{ position: 'relative', margin: '8px 0' }}>
+      <pre className="mono" aria-label="Command" style={{ margin: 0, padding: '10px 12px', paddingRight: 70, background: 'var(--panel)',
+        border: '1px solid var(--border)', borderRadius: 7, fontSize: 11.5, lineHeight: 1.5, overflowX: 'auto', whiteSpace: 'pre' }}>
+        {code}</pre>
+      <button onClick={() => { navigator.clipboard?.writeText(code).catch(() => {}); setCopied(true) }}
+        style={{ position: 'absolute', top: 6, right: 6, fontSize: 11, padding: '3px 9px', borderRadius: 5,
+          border: '1px solid var(--border)', color: 'var(--text-secondary)', background: 'var(--bg)' }}>
+        {copied ? 'Copied' : 'Copy'}</button>
+    </div>
+  )
+}
+
+/** The failing request as curl (Mirmera kept it from the agent's run): shown on drafts and reviewed bugs alike. */
+function Reproduce({ bug }: { bug: BugListItem }) {
+  if (!bug.reproduce) return null
+  return (
+    <section aria-label="Reproduce without the UI" style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+        Reproduce without the UI: the request as the browser sent it. Cookies and secrets are masked, so use your own session
+        (in PowerShell, type <span className="mono">curl.exe</span>).
+      </div>
+      <CodeBlock code={bug.reproduce} />
+    </section>
+  )
+}
+
 /** A description: its paragraphs as written, and ``` blocks (a curl command, from Mirmera) as code
  *  with a Copy button. */
 function DescriptionText({ text }: { text: string }) {
-  const [copied, setCopied] = useState<number | null>(null)
   const parts = text.split(/```\n?/)
   return (
     <>
       {parts.map((part, i) => i % 2 === 0
         ? (part.trim() ? <div key={i} style={{ whiteSpace: 'pre-wrap' }}>{part.trim()}</div> : null)
-        : (
-          <div key={i} style={{ position: 'relative', margin: '8px 0' }}>
-            <pre className="mono" aria-label="Command" style={{ margin: 0, padding: '10px 12px', paddingRight: 70, background: 'var(--panel)',
-              border: '1px solid var(--border)', borderRadius: 7, fontSize: 11.5, lineHeight: 1.5, overflowX: 'auto', whiteSpace: 'pre' }}>
-              {part.replace(/\n$/, '')}</pre>
-            <button onClick={() => { navigator.clipboard?.writeText(part.replace(/\n$/, '')).catch(() => {}); setCopied(i) }}
-              style={{ position: 'absolute', top: 6, right: 6, fontSize: 11, padding: '3px 9px', borderRadius: 5,
-                border: '1px solid var(--border)', color: 'var(--text-secondary)', background: 'var(--bg)' }}>
-              {copied === i ? 'Copied' : 'Copy'}</button>
-          </div>
-        ))}
+        : <CodeBlock key={i} code={part.replace(/\n$/, '')} />)}
     </>
   )
 }

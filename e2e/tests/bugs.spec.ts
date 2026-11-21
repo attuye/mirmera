@@ -139,3 +139,31 @@ test('bugs: a curl command in a report is shown as code, with Copy', async ({ pa
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(curl)
   await page.screenshot({ path: 'test-results/curl-in-report.png' })
 })
+
+// The agent's curl command has its own place: on a draft that still needs review, and kept after review.
+test('bugs: a draft from a server error shows how to reproduce it without the UI', async ({ page, api, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const project = await api.project()
+  const session = await api.session((await api.charter(project.id, 'Explore document types to discover which fail')).id)
+  const bug = await api.bug(session.id, 'POST /api/verify answered 500')
+  const curl = "curl -X POST http://localhost:4100/api/verify \\\n  -H 'content-type: application/json' \\\n  -H 'Cookie: <your session: copy it from your browser>' \\\n  --data-raw '{\"documentType\": \"Passport\"}'"
+  await page.route(`${API_URL}/projects/${project.id}/bugs`, async (route) => {
+    const response = await route.fetch().catch(() => null)
+    if (!response) return
+    const bugs = await response.json()
+    for (const b of bugs) if (b.id === bug.id) b.reproduce = curl
+    await route.fulfill({ json: bugs })
+  })
+  await page.goto(`/projects/${project.id}/bugs`)
+  const row = page.getByRole('article', { name: 'POST /api/verify answered 500' })
+  await expect(row.getByText('Needs review')).toBeVisible()
+  await row.getByRole('button', { name: /POST \/api\/verify answered/ }).first().click()
+  const reproduce = row.getByRole('region', { name: 'Reproduce without the UI' })
+  await expect(reproduce.getByLabel('Command')).toHaveText(curl)
+  await expect(reproduce).toContainText('curl.exe')
+  await reproduce.getByRole('button', { name: 'Copy' }).click()
+  await expect(reproduce.getByRole('button', { name: 'Copied' })).toBeVisible()
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(curl)
+  if (process.env.SHOTS) await row.screenshot({ path: `${process.env.SHOTS}/reproduce-on-draft.png` })
+  await page.unrouteAll({ behavior: 'ignoreErrors' })
+})
