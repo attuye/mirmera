@@ -170,6 +170,7 @@ export interface Bug {
   filings: BugFiling[]
   /** The exploration agent met the same problem again, in another charter or run */
   sightings?: BugSighting[]
+  reproduce?: string | null  // the failing request as curl, secrets masked
   /** Mirmera replayed the draft's steps in fresh browsers when its run ended */
   confirmation?: { runs: number; reproduced: number; results: { run: number; reproduced: boolean; detail: string }[]; note?: string } | null
   /** A tester said it isn't a bug, and why: Mirmera won't draft the same problem again here */

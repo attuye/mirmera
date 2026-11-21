@@ -838,8 +838,8 @@ def test_a_server_error_comes_with_a_curl_command(client, kyc, monkeypatch, chro
                            step("Done", kind="done", summary="A passport.")])
     run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 4}).json())
     bug = next(b for b in client.get(f"/sessions/{run['session_id']}/bugs").json() if "500" in b["title"])
-    assert "Reproduce without the UI" in bug["description"]
-    cmd = bug["description"].split("```\n")[1].split("\n```")[0]
+    cmd = bug["reproduce"]  # its own field: a review or an AI draft of the report can't lose it
+    assert "curl " not in bug["description"]
     assert cmd.startswith("curl -X POST ") and "/api/verify" in cmd.splitlines()[0]
     assert "Passport" in cmd and "--data-raw" in cmd
 
@@ -879,3 +879,24 @@ def test_a_session_knows_its_own_run(client, kyc, monkeypatch, chromium_availabl
     assert client.get(f"/sessions/{second['session_id']}/exploration").json()["id"] == second["id"]
     other = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "Attu"}).json()
     assert client.get(f"/sessions/{other['id']}/exploration").json() is None
+
+
+def test_a_bug_drafted_before_the_curl_gets_it_when_seen_again(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """A 500 drafted before Mirmera kept requests: the next run that meets it adds the command to that bug."""
+    from app import models
+    from app.database import SessionLocal
+    project, charter = kyc
+    tries = [step("A passport", kind="try", values={"Document type": "Passport"}), step("Done", kind="done", summary="A passport.")]
+    scripted(monkeypatch, list(tries))
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 4}).json())
+    bug = next(b for b in client.get(f"/sessions/{run['session_id']}/bugs").json() if "500" in b["title"])
+    with SessionLocal() as db:  # as an older Mirmera left it
+        db.get(models.Bug, bug["id"]).reproduce = None
+        db.commit()
+    client.post(f"/sessions/{run['session_id']}/end")
+    scripted(monkeypatch, list(tries))
+    again = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 4}).json())
+    assert not [b for b in client.get(f"/sessions/{again['session_id']}/bugs").json() if "500" in b["title"]]  # no second draft
+    seen = next(b for b in client.get(f"/projects/{project['id']}/bugs").json() if b["id"] == bug["id"])
+    assert len(seen["sightings"]) == 1
+    assert seen["reproduce"].startswith("curl -X POST ")

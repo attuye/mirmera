@@ -48,6 +48,10 @@ def build_report(bug: models.Bug, evidence: list[models.Evidence], *, attaches_f
         b += [Block("heading", "Expected"), Block("paragraph", bug.expected)]
     if bug.actual:
         b += [Block("heading", "Actual"), Block("paragraph", bug.actual)]
+    if bug.reproduce:
+        b += [Block("heading", "Reproduce without the UI"),
+              Block("paragraph", "The failing request as the browser sent it. Cookies and secrets are masked: use your own session."),
+              Block("code", bug.reproduce)]
     if bug.oracle_heuristic:
         name = ORACLE_NAMES.get(bug.oracle_heuristic, bug.oracle_heuristic)
         b += [Block("heading", "Why it's a problem"),

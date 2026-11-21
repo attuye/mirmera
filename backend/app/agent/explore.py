@@ -1535,6 +1535,8 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
             if screenshot and screenshot.is_file():
                 db.add(models.Evidence(session_id=session_id, bug_id=same.id, kind="screenshot",
                                        summary=f"Seen again: {p.title}"[:300], url=page_url, file_path=str(screenshot)))
+            if p.reproduce and not same.reproduce:  # drafted before Mirmera kept the request: keep it now
+                same.reproduce = p.reproduce
             if (same.dismissal or {}).get("reason") == "cant_reproduce":  # it showed again: reproducible after all
                 for d in db.query(models.Dismissal).filter(models.Dismissal.bug_id == same.id).all():
                     db.delete(d)
@@ -1555,8 +1557,6 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
         bug = models.Bug(
             session_id=session_id, charter_id=charter_id, title=p.title[:200], severity=p.severity,
             description=(f"{p.actual}\n\nExpected: {p.expected}\n\nWhat Mirmera checked: {evidence}\n\n"
-                         + (f"Reproduce without the UI (the request as the browser sent it; use your own session):\n"
-                            f"```\n{p.reproduce}\n```\n\n" if p.reproduce else "")
                          + f"Found by the Mirmera exploration agent ({provider.name}/{provider.model}). "
                          "A draft: review it before filing." + before),
             expected=p.expected, actual=p.actual,
@@ -1569,7 +1569,7 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
                          **({"clock": clock_line().removeprefix("Set the computer's clock to "),
                              "clock_at": CLOCK_AT.get().isoformat(), "timezone": str(CLOCK_AT.get().tzinfo)}
                             if CLOCK_AT.get() else {})},
-            signature=key, sightings=[], symptom=p.symptom.model_dump(),
+            signature=key, sightings=[], symptom=p.symptom.model_dump(), reproduce=p.reproduce,
         )
         db.add(bug)
         db.flush()

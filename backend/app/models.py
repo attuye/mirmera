@@ -410,6 +410,9 @@ class Bug(Base):
     # run) is added to this bug as a sighting instead of becoming a second draft.
     signature = Column(String, nullable=True, index=True)
     sightings = Column(JSON, nullable=True)  # [{"session_id", "charter_id", "mission", "at", "url"}]
+    # The failing request as a curl command (secrets masked), kept apart from the description so a
+    # review or an AI draft of the report never loses it; shown as "Reproduce without the UI".
+    reproduce = Column(Text, nullable=True)
     symptom = Column(JSON, nullable=True)  # what shows it, as the agent's checks see it: {"kind", "value", "explanation"}
     confirmation = Column(JSON, nullable=True)  # its steps replayed in fresh browsers: {"runs", "reproduced", "results", "at"}
     dismissal = Column(JSON, nullable=True)  # a tester said it isn't a bug: {"reason", "note", "by", "at"}
