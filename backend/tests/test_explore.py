@@ -900,3 +900,83 @@ def test_a_bug_drafted_before_the_curl_gets_it_when_seen_again(client, kyc, monk
     seen = next(b for b in client.get(f"/projects/{project['id']}/bugs").json() if b["id"] == bug["id"])
     assert len(seen["sightings"]) == 1
     assert seen["reproduce"].startswith("curl -X POST ")
+
+
+SELFIE = b"""<!doctype html><title>Your selfie</title><h1>Upload a selfie</h1>
+<form id=f><label for=photo>Selfie</label><input id=photo type=file accept="image/jpeg">
+<button type=submit>Upload</button></form><p role=status id=out></p><img id=preview alt="Your selfie">
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const file = document.getElementById('photo').files[0]
+  if (!file) { document.getElementById('out').textContent = 'Please choose a photo.'; return }
+  const r = await fetch('/api/selfie', { method: 'POST', body: file })
+  const { url } = await r.json()
+  document.getElementById('out').textContent = 'Uploaded. This is what the reviewer sees:'
+  document.getElementById('preview').src = url
+})
+</script>"""
+
+
+def selfie_app(strips: bool):
+    """Stores the selfie and serves it back for the preview: as uploaded, or with its EXIF removed."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from app.agent.exif import without_exif
+
+    class App(BaseHTTPRequestHandler):
+        stored = b""
+
+        def do_GET(self):
+            photo = self.path.startswith("/uploads/")
+            body = App.stored if photo else SELFIE
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg" if photo else "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            App.stored = without_exif(data) if strips else data
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"url": "/uploads/selfie-1.jpg"}')
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def explore_selfie(client, project, monkeypatch, strips: bool):
+    server = selfie_app(strips)
+    try:
+        client.patch(f"/projects/{project['id']}", json={"app_url": f"http://127.0.0.1:{server.server_port}"})
+        charter = client.post(f"/projects/{project['id']}/charters", json={"mission_statement": "Explore the selfie upload with phone photos to discover what is kept"}).json()
+        scripted(monkeypatch, [step("A phone photo", kind="try", values={"Selfie": "@file:geotagged.jpg"}),
+                               step("Done", kind="done", summary="A phone photo.")])
+        run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 4}).json())
+        return run, client.get(f"/sessions/{run['session_id']}/bugs").json()
+    finally:
+        server.shutdown()
+
+
+def test_an_uploaded_photo_served_back_with_its_location_is_a_bug(client, project, monkeypatch, chromium_available):  # noqa: F811
+    """The privacy check on uploads: the selfie comes back with the GPS and camera Mirmera put in it."""
+    run, bugs = explore_selfie(client, project, monkeypatch, strips=False)
+    bug = next(b for b in bugs if "GPS" in b["title"])
+    assert bug["title"] == "Uploaded photo is served back with its GPS location (EXIF)"
+    assert bug["severity"] == "high"
+    assert "/uploads/selfie-1.jpg was served with GPS 9.0300° N, 38.7600° E and camera \"Mirmera GPS probe\"" in bug["actual"]
+    assert "the location and camera Mirmera put in the photo it uploaded" in bug["actual"]
+    assert "must not tell anyone where they live" in bug["expected"]
+
+
+def test_a_photo_served_without_its_location_is_fine(client, project, monkeypatch, chromium_available):  # noqa: F811
+    run, bugs = explore_selfie(client, project, monkeypatch, strips=True)
+    assert run["status"] == "finished"
+    assert not [b for b in bugs if "GPS" in b["title"] or "EXIF" in b["title"]]

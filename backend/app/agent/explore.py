@@ -1131,6 +1131,30 @@ def crashes(failed: list[str], page_errors: list[str], requests: list[dict] | No
     return out
 
 
+def exif_leaks(leaks: list[dict], origins: set[str]) -> list[schemas.ExploreProblem]:
+    """A bug draft when the app served an image that still says where it was taken (EXIF GPS).
+    No rule needed: a customer's photo must never give away their location. One draft per run."""
+    from urllib.parse import urlsplit
+    from app.agent.exif import place
+    mine = [g for g in leaks if in_app(g["url"], origins)]
+    if not mine:
+        return []
+    g = next((x for x in mine if x["probe"]), mine[0])
+    path = urlsplit(g["url"]).path or "/"
+    whose = ("the location and camera Mirmera put in the photo it uploaded, so the upload is stored and served untouched"
+             if g["probe"] else "a location Mirmera didn't put there: someone's photo, served with where it was taken")
+    return [schemas.ExploreProblem(
+        title="Uploaded photo is served back with its GPS location (EXIF)" if g["probe"]
+        else "A photo is served with a GPS location in it (EXIF)", severity="high",
+        expected="Photos are stripped of their EXIF data (GPS location, camera) when uploaded, or at least before "
+                 "they are shown again: a customer's photo must not tell anyone where they live.",
+        actual=f"{path} was served with GPS {place(g)}" + (f" and camera \"{g['camera']}\"" if g["camera"] else "")
+               + f": {whose}.",
+        symptom=schemas.Symptom(kind="privacy", value="gps",
+                                explanation="Mirmera read the EXIF of every image the app sent to the browser."),
+        same_as="exif-gps")]
+
+
 GAP_WORDS = ("required", "missing", "empty", "please enter", "please fill", "please provide", "can't be blank",
              "cannot be blank", "is mandatory")
 LABEL_NOISE = {"the", "your", "and", "for", "with", "enter", "create", "accept", "date", "number"}
@@ -2177,6 +2201,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     if a.kind == "try" and not a.values:
                         tried[baseline_key(page.url)] = entry["n"]
                     failed_before, page_errors_before = len(signals.failed), len(signals.page_errors)
+                    leaks_before = len(signals.exif_leaks)
                     acted_at = time.monotonic()
                     bugs_before = len(bug_ids)
                     changed = (list((a.values or {}).keys()) if a.kind == "try"
@@ -2218,6 +2243,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             f"that left the app ({origin(left)}), so the browser went back"
                     broke = crashes(signals.failed[failed_before:], signals.page_errors[page_errors_before:],
                                     signals.failed_requests, secrets_of(sign_in_cfg))
+                    broke += exif_leaks(signals.exif_leaks[leaks_before:], origins)
                     said: list[str] = []  # what the app answered this step
                     after = FormState()
                     toggled = False

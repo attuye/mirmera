@@ -21,6 +21,7 @@ FILES: dict[str, dict] = {
     "big-photo.png": {"what": "a 25 MB photo", "real": "png", "mb": 25},
     "tiny.png": {"what": "a photo of 8 × 8 pixels, too small to read", "real": "png"},
     "sideways.jpg": {"what": "a photo taken sideways (rotated by its EXIF tag)", "real": "jpg"},
+    "geotagged.jpg": {"what": "a phone photo with its GPS location still in it (is it served back with it?)", "real": "jpg"},
     "phone-photo.heic": {"what": "an iPhone photo (HEIC)", "real": "heic"},
     "program.jpg": {"what": "a program (.exe) renamed .jpg", "real": "exe"},
     "not-a.pdf": {"what": "a text file renamed .pdf", "real": "txt"},
@@ -75,6 +76,9 @@ def _content(name: str) -> bytes:
         return _png(8, 8)
     if name == "sideways.jpg":
         return _sideways(JPEG)
+    if name == "geotagged.jpg":
+        from app.agent.exif import geotagged
+        return geotagged(JPEG)
     if name == "phone-photo.heic":
         return b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic" + b"\x00" * 64
     if name == "program.jpg":
@@ -108,7 +112,7 @@ def name_of(value: str | None) -> str | None:
     return None
 
 
-FIRST = ("empty.jpg", "big-photo.png", "program.jpg", "not-a.pdf", "phone-photo.heic")
+FIRST = ("empty.jpg", "big-photo.png", "program.jpg", "not-a.pdf", "phone-photo.heic", "geotagged.jpg")
 
 
 def ideas() -> list[tuple[str, str]]:
