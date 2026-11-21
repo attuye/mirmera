@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Bot } from 'lucide-react'
 import { api, ExplorationRun, Note } from '../api/client'
 import Sidebar from '../components/Sidebar'
@@ -26,14 +26,13 @@ const TAGS: { key: Note['tag']; label: string; color: string }[] = [
 function useAgentRun(charterId: string | null, sessionId: string | undefined, onDone: () => void, onStep: () => void): ExplorationRun | null {
   const [run, setRun] = useState<ExplorationRun | null>(null)
   useEffect(() => {
-    if (!charterId || !sessionId) return
+    if (!charterId || !sessionId) return  // charterId: known once the session has loaded
     let stopped = false
     let timer: number | undefined
     let wasRunning = false
     const tick = async () => {
-      const latest = await api.charterExploration(charterId).catch(() => null)
+      const mine = await api.sessionExploration(sessionId).catch(() => null)
       if (stopped) return
-      const mine = latest && latest.session_id === sessionId ? latest : null
       setRun(mine)
       if (mine?.status === 'running') {
         if (wasRunning) onStep()
@@ -126,6 +125,11 @@ export default function ActiveSession() {
   const box = useRef<HTMLTextAreaElement>(null)
   const [charterId, setCharterId] = useState<string | null>(null)
   const [missing, setMissing] = useState(false)  // deleted, or never existed: said, not a blank page
+  // An ended session opens its debrief; with ?view=1 (the debrief's "Open the session") it shows
+  // its notes and Mirmera's browser to look at, with nothing to add, pause or end.
+  const [search] = useSearchParams()
+  const [endedAt, setEndedAt] = useState<string | null>(null)
+  const viewOnly = !!endedAt
   const agentRun = useAgentRun(charterId, sessionId, () => {
     // Mirmera finished: show its last notes, and the pause it left the session in.
     if (!sessionId) return
@@ -147,7 +151,8 @@ export default function ActiveSession() {
     api.listNotes(sessionId).then(setNotes).catch(console.error)
     api.getSession(sessionId).then((session) => {
       // Already ended (e.g. ended in another tab, or the page was refreshed while ending): show its debrief.
-      if (session.ended_at) { navigate(path(`/sessions/${sessionId}/debrief`), { replace: true }); return }
+      if (session.ended_at && !search.get('view')) { navigate(path(`/sessions/${sessionId}/debrief`), { replace: true }); return }
+      setEndedAt(session.ended_at)
       setStartedAt(session.started_at)
       setPaused(!!session.paused_at)
       setPausedAt(session.paused_at)
@@ -244,13 +249,21 @@ export default function ActiveSession() {
             <div className="mono" style={{ fontSize: 10, color: 'var(--text-quiet)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Charter</div>
             <div style={{ fontSize: 14.5, fontWeight: 600, maxWidth: 560 }}>{charterMission || 'Loading…'}</div>
             <HeuristicChips heuristics={charterHeuristics.heuristics} oracles={charterHeuristics.oracles} />
-            {sessionId && (
+            {sessionId && !viewOnly && (
               <div style={{ marginTop: 6 }}>
                 <ConfirmDelete label="Delete session" question="Delete this session with its notes, bugs and recordings?"
                   onConfirm={async () => { await api.deleteSession(sessionId); navigate(path('/dashboard'), { replace: true }) }} />
               </div>
             )}
           </div>
+          {viewOnly ? (
+            <div role="status" aria-label="View only" style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: 12.5, color: 'var(--text-secondary)' }}>
+              <span>Ended {new Date(endedAt!.endsWith('Z') ? endedAt! : `${endedAt}Z`).toLocaleString()} · View only</span>
+              <Link to={path(`/sessions/${sessionId}/debrief`)} style={{
+                border: '1px solid var(--border)', padding: '8px 14px', borderRadius: 8, color: 'var(--accent)', fontWeight: 500,
+              }}>Open the debrief</Link>
+            </div>
+          ) : (<>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             {agentRun && agentWorking && <AgentAtWork run={agentRun} />}
             <div className="mono" style={{ fontSize: 26, fontWeight: 600, color: paused ? 'var(--text-tertiary)' : 'var(--accent)' }}>{elapsed}</div>
@@ -267,11 +280,13 @@ export default function ActiveSession() {
           }}>
             {ending ? 'Ending session…' : 'End Session'}
           </button>
+          </>)}
         </div>
         {endError && <div role="alert" style={{ padding: '8px 36px', color: 'var(--danger)', fontSize: 12.5 }}>{endError}</div>}
 
         <div style={{ flex: 1, display: 'flex', padding: '22px 32px', gap: 24 }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            {!viewOnly && <>
             <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 11, padding: '14px 16px', marginBottom: 16 }}>
               <textarea
                 ref={box}
@@ -316,6 +331,8 @@ export default function ActiveSession() {
                 onNote={(note) => setNotes((prev) => [...prev, note])}
                 onUse={(text) => { setTag('test'); setDraft(text); box.current?.focus() }} />
             )}
+            </>}
+            {viewOnly && !timeline.length && <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>No notes were logged in this session.</div>}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, overflowY: 'auto' }}>
               {timeline.map((item) => item.type === 'note' ? (
@@ -339,6 +356,7 @@ export default function ActiveSession() {
           </div>
           {sessionId && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 }}>
+              {!viewOnly && <>
               <div role="tablist" aria-label="Tools" style={{ display: 'inline-flex', alignSelf: 'flex-start', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
                 {(['browser', 'api', 'compare'] as const).map((t) => (
                   <button key={t} role="tab" aria-selected={tool === t} onClick={() => setTool(t)} style={{
@@ -351,6 +369,7 @@ export default function ActiveSession() {
               {tool === 'api' && <ApiPanel sessionId={sessionId} project={project} disabled={ending}
                 onNote={(note) => setNotes((prev) => [...prev, note])} />}
               {tool === 'compare' && <ComparePanel sessionId={sessionId} project={project} />}
+              </>}
               {agentRun && <div style={{ width: 360 }}><AgentBrowser run={agentRun} /></div>}
             </div>
           )}

@@ -864,3 +864,18 @@ def test_the_run_keeps_its_network_log_without_secrets(client, kyc, monkeypatch,
     assert verify and verify[-1]["request"]["method"] == "POST" and verify[-1]["response"]["status"] == 500
     assert "hunter2-not-in-the-log" not in r.text
     assert client.get("/exploration-runs/nope/har").status_code == 404
+
+
+def test_a_session_knows_its_own_run(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """A later run of the same charter is in another session: each session shows its own."""
+    project, charter = kyc
+    scripted(monkeypatch, [step("Done", kind="done", summary="Looked.")])
+    first = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 3}).json())
+    client.post(f"/sessions/{first['session_id']}/end")
+    scripted(monkeypatch, [step("Done", kind="done", summary="Looked again.")])
+    second = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 3}).json())
+    assert first["session_id"] != second["session_id"]
+    assert client.get(f"/sessions/{first['session_id']}/exploration").json()["id"] == first["id"]
+    assert client.get(f"/sessions/{second['session_id']}/exploration").json()["id"] == second["id"]
+    other = client.post("/sessions", json={"charter_id": charter["id"], "tester_id": "Attu"}).json()
+    assert client.get(f"/sessions/{other['id']}/exploration").json() is None

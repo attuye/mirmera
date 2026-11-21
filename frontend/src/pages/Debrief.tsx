@@ -280,6 +280,7 @@ export default function DebriefPage() {
         <main style={{ padding: '32px 40px 60px', maxWidth: 860, flex: 1 }}>
           <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Session debrief</h1>
           {charter && <div style={{ fontSize: 13.5, color: 'var(--text-secondary)', marginTop: 8 }}>{charter.mission_statement}</div>}
+          <Link to={path(`/sessions/${sessionId}?view=1`)} style={{ display: 'inline-block', marginTop: 8, fontSize: 12.5, color: 'var(--accent)' }}>Open the session →</Link>
           <div role="status" style={{ ...panel, marginTop: 18, display: 'flex', gap: 10, alignItems: 'center', fontSize: 13.5 }}>
             <Loader2 size={15} aria-hidden className="mm-spin" style={{ color: 'var(--info)', flexShrink: 0 }} />
             <span>The session has ended. Mirmera is writing the debrief; with a local model this can take a few minutes. This page fills in by itself; you can leave and come back.</span>
@@ -304,6 +305,8 @@ export default function DebriefPage() {
               AI draft — review before saving
             </span>
           )}
+          <Link to={path(`/sessions/${sessionId}?view=1`)} style={{ marginLeft: 'auto', fontSize: 12.5, color: 'var(--accent)' }}
+            title="Its notes, and Mirmera's browser with the recording and the network log">Open the session →</Link>
         </div>
         {charter && <div style={{ fontSize: 13.5, color: 'var(--text-secondary)', marginTop: 8 }}>{charter.mission_statement}</div>}
 

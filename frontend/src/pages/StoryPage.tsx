@@ -334,7 +334,7 @@ export default function StoryPage() {
                   <span style={{ flex: 1, color: 'var(--text-secondary)' }}>{s.mission_statement}</span>
                   <span style={{ color: 'var(--text-tertiary)' }}>{timeText(s.minutes)}{s.bugs ? `, ${s.bugs} bug${s.bugs === 1 ? '' : 's'}` : ''}</span>
                   {s.ended_at
-                    ? <Link to={path(`/sessions/${s.id}/debrief`)}>{s.debrief ? 'Debrief' : 'Write debrief'}</Link>
+                    ? <span style={{ display: 'inline-flex', gap: 10 }}><Link to={path(`/sessions/${s.id}?view=1`)}>Session</Link><Link to={path(`/sessions/${s.id}/debrief`)}>{s.debrief ? 'Debrief' : 'Write debrief'}</Link></span>
                     : <Link to={path(`/sessions/${s.id}`)}>{s.paused ? 'Paused' : 'Running'}</Link>}
                 </li>
               ))}
