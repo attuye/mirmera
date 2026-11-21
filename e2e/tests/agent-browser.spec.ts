@@ -59,7 +59,7 @@ test("Mirmera's browser: replay each step, and watch it live", async ({ page, ap
   })
 
   await test.step('a run without a recording plays its step pictures one after another', async () => {
-    await page.route(`**/charters/${charter.id}/exploration`, (route) => route.fulfill({ json: { ...run, video: null } }))
+    await page.route(`**/sessions/${run.session_id}/exploration`, (route) => route.fulfill({ json: { ...run, video: null } }))
     await page.goto(`/projects/${project.id}/sessions/${run.session_id}`)
     const view = page.getByRole('region', { name: "Mirmera's browser" })
     await expect(view.getByText('Steps', { exact: true })).toBeVisible()
@@ -71,12 +71,12 @@ test("Mirmera's browser: replay each step, and watch it live", async ({ page, ap
     await expect(view.getByRole('img', { name: `Step ${framed[0].n}: ${framed[0].action}` })).toBeVisible()
     await expect(view.getByRole('img', { name: `Step ${framed[1].n}: ${framed[1].action}` })).toBeVisible({ timeout: 4000 })
     await view.getByRole('button', { name: 'Pause' }).click()
-    await page.unroute(`**/charters/${charter.id}/exploration`)
+    await page.unroute(`**/sessions/${run.session_id}/exploration`)
   })
 
   await test.step('a step Mirmera took itself, because the AI was stuck, is marked', async () => {
     const steps = run.steps.map((s: { n: number }, i: number) => (i === 0 ? { ...s, by: 'Mirmera' } : s))
-    await page.route(`**/charters/${charter.id}/exploration`, (route) => route.fulfill({ json: { ...run, steps, video: null } }))
+    await page.route(`**/sessions/${run.session_id}/exploration`, (route) => route.fulfill({ json: { ...run, steps, video: null } }))
     await page.goto(`/projects/${project.id}/sessions/${run.session_id}`)
     const view = page.getByRole('region', { name: "Mirmera's browser" })
     await view.getByRole('button', { name: 'Play' }).click()  // from the end: starts again at the first
@@ -84,12 +84,12 @@ test("Mirmera's browser: replay each step, and watch it live", async ({ page, ap
     await expect(view.getByLabel('Step on screen')).toContainText(`Step ${run.steps[0].n}`)
     await expect(view.getByLabel('Step on screen').getByTitle('The AI was stuck, so Mirmera took this step itself')).toHaveText('Mirmera stepped in')
     if (process.env.SHOTS) await view.screenshot({ path: `${process.env.SHOTS}/stepped-in.png` })
-    await page.unroute(`**/charters/${charter.id}/exploration`)
+    await page.unroute(`**/sessions/${run.session_id}/exploration`)
   })
 
   await test.step('while it works: the live picture, marked LIVE (its run is faked as still going)', async () => {
     const jpeg = await (await request.get(`${API_URL}/exploration-runs/${run.id}/steps/${last.n}/frame`)).body()
-    await page.route(`**/charters/${charter.id}/exploration`, async (route) =>
+    await page.route(`**/sessions/${run.session_id}/exploration`, async (route) =>
       route.fulfill({ json: { ...run, status: 'running', finished_at: null } }))
     await page.route(`**/exploration-runs/${run.id}/frame?after=*`, (route) => route.request().url().endsWith('after=-1')
       ? route.fulfill({ body: jpeg, contentType: 'image/jpeg', headers: { 'X-Frame-Seq': '7', 'X-Frame-Url': 'http://localhost:5190/?q=test', ...EXPOSE } })
@@ -116,5 +116,28 @@ test("Mirmera's browser: replay each step, and watch it live", async ({ page, ap
     await pair.getByRole('button', { name: 'Send' }).click()
     await expect(pair).toContainText('Attu: Try a Passport next · waiting for its next step')
     await expect(pair.getByLabel('Tell Mirmera what to try next')).toHaveValue('')
+    await page.unrouteAll({ behavior: 'ignoreErrors' })
+  })
+
+  await test.step('after it ends: the debrief opens the session to look at, notes and recording still there', async () => {
+    expect((await request.post(`${API_URL}/sessions/${run.session_id}/end`)).ok()).toBeTruthy()
+    await page.goto(`/projects/${project.id}/sessions/${run.session_id}`)
+    await expect(page).toHaveURL(/\/debrief$/)  // an ended session still opens its debrief
+    await page.getByRole('link', { name: 'Open the session →' }).click()
+    await expect(page).toHaveURL(/\?view=1$/)
+    await expect(page.getByRole('status', { name: 'View only' })).toContainText('View only')
+    const notes = await api.notes(run.session_id)
+    expect(notes.length).toBeGreaterThan(0)  // the agent logs what it tried
+    await expect(page.getByText(notes[0].content, { exact: true }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'End Session' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Pause' })).toHaveCount(0)
+    await expect(page.getByPlaceholder('What are you observing?')).toHaveCount(0)
+    await expect(page.getByRole('tablist', { name: 'Tools' })).toHaveCount(0)
+    const view = page.getByRole('region', { name: "Mirmera's browser" })
+    await expect(view.getByRole('link', { name: 'Network log (HAR)' })).toBeVisible()
+    await expect(view.getByLabel("Recording of Mirmera's run")).toBeVisible()
+    if (process.env.SHOTS) await page.screenshot({ path: `${process.env.SHOTS}/session-view-only.png` })
+    await page.getByRole('link', { name: 'Open the debrief' }).click()
+    await expect(page).toHaveURL(/\/debrief$/)
   })
 })

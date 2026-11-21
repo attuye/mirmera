@@ -128,6 +128,14 @@ def latest(charter_id: str, db: DBSession = Depends(get_db)):
     return _run_or_404(db, run.id) if run else None
 
 
+@router.get("/sessions/{session_id}/exploration", response_model=schemas.ExplorationRunOut | None)
+def session_latest(session_id: str, db: DBSession = Depends(get_db)):
+    """The agent's latest run in this session (a later run of the same charter is in another session)."""
+    run = (db.query(models.ExplorationRun).filter(models.ExplorationRun.session_id == session_id)
+           .order_by(models.ExplorationRun.created_at.desc()).first())
+    return _run_or_404(db, run.id) if run else None
+
+
 @router.get("/exploration-runs/{run_id}", response_model=schemas.ExplorationRunOut)
 def get_run(run_id: str, db: DBSession = Depends(get_db)):
     return _run_or_404(db, run_id)

@@ -1165,6 +1165,7 @@ export const api = {
   exploreCharter: (charterId: string, body: { max_steps?: number; base_url?: string; conditions?: ExploreConditions } = {}) =>
     request<ExplorationRun>(`/charters/${charterId}/explore`, { method: 'POST', body: JSON.stringify(body) }),
   charterExploration: (charterId: string) => request<ExplorationRun | null>(`/charters/${charterId}/exploration`),
+  sessionExploration: (sessionId: string) => request<ExplorationRun | null>(`/sessions/${sessionId}/exploration`),
   explorationRun: (runId: string) => request<ExplorationRun>(`/exploration-runs/${runId}`),
   cancelExploration: (runId: string) => request<ExplorationRun>(`/exploration-runs/${runId}/cancel`, { method: 'POST' }),
   hintExploration: (runId: string, text: string) =>

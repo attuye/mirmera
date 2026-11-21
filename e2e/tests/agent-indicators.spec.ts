@@ -36,7 +36,7 @@ test('Mirmera at work: on the stories list and beside the session clock', async 
   })
 
   let cancelled = false
-  await page.route(`**/charters/${charter.id}/exploration`, (route) => route.fulfill({ json: {
+  await page.route(`**/sessions/${session.id}/exploration`, (route) => route.fulfill({ json: {
     id: 'run-1', project_id: project.id, charter_id: charter.id, session_id: session.id, status: cancelled ? 'cancelled' : 'running',
     start_url: 'http://localhost:4000', max_steps: 25, steps, bug_ids: [], summary: null, detail: null, started_by: 'Attu',
     ai_provider: 'mock', ai_model: 'mock', created_at: now, finished_at: null } }))
