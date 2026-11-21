@@ -16,6 +16,7 @@ before a draft is made, and it has a step budget, a time limit and can be cancel
 """
 import json
 import logging
+import os
 import re
 import time
 from contextvars import ContextVar
@@ -173,12 +174,38 @@ async def _start_screencast(page, live: Live, viewport: dict = VIEWPORT, slow: b
 async def _recording_context(browser, folder: Path, run_id: str, options: dict | None = None):
     """A browser context that films itself (a WebM video, written when the context closes)."""
     options = options or {"viewport": VIEWPORT}
+    har = {"record_har_path": str(_raw_har(folder, run_id)), "record_har_content": "embed"}  # cleaned when kept
     try:
-        return await browser.new_context(**options, record_video_dir=str(folder / f"video-{run_id[:8]}"),
+        return await browser.new_context(**options, **har, record_video_dir=str(folder / f"video-{run_id[:8]}"),
                                          record_video_size=options["viewport"])
     except Exception as err:  # e.g. Playwright's ffmpeg isn't installed: explore without a recording
         logger.info("No recording for this run: %s", _first_line(err))
-        return await browser.new_context(**options)
+        try:
+            return await browser.new_context(**options, **har)
+        except Exception:
+            return await browser.new_context(**options)
+
+
+def _raw_har(folder: Path, run_id: str) -> Path:
+    return folder / f"network-{run_id[:8]}.raw.har"
+
+
+def _keep_network(folder: Path, run_id: str, secrets: list[str]) -> str | None:
+    """Playwright's network log (written when the context closed), kept with cookies, authorization,
+    passwords, tokens and pictures taken out; the raw one is deleted. None when there is none."""
+    from app.har import clean_har_file
+    raw = _raw_har(folder, run_id)
+    if not raw.is_file():
+        return None
+    name = f"network-{run_id[:8]}.har"
+    try:
+        clean_har_file(raw, folder / name, secrets)
+        return name
+    except Exception as err:
+        logger.info("The run's network log could not be kept: %s", _first_line(err))
+        return None
+    finally:
+        raw.unlink(missing_ok=True)  # never leave the uncleaned log behind
 
 
 async def _keep_recording(context, folder: Path, run_id: str) -> str | None:
@@ -449,6 +476,12 @@ def action_key(a: schemas.ExploreAction) -> str:
     return a.model_dump_json(include={"kind", "locator", "value", "values", "key", "url"})
 
 
+def baseline_key(url: str) -> tuple[str, str, str]:
+    """The form sent with valid data on this page: done once, it shows what success looks like.
+    The form's current values don't tell two of them apart (they hold the last try's values)."""
+    return ("try the form with valid data", (url or "").split("#")[0], "")
+
+
 def pointless(a: schemas.ExploreAction, url: str, before: FormState, tried: dict[tuple[str, str, str], int]) -> str | None:
     """Why a step would learn nothing, or None. A small model loops: it submits the same form
     again and again, or fills a field with the value it already holds. Such a step isn't run.
@@ -463,6 +496,9 @@ def pointless(a: schemas.ExploreAction, url: str, before: FormState, tried: dict
         if current is not None and current == a.value:
             return (f'that field already holds "{a.value}". Change a different field, or change this one to a '
                     "different value, then submit")
+    if a.kind == "try" and not a.values and baseline_key(url) in tried:
+        return (f"you sent the form with valid data at step {tried[baseline_key(url)]} on this page, and nothing has "
+                "failed since, so it can't show anything new. Give the field and value you mean in values")
     if a.kind in SUBMITS:
         key = (action_key(a), url, before.values())
         if key in tried:
@@ -739,11 +775,43 @@ def _type_ideas(f: dict, today) -> list[tuple[str, str]]:
     if "name" in label:
         return [("Ge'ez script", GEEZ_NAME), ("apostrophe and hyphen", "O'Brien-Smith"), ("one letter", "A"),
                 ("very long", "@long300"), ("spaces around", "  John Smith  "), ("an emoji", "John 😀 Smith")]
-    return [("empty", ""), ("only spaces", "   "), ("very long", "@long300"), ("markup", "<b>bold</b>"),
+    return [("empty", ""), ("only spaces", "   "), ("very long, a counterstring", "@count300"), ("markup", "<b>bold</b>"),
             ("quotes", "It's \"quoted\"")]
 
 
 LONG = re.compile(r"@long(\d{1,5})")
+COUNT = re.compile(r"@count(\d{1,5})")
+
+
+def counterstring(n: int, mark: str = "*") -> str:
+    """James Bach's counterstring (PerlClip): "*3*5*7*9*12*15*…", where each number says the position
+    of the * after it. Cut anywhere, the text says how long it still is: "…*47*49*" was kept to 50."""
+    parts, pos = [], n
+    while pos > 0:
+        piece = f"{pos}{mark}"
+        piece = piece[-pos:] if len(piece) > pos else piece
+        parts.append(piece)
+        pos -= len(piece)
+    return "".join(reversed(parts))
+
+
+def counter_cut(sent: str, kept: str | None, page_text: str) -> list[str]:
+    """What a counterstring shows after a step, without AI: the field kept fewer characters than were
+    sent, or the page shows it back cut short. Plain sentences for the notes; none when it's whole."""
+    out = []
+    if kept is not None and kept != sent and sent.startswith(kept):
+        out.append(f"took {len(kept)} of {len(sent)} characters")
+    whole = kept if kept and sent.startswith(kept) else sent
+    lo, hi = 0, len(whole)  # the longest start of it the page shows (a shorter start is shown whenever a longer one is)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if whole[:mid] in page_text:
+            lo = mid
+        else:
+            hi = mid - 1
+    if 12 <= lo < len(whole):
+        out.append(f"is shown cut at {lo} characters")
+    return out
 
 
 def expand(value: str | None, f: dict | None = None) -> str:
@@ -754,6 +822,8 @@ def expand(value: str | None, f: dict | None = None) -> str:
     if value and "{" in value:
         from app import test_data
         value = test_data.resolve(value)  # {data:…} typed into the browser only; {email}, {unique}… made fresh
+    if value and "@count" in value:
+        value = COUNT.sub(lambda m: counterstring(min(int(m.group(1)), 20_000)), value)
     if not value or "@long" not in value:
         return value or ""
     name = f is not None and "name" in f["label"].lower()
@@ -780,7 +850,8 @@ def ideas_text(fields: list[dict], tried: dict[str, set[str]], today, limit_fiel
         if left:
             lines.append(f'- {f["label"]}: ' + "; ".join(f'{w} ("{v[:40]}")' for w, v in left[:3]))
     head = (f"Test ideas not tried yet ({done} of {total} tried), each with the rest of the form valid "
-            '("@long300" stands for 300 characters: send it as written, Mirmera types them):')
+            '("@long300" stands for 300 characters and "@count300" for a 300-character counterstring: send them as '
+            'written, Mirmera types them):')
     return (head + "\n" + "\n".join(lines)) if lines else "", done, total
 
 
@@ -1028,22 +1099,28 @@ def kept_values(before: FormState) -> list[str]:
             if f["type"] in ("text", "email", "tel", "number", "search", "textarea") and len(f["value"]) >= 4][:4]
 
 
-def crashes(failed: list[str], page_errors: list[str]) -> list[schemas.ExploreProblem]:
+def crashes(failed: list[str], page_errors: list[str], requests: list[dict] | None = None,
+            secrets: list[str] | None = None) -> list[schemas.ExploreProblem]:
     """Bug drafts for what broke during a step: a server error (5xx) or an uncaught error in
-    the page. Wrong whatever the rules say, so no AI is asked."""
+    the page. Wrong whatever the rules say, so no AI is asked. With the requests' details, a
+    server error comes with the curl command that sends it again."""
     from urllib.parse import urlsplit
+    from app.curl import curl_of
     out = []
     for f in failed:
         m = re.match(r"(\w+) (\S+) -> (5\d\d)$", f)
         if m:
             method, url, status = m.groups()
             path = urlsplit(url).path or "/"
+            req = next((r for r in reversed(requests or []) if r["method"] == method and r["url"] == url
+                        and str(r["status"]) == status), None)
             out.append(schemas.ExploreProblem(
                 title=f"{method} {path} fails with {status}", severity="high",
                 expected="The app handles the request and answers it (accepted or refused with a reason); a server error is never the answer.",
                 actual=f"{method} {path} answered {status}.",
                 symptom=schemas.Symptom(kind="failed_request", value=path,
-                                        explanation="A server error, seen by Mirmera in the browser's network log.")))
+                                        explanation="A server error, seen by Mirmera in the browser's network log."),
+                reproduce=curl_of(method, url, req["headers"], req["body"], secrets) if req else None))
     for e in page_errors:
         first = e.strip().splitlines()[0][:150] if e.strip() else "error"
         out.append(schemas.ExploreProblem(
@@ -1478,7 +1555,9 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
         bug = models.Bug(
             session_id=session_id, charter_id=charter_id, title=p.title[:200], severity=p.severity,
             description=(f"{p.actual}\n\nExpected: {p.expected}\n\nWhat Mirmera checked: {evidence}\n\n"
-                         f"Found by the Mirmera exploration agent ({provider.name}/{provider.model}). "
+                         + (f"Reproduce without the UI (the request as the browser sent it; use your own session):\n"
+                            f"```\n{p.reproduce}\n```\n\n" if p.reproduce else "")
+                         + f"Found by the Mirmera exploration agent ({provider.name}/{provider.model}). "
                          "A draft: review it before filing." + before),
             expected=p.expected, actual=p.actual,
             steps_to_reproduce=([clock_line()] if CLOCK_AT.get() else []) + ([first_step(p.fault)] if p.fault else []) + [s["action"]["summary"] if s["type"] == "action"
@@ -1528,7 +1607,7 @@ async def flow_tour(page, context, signals, form_url: str, answer_url: str, sent
 
     async def check(pg, sigs, f0: int, e0: int, how: str, rec: list[dict]) -> None:
         nonlocal found
-        for c in crashes(sigs.failed[f0:], sigs.page_errors[e0:]):
+        for c in crashes(sigs.failed[f0:], sigs.page_errors[e0:], sigs.failed_requests):
             c.actual = f"{how}: {c.actual}"[:600]
             if await keep(c, (c.symptom.kind, c.symptom.value), (pg, sigs, rec)):
                 found += 1
@@ -1865,6 +1944,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
     run_timeout = max(RUN_TIMEOUT_S, max_steps * STEP_TIME_S)
     final: dict = {}
     video: str | None = None  # the run's recording, kept in the session's folder
+    har: str | None = None  # its network log (HAR), cleaned of secrets, in the same folder
 
     def now() -> datetime:
         return utcnow()
@@ -2094,6 +2174,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         continue
                     if a.kind in SUBMITS:
                         tried[(action_key(a), page.url, before.values())] = entry["n"]
+                    if a.kind == "try" and not a.values:
+                        tried[baseline_key(page.url)] = entry["n"]
                     failed_before, page_errors_before = len(signals.failed), len(signals.page_errors)
                     acted_at = time.monotonic()
                     bugs_before = len(bug_ids)
@@ -2134,7 +2216,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         await _back_into_app(page, entry["url"], signals)
                         entry["detail"] = (entry["detail"] + "; " if entry["detail"] else "") + \
                             f"that left the app ({origin(left)}), so the browser went back"
-                    broke = crashes(signals.failed[failed_before:], signals.page_errors[page_errors_before:])
+                    broke = crashes(signals.failed[failed_before:], signals.page_errors[page_errors_before:],
+                                    signals.failed_requests, secrets_of(sign_in_cfg))
                     said: list[str] = []  # what the app answered this step
                     after = FormState()
                     toggled = False
@@ -2412,6 +2495,20 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                     await keep(prob, ("layout", url_path, prob.symptom.value),
                                                f". Seen at 390 px wide ({'the run itself is on a phone' if (conditions or {}).get('device') == 'phone' else 'Mirmera narrowed the browser for a moment'}).")
                     # Slow answers: a tester notices waiting.
+                    if a.kind == "try" and entry["status"] in ("ok", "drafted") and not page.is_closed():
+                        for name, code in (a.values or {}).items():  # a counterstring says where text was cut
+                            if "@count" not in (code or ""):
+                                continue
+                            f = find_field(before, name)
+                            try:
+                                text = await page.locator("body").inner_text(timeout=3_000)
+                            except Exception:
+                                text = ""
+                            label = f["label"] if f else name
+                            for found in counter_cut(expand(code, f), f["value"] if f else None, text):
+                                entry["detail"] = (entry["detail"] + "; " if entry["detail"] else "") + f"{label} {found}"
+                                _note(session_id, "test", f"Counterstring: {label} {found} (each number in it is the "
+                                                          "position of the * after it).")
                     if a.kind == "try" and entry["status"] in ("ok", "drafted"):  # a test: on the charter or beyond it
                         if beyond_charter(changed, ctx.focus):
                             if not charter_steps["beyond"]:
@@ -2419,11 +2516,13 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                       f"({charter_target(ctx.mission)}): {', '.join(changed)}. Kept, and marked as beyond it.")
                             entry["beyond_charter"] = True
                             entry["detail"] = (entry["detail"] + " " if entry["detail"] else "") + "(beyond the charter)"
-                            charter_steps["beyond"].append((entry["n"], changed, bug_ids[bugs_before:]))
+                            charter_steps["beyond"].append((entry["n"], changed, bug_ids[bugs_before:], dict(a.values or {})))
                         elif changed and ctx.focus:
                             charter_steps["on"] += 1
                     if is_submit and app_took > 5:
                         _note(session_id, "issue", f"Slow: after {entry['action']} the app took {app_took:.1f} s to answer.")
+                    if broke or entry["status"] in ("drafted", "failed"):  # something failed: valid data may be sent again, to re-check
+                        tried.pop(baseline_key(entry["url"]), None)
                     history.append(entry)
                     stuck = stuck + 1 if entry["status"] in ("refused", "failed", "not verified") else 0
                     _save(run_id, steps=list(history), bug_ids=list(bug_ids))
@@ -2462,6 +2561,11 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         ideas_seen.update(done=done, total=total, left=left)
             finally:
                 video = await _keep_recording(context, folder, run_id)
+                try:
+                    known = secrets_of(sign_in_cfg) + [v for k, v in os.environ.items() if k.startswith("MIRMERA_SECRET_") and v]
+                except Exception:
+                    known = []
+                har = _keep_network(folder, run_id, known)
                 await browser.close()
             if ACCESS_CHECK and sign_in_cfg and final.get("status") not in ("cancelled", "error"):
                 # Who sees what: the user's own pages opened signed out and as the second user. (No AI.)
@@ -2549,7 +2653,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     test_data.after_run(ctx.project_id, visited_forms=bool(last_fields))
                 except Exception:
                     logger.exception("Test data: couldn't record which rows met their fields")
-            _save(run_id, steps=list(history), bug_ids=list(bug_ids), finished_at=utcnow(), video=video,
+            _save(run_id, steps=list(history), bug_ids=list(bug_ids), finished_at=utcnow(), video=video, har=har,
                   journey=list(steps)[:60], **final)
         finally:
             ACTIVE.discard(run_id)
@@ -2588,20 +2692,37 @@ def facts_summary(history: list[dict], bug_titles: list[str], ideas: dict, why_i
 def beyond_line(ctx: CharterContext, charter_steps: dict) -> str:
     """On the charter, and beyond it, in one sentence for the summary."""
     beyond = charter_steps["beyond"]
-    fields = list(dict.fromkeys(f for _, changed, _ in beyond for f in changed))
-    found = _titles([b for _, _, ids in beyond for b in ids])
+    fields = list(dict.fromkeys(f for _, changed, _, _ in beyond for f in changed))
+    found = _titles([b for _, _, ids, _ in beyond for b in ids])
     return (f"On the charter ({charter_target(ctx.mission)}): {charter_steps['on']} test{'s' if charter_steps['on'] != 1 else ''}. "
             f"Beyond it: {len(beyond)} ({', '.join(fields[:6])})"
             + (f", which found: {'; '.join(t[:100] for t in found[:4])}." if found else ", nothing found there."))
+
+
+def rule_for_field(rules: dict[str, str], label: str, values: list[str]) -> str | None:
+    """The rule a field's follow-up checks: the one naming the values tried there (AC1 names
+    "Passport" for Document type) counts most, then its label's words. The first rule sharing a
+    word was picked before: "…as written on the document" made the name rule Document type's."""
+    label_words = _focus_stems(label)
+    value_words = set().union(*(_focus_stems(v) for v in values)) if values else set()
+    best, score = None, 0
+    for rid, text in rules.items():
+        words = _focus_stems(text)
+        s = 2 * len(value_words & words) + len(label_words & words)
+        if s > score:
+            best, score = rid, s
+    return best
 
 
 def follow_up_charters(charter_id: str, ctx: CharterContext, charter_steps: dict) -> list[str]:
     """A proposed charter for each field where something was found beyond the charter: an unplanned
     find deserves its own session. Linked to the same stories; not made twice."""
     by_field: dict[str, list[str]] = {}
-    for _, changed, ids in charter_steps["beyond"]:
-        if ids:
-            for f in changed:
+    tried: dict[str, list[str]] = {}  # the values sent to each field beyond the charter
+    for _, changed, ids, values in charter_steps["beyond"]:
+        for f in changed:
+            tried.setdefault(f, []).append(str(values.get(f, "")))
+            if ids:
                 by_field.setdefault(f, []).extend(ids)
     if not by_field:
         return []
@@ -2615,7 +2736,7 @@ def follow_up_charters(charter_id: str, ctx: CharterContext, charter_steps: dict
         for f in list(by_field)[:3]:
             if any(f.lower() in m for m in have):
                 continue
-            rid = next((k for k, v in rules.items() if _focus_stems(f) & _focus_stems(v)), None)
+            rid = rule_for_field(rules, f, tried.get(f, []))
             info = f"whether it works as {rid} says" if rid else "how it handles unusual values"
             mission = f"Explore {f[:1].lower() + f[1:]} with its test ideas, everything else valid, to discover {info}"
             follow = models.Charter(project_id=charter.project_id, mission_statement=mission, source="follow-up",

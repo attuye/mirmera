@@ -738,3 +738,129 @@ def test_the_charter_target_decides_its_focus():
     assert focus_fields("Explore My documents after verifying to discover whether all are listed", fields) == ["Document type", "Document number"]
     assert beyond_charter(["Full name"], ["Expiry date"]) and not beyond_charter(["Expiry date"], ["Expiry date"])
     assert not beyond_charter(["Full name"], [])  # no focus known: nothing is beyond it
+
+
+def test_a_follow_up_checks_the_rule_its_field_is_about():
+    """Seen on the practice app: Document type's follow-up said "as AC2 says", the name rule, because
+    AC2 mentions "the document". AC1 names the values tried there."""
+    from app.agent.explore import rule_for_field
+    rules = {"AC1": "Customers can verify with a National ID, a Passport or a Driver's licence. All three are supported equally.",
+             "AC2": "The customer's full name is entered as written on the document, in Latin or Ge'ez script.",
+             "AC3": "Expired documents must be rejected. A document is expired if its expiry date is before today."}
+    assert rule_for_field(rules, "Document type", ["Passport", "Driver's licence"]) == "AC1"
+    assert rule_for_field(rules, "Full name", ["አበበ ከበደ", "O'Brien-Smith"]) == "AC2"
+    assert rule_for_field(rules, "Phone number", ["0911223344"]) is None
+
+
+def test_valid_data_is_sent_again_only_after_something_failed(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """Seen with qwen3:8b: four "try the form with valid data" in a run, three of them meant as other
+    tests (its thought said "Document number = 0", its values were empty). The baseline is sent once
+    per page; again only to re-check after a failure."""
+    project, charter = kyc
+    valid = step("Valid", kind="try", values={})
+    scripted(monkeypatch, [
+        valid,                                                   # 1. the baseline
+        step("Future", kind="try", values={"Expiry date": "2030-01-01"}),
+        valid,                                                   # 3. nothing failed since: refused
+        step("Passport", kind="try", values={"Document type": "Passport"}),  # a 500
+        valid,                                                   # 5. a re-check after the failure: run
+        valid,                                                   # 6. refused again
+        step("Done", kind="done", summary="Done."),
+    ])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 10}).json())
+    tries = [(s["n"], s["status"]) for s in run["steps"] if s["kind"] == "try"]
+    assert [st for _, st in tries] == ["ok", "ok", "refused", "drafted", "ok", "refused"]
+    refused = next(s for s in run["steps"] if s["status"] == "refused")
+    assert refused["detail"].startswith("not run: you sent the form with valid data at step 1 on this page, and nothing has failed since")
+
+
+PROFILE = b"""<!doctype html><html><body><h1>Profile</h1>
+<form id="f"><label>Nickname <input name="nick" maxlength="50"></label>
+<label>Bio <textarea name="bio"></textarea></label><button>Save</button></form><p id="out"></p>
+<script>document.getElementById('f').onsubmit = (e) => { e.preventDefault()
+  const f = e.target; document.getElementById('out').textContent = 'Saved. Bio: ' + f.bio.value.slice(0, 80) }</script>
+</body></html>"""
+
+
+@pytest.fixture
+def profile_app():
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class App(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(PROFILE)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_port}"
+    server.shutdown()
+
+
+def test_a_counterstring_says_where_text_was_cut(client, project, profile_app, monkeypatch, chromium_available):  # noqa: F811
+    """James Bach's counterstring: a field that keeps 50 characters, and a saved text shown cut at 80,
+    each said with the exact number, without AI."""
+    client.patch(f"/projects/{project['id']}", json={"app_url": profile_app})
+    charter = client.post(f"/projects/{project['id']}/charters", json={"mission_statement": "Explore the profile with long text to discover where it is cut"}).json()
+    scripted(monkeypatch, [step("Nickname", kind="try", values={"Nickname": "@count300"}),
+                           step("Bio", kind="try", values={"Bio": "@count300"}),
+                           step("Done", kind="done", summary="Both fields.")])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 5}).json())
+    tries = [s for s in run["steps"] if s["kind"] == "try"]
+    assert tries[0]["action"] == 'try Nickname = "@count300", then submit'  # the code, not 300 characters
+    assert "Nickname took 50 of 300 characters" in tries[0]["detail"]
+    assert "Bio is shown cut at 80 characters" in tries[1]["detail"]
+    notes = [n["content"] for n in client.get(f"/sessions/{run['session_id']}/notes").json()]
+    assert "Counterstring: Nickname took 50 of 300 characters (each number in it is the position of the * after it)." in notes
+
+
+def test_counterstrings():
+    from app.agent.explore import counter_cut, counterstring, expand
+    assert counterstring(10) == "*3*5*7*10*"
+    s = counterstring(300)
+    assert len(s) == 300 and s.endswith("*300*") and expand("@count300") == s
+    assert all(s[int(m.group(1)) - 1] == "*" for m in __import__("re").finditer(r"(\d+)\*", s))  # each number: where its * is
+    assert counter_cut(s, s[:50], "") == ["took 50 of 300 characters"]
+    assert counter_cut(s, s, "Saved: " + s[:120]) == ["is shown cut at 120 characters"]
+    assert counter_cut(s, s, "Saved: " + s) == [] and counter_cut(s, s, "Thanks!") == []  # whole, or not shown at all
+
+
+def test_a_server_error_comes_with_a_curl_command(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """The Passport 500: the draft says how to send the same request without the UI."""
+    project, charter = kyc
+    scripted(monkeypatch, [step("A passport", kind="try", values={"Document type": "Passport"}),
+                           step("Done", kind="done", summary="A passport.")])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 4}).json())
+    bug = next(b for b in client.get(f"/sessions/{run['session_id']}/bugs").json() if "500" in b["title"])
+    assert "Reproduce without the UI" in bug["description"]
+    cmd = bug["description"].split("```\n")[1].split("\n```")[0]
+    assert cmd.startswith("curl -X POST ") and "/api/verify" in cmd.splitlines()[0]
+    assert "Passport" in cmd and "--data-raw" in cmd
+
+
+def test_the_run_keeps_its_network_log_without_secrets(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """Every request the browser made, as a HAR to download: the Passport 500 is in it; the password isn't."""
+    project, charter = kyc
+    monkeypatch.setenv("MIRMERA_SECRET_KYC_PASSWORD", "hunter2-not-in-the-log")
+    scripted(monkeypatch, [
+        step("The password", kind="fill_secret", locator={"method": "label", "value": "Password"}, secret="MIRMERA_SECRET_KYC_PASSWORD"),
+        step("A passport", kind="try", values={"Document type": "Passport"}),
+        step("Done", kind="done", summary="A passport.")])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 5}).json())
+    assert run["har"] == f"network-{run['id'][:8]}.har"
+    folder = runner_api.session_folder(run["session_id"])
+    assert not list(folder.glob("*.raw.har"))  # the uncleaned log is never left behind
+    r = client.get(f"/exploration-runs/{run['id']}/har")
+    assert r.status_code == 200 and "attachment" in r.headers["content-disposition"]
+    assert ".har" in r.headers["content-disposition"]
+    har = r.json()
+    verify = [e for e in har["log"]["entries"] if "/api/verify" in e["request"]["url"]]
+    assert verify and verify[-1]["request"]["method"] == "POST" and verify[-1]["response"]["status"] == 500
+    assert "hunter2-not-in-the-log" not in r.text
+    assert client.get("/exploration-runs/nope/har").status_code == 404

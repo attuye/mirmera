@@ -353,6 +353,30 @@ function Trail({ bug }: { bug: BugListItem }) {
   )
 }
 
+/** A description: its paragraphs as written, and ``` blocks (a curl command, from Mirmera) as code
+ *  with a Copy button. */
+function DescriptionText({ text }: { text: string }) {
+  const [copied, setCopied] = useState<number | null>(null)
+  const parts = text.split(/```\n?/)
+  return (
+    <>
+      {parts.map((part, i) => i % 2 === 0
+        ? (part.trim() ? <div key={i} style={{ whiteSpace: 'pre-wrap' }}>{part.trim()}</div> : null)
+        : (
+          <div key={i} style={{ position: 'relative', margin: '8px 0' }}>
+            <pre className="mono" aria-label="Command" style={{ margin: 0, padding: '10px 12px', paddingRight: 70, background: 'var(--panel)',
+              border: '1px solid var(--border)', borderRadius: 7, fontSize: 11.5, lineHeight: 1.5, overflowX: 'auto', whiteSpace: 'pre' }}>
+              {part.replace(/\n$/, '')}</pre>
+            <button onClick={() => { navigator.clipboard?.writeText(part.replace(/\n$/, '')).catch(() => {}); setCopied(i) }}
+              style={{ position: 'absolute', top: 6, right: 6, fontSize: 11, padding: '3px 9px', borderRadius: 5,
+                border: '1px solid var(--border)', color: 'var(--text-secondary)', background: 'var(--bg)' }}>
+              {copied === i ? 'Copied' : 'Copy'}</button>
+          </div>
+        ))}
+    </>
+  )
+}
+
 function ReportBlock({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -365,7 +389,7 @@ function ReportBlock({ label, children }: { label: string; children: React.React
 function Report({ bug, onEdit }: { bug: BugListItem; onEdit: () => void }) {
   return (
     <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {bug.description && <ReportBlock label="Summary">{bug.description}</ReportBlock>}
+      {bug.description && <ReportBlock label="Summary"><DescriptionText text={bug.description} /></ReportBlock>}
       {bug.steps_to_reproduce.length > 0 && (
         <ReportBlock label="Steps to reproduce">
           <ol style={{ margin: 0, paddingLeft: 20 }}>{bug.steps_to_reproduce.map((s, i) => <li key={i}>{s}</li>)}</ol>

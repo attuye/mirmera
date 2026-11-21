@@ -1296,6 +1296,8 @@ class ExploreProblem(BaseModel):
     # Mirmera's own key for "the same problem" when the symptom changes every time (a marker
     # value): set by Mirmera's checks, never by the AI.
     same_as: SkipJsonSchema[Optional[str]] = None
+    # The failed request as a curl command (app/curl.py), for the report. Mirmera's own, never the AI's.
+    reproduce: SkipJsonSchema[Optional[str]] = None
     # The failure Mirmera made happen to show it ("POST /api/verify answering 500"): its replays
     # can't make it happen again, so it isn't replayed. Mirmera's own, never the AI's.
     fault: SkipJsonSchema[Optional[str]] = None
@@ -1533,6 +1535,7 @@ class ExplorationRunOut(BaseModel):
     ai_provider: Optional[str] = None
     ai_model: Optional[str] = None
     video: Optional[str] = None  # set when its recording was kept: GET /exploration-runs/{id}/video
+    har: Optional[str] = None  # set when its network log was kept: GET /exploration-runs/{id}/har
     hints: list[dict] = []  # what a tester (or Mirmera) asked it to try next, and the step that took it up
     conditions: Optional[dict] = None  # device, network, locale, timezone it browsed with
     created_at: datetime

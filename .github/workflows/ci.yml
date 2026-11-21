@@ -7,7 +7,7 @@ on:
 
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # ubuntu-latest is 26.04, which Playwright does not support yet
     defaults:
       run:
         working-directory: backend
@@ -25,7 +25,7 @@ jobs:
       - run: python -m pytest -v
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # ubuntu-latest is 26.04, which Playwright does not support yet
     defaults:
       run:
         working-directory: frontend
@@ -41,7 +41,7 @@ jobs:
 
   jira-app:
     # The Forge app: manifest against Forge's schema, resolver and UI Kit screens bundle.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # ubuntu-latest is 26.04, which Playwright does not support yet
     defaults:
       run:
         working-directory: jira-app
@@ -57,7 +57,7 @@ jobs:
 
   e2e:
     # Browser tests: real backend (mock AI, fresh database) + real frontend + Chromium.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # ubuntu-latest is 26.04, which Playwright does not support yet
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

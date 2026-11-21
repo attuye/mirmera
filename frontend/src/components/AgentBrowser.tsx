@@ -5,8 +5,8 @@
  *  - Runs without a recording (older ones), and looking back while it works, play the
  *    step pictures one after another instead. */
 import { useEffect, useRef, useState } from 'react'
-import { Bot, ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react'
-import { api, ExplorationRun, explorationLiveUrl, explorationStepFrameUrl, explorationVideoUrl } from '../api/client'
+import { Bot, ChevronLeft, ChevronRight, Download, Pause, Play } from 'lucide-react'
+import { api, ExplorationRun, explorationLiveUrl, explorationHarUrl, explorationStepFrameUrl, explorationVideoUrl } from '../api/client'
 import { errorText } from './ui'
 
 type Step = ExplorationRun['steps'][number]
@@ -198,6 +198,15 @@ export default function AgentBrowser({ run, compact = false }: { run: Exploratio
           {running && picked !== null && (
             <button onClick={() => { setPicked(null); setPlaying(false) }} style={{ ...navButton, width: 'auto', padding: '2px 8px', fontSize: 11.5, color: 'var(--danger)' }}>Back to live</button>
           )}
+        </div>
+      )}
+
+      {!compact && !running && run.har && (
+        <div style={{ padding: '0 10px 8px', fontSize: 11.5 }}>
+          <a href={explorationHarUrl(run.id)} download style={{ color: 'var(--accent)', display: 'inline-flex', gap: 5, alignItems: 'center' }}
+            title="Every request the browser made, for DevTools or a developer. Cookies, authorization, passwords, tokens and pictures are taken out.">
+            <Download size={12} aria-hidden />Network log (HAR)
+          </a>
         </div>
       )}
     </section>
