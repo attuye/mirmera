@@ -1168,6 +1168,24 @@ def exif_leaks(leaks: list[dict], origins: set[str]) -> list[schemas.ExploreProb
         same_as="exif-gps")]
 
 
+def display_mismatches(found: list[dict]) -> list[schemas.ExploreProblem]:
+    """Bug drafts for values the page shows that its own JSON contradicts (app/agent/datacheck.py)."""
+    from urllib.parse import urlsplit
+    out = []
+    for m in found:
+        path = urlsplit(m["url"]).path or "/"
+        status = "the data says" in m["why"]
+        out.append(schemas.ExploreProblem(
+            title=f"{m['label']} shown differs from the app's own data", severity="high" if status else "medium",
+            expected=f"The page shows {m['label']} as the server sent it: {m['key']} = {json.dumps(m['value'], ensure_ascii=False)}.",
+            actual=f"The page shows \"{m['label']}: {m['shown']}\"; {m['method']} {path} answered "
+                   f"{m['key']}: {json.dumps(m['value'], ensure_ascii=False)} ({m['why']}).",
+            symptom=schemas.Symptom(kind="mismatch", value=m["label"],
+                                    explanation="Mirmera compared what the page shows with the JSON it was drawn from."),
+            same_as=f"mismatch:{m['label'].lower()}"))
+    return out
+
+
 GAP_WORDS = ("required", "missing", "empty", "please enter", "please fill", "please provide", "can't be blank",
              "cannot be blank", "is mandatory")
 LABEL_NOISE = {"the", "your", "and", "for", "with", "enter", "create", "accept", "date", "number"}
@@ -2023,6 +2041,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                 seen_pages: set[str] = set()  # pages already looked at for glitches and accessibility
                 asked: set[str] = set()  # questions already noted
                 tried_values: dict[str, set[str]] = {}  # field label -> values submitted (for the test ideas)
+                curios_noted: set[str] = set()  # display versus data: each curio once a run
                 last_fields: list[dict] = []  # the last form seen, for the ideas tally at the end
                 toured: set[str] = set()  # forms whose flow was toured after an accepted submit
                 tour_due = None
@@ -2215,6 +2234,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         tried[baseline_key(page.url)] = entry["n"]
                     failed_before, page_errors_before = len(signals.failed), len(signals.page_errors)
                     leaks_before = len(signals.exif_leaks)
+                    answers_before = signals.json_count
                     acted_at = time.monotonic()
                     bugs_before = len(bug_ids)
                     changed = (list((a.values or {}).keys()) if a.kind == "try"
@@ -2257,6 +2277,19 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     broke = crashes(signals.failed[failed_before:], signals.page_errors[page_errors_before:],
                                     signals.failed_requests, secrets_of(sign_in_cfg))
                     broke += exif_leaks(signals.exif_leaks[leaks_before:], origins)
+                    answers = [a for a in signals.json_answers if a["n"] > answers_before and in_app(a["url"], origins)]
+                    if answers:  # display versus data: the page against the JSON it was drawn from
+                        from app.agent import datacheck
+                        try:
+                            shown = await page.locator("body").inner_text(timeout=3_000)
+                        except Exception:
+                            shown = ""
+                        broke += display_mismatches(datacheck.mismatches(answers, shown))
+                        for c in datacheck.curios(answers, utcnow().date()):
+                            if c["key"] not in curios_noted:
+                                curios_noted.add(c["key"])
+                                _note(session_id, "issue", f"Curio: {c['what']} ({c['method']} {urlsplit_path(c['url'])}). "
+                                                           "Mirmera can't tell if this is wrong: worth a look.")
                     said: list[str] = []  # what the app answered this step
                     after = FormState()
                     toggled = False
