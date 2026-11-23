@@ -54,3 +54,11 @@ def test_they_are_counted_apart_from_the_test_ideas():
     every = ideas_for(f, today)
     assert total == len([w for w, _ in every if not w.startswith("Bug Magnet: ")])
     assert magnet_tally([f], {"Full name": {"Zoë Saldaña", "O'Brien-Smith"}}, today) == (1, len(every) - total)
+
+
+def test_a_date_picker_gets_only_real_dates():
+    """31 April can't be typed into <input type=date>: offering it wasted steps (Locator.fill: Malformed value)."""
+    picker = [v for _, v in magnet.ideas(field("Expiry date", "date"))]
+    assert picker == ["1900-01-01", "9999-12-31"]
+    typed = [v for _, v in magnet.ideas(field("Expiry date (DD/MM/YYYY)"))]  # a plain text box takes anything
+    assert "2026-04-31" in typed and "21/11/2026" in typed

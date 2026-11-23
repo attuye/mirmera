@@ -1140,3 +1140,32 @@ def test_a_problem_the_ai_reports_is_marked_as_its_judgement(client, kyc, monkey
     assert [j["judge"] for j in record["by_judge"]] == ["ai"] and record["overall"]["waiting"] == 1
     notes = [n["content"] for n in client.get(f"/sessions/{run['session_id']}/notes").json()]
     assert "The agent's drafts in this project so far: 0 saved as bugs, 0 as questions, 0 dismissed, 1 waiting for review." in notes
+
+
+def test_an_impossible_date_in_a_date_picker_is_not_sent_or_offered_again(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """The run that wasted 5 steps: 2027-02-29 can't be typed into <input type=date> (Malformed value)."""
+    project, charter = kyc
+    provider = scripted(monkeypatch, [
+        step("31 April", kind="try", values={"Expiry date": "2026-04-31"}),
+        step("Same again", kind="try", values={"Expiry date": "2026-04-31"}),
+        step("Done", kind="done", summary="Dates.")])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 4}).json())
+    first = run["steps"][0]
+    assert first["status"] == "refused" and "the browser's date picker, which only holds real dates" in first["detail"]
+    assert run["steps"][1]["status"] == "refused"  # not run again
+    ideas = provider.users[-1].split("<ideas>")[1].split("</ideas>")[0] if "<ideas>" in provider.users[-1] else ""
+    assert "2026-04-31" not in ideas and "21/11/2026" not in ideas
+
+
+def test_latest_run_writes_the_steps_storage_curios_and_drafts(client, kyc, monkeypatch, chromium_available, capsys):  # noqa: F811
+    """backend/latest_run.py: the plain-text dump a tester shares, with the new evidence in it."""
+    import latest_run
+    project, charter = kyc
+    scripted(monkeypatch, [step("A passport", kind="try", values={"Document type": "Passport"}),
+                           step("Done", kind="done", summary="A passport.")])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 4}).json())
+    latest_run.main(run["id"])
+    out = capsys.readouterr().out
+    assert out.startswith("Charter: Explore identity verification")
+    assert '1. [try] try Document type = "Passport", then submit -> drafted' in out
+    assert "\nCurios (" in out and "\nBug drafts:\n- [high] POST /api/verify fails with 500 (judged by: mirmera" in out

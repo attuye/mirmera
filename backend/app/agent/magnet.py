@@ -100,9 +100,23 @@ def lists_for(f: dict) -> list[str]:
 
 
 def ideas(f: dict) -> list[tuple[str, str]]:
-    """(what, value) from the lists for this field, labelled as Bug Magnet's."""
+    """(what, value) from the lists for this field, labelled as Bug Magnet's. A date field (the browser's
+    date picker) holds only real dates: 31 April or 21/11/2026 can't even be typed into it, so those are
+    left out; they stay for date fields that are plain text."""
     by_key = {k: vals for k, _, vals in CATEGORIES}
-    return [(f"Bug Magnet: {what}", value) for key in lists_for(f) for what, value in by_key[key]]
+    out = [(f"Bug Magnet: {what}", value) for key in lists_for(f) for what, value in by_key[key]]
+    if f.get("type") == "date":
+        out = [(w, v) for w, v in out if real_date(v)]
+    return out
+
+
+def real_date(v: str) -> bool:
+    from datetime import date
+    try:
+        date.fromisoformat(v)
+        return True
+    except ValueError:
+        return False
 
 
 def catalog() -> list[dict]:
