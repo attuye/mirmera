@@ -839,7 +839,9 @@ export interface ExplorationRun {
   steps: { n: number; thought: string; action: string; kind: string; status: string; detail: string; url: string
     frame?: string; box?: [number, number, number, number]; t?: number
     /** "Mirmera" when Mirmera took this step itself because the AI was stuck */
-    by?: string }[]
+    by?: string
+    storage?: string[]  // what the app kept in the browser after this step, values masked
+  }[]
   bug_ids: string[]; summary: string | null; detail: string | null; started_by: string | null
   ai_provider: string | null; ai_model: string | null; created_at: string; finished_at: string | null
   video?: string | null

@@ -1066,3 +1066,57 @@ def test_a_page_true_to_its_data_is_quiet(client, project, monkeypatch, chromium
     run, bugs, notes = explore_result(client, project, monkeypatch, buggy=False)
     assert not [b for b in bugs if "own data" in b["title"]]
     assert len([n for n in notes if n.startswith("Curio: ")]) == 1  # the data's own oddity, noted once
+
+
+ACCOUNT = """<!doctype html><title>Your account</title><h1>Your account</h1><p id=who></p>
+<button id=out>Sign out</button>
+<script>
+localStorage.setItem('auth', '%s')
+localStorage.setItem('kyc_draft', JSON.stringify({fullName: 'Abebe Kebede', dateOfBirth: '1990-01-01', documentNumber: 'EP1234567'}))
+localStorage.setItem('theme', 'dark')
+document.getElementById('who').textContent = 'Signed in'
+document.getElementById('out').onclick = () => {
+  localStorage.removeItem('auth')  // the bug: the draft with the customer's details stays behind
+  document.getElementById('who').textContent = 'Signed out'
+}
+</script>"""
+
+
+def test_what_the_app_keeps_in_the_browser(client, project, monkeypatch, chromium_available):  # noqa: F811
+    """Storage after each step, masked; curios for a token and personal details, and what signing out left."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from tests.test_storage import JWT
+
+    class App(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write((ACCOUNT % JWT).encode())
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        client.patch(f"/projects/{project['id']}", json={"app_url": url})
+        charter = client.post(f"/projects/{project['id']}/charters", json={"mission_statement": "Explore signing out to discover what stays behind"}).json()
+        scripted(monkeypatch, [step("The account", kind="goto", url=f"{url}/"),
+                               step("Done", kind="done", summary="Looked at the account.")])  # the agent never signs out
+        run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 5}).json())
+    finally:
+        server.shutdown()
+    notes = [n["content"] for n in client.get(f"/sessions/{run['session_id']}/notes").json()]
+    curios = [n for n in notes if n.startswith("Curio: ")]
+    assert any('local storage (kept after the browser closes) holds a token (JWT) under "auth"' in n for n in curios)
+    assert any('holds personal details (dateOfBirth, documentNumber, fullName) under "kyc_draft"' in n for n in curios)
+    assert any('after signing out, local storage still holds personal details' in n and '"kyc_draft"' in n for n in curios)
+    assert not any('after signing out' in n and '"auth"' in n for n in curios)  # that one was removed
+    opened, signed_out = run["steps"][0], next(s for s in run["steps"] if s["kind"] == "signout")
+    assert f"+ local: auth = ••• ({len(JWT)} characters)" in opened["storage"] and "+ local: theme = dark" in opened["storage"]
+    assert signed_out["by"] == "Mirmera" and signed_out["action"] == 'click "Sign out"'  # Mirmera signs out, last
+    assert signed_out["storage"] == ["- local: auth"] and signed_out["detail"] == "left behind: 1"
+    assert JWT not in json.dumps(run["steps"]) and "Abebe" not in json.dumps(run["steps"])

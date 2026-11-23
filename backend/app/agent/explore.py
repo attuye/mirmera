@@ -1168,6 +1168,33 @@ def exif_leaks(leaks: list[dict], origins: set[str]) -> list[schemas.ExploreProb
         same_as="exif-gps")]
 
 
+async def _sign_out_check(page, signals, history: list, session_id: str, run_id: str, noted: set) -> None:
+    """At the end of a run, Mirmera clicks the app's sign-out (when the page has one) and reads what the
+    browser still holds: a customer's details or session left behind for the next person on that phone."""
+    from app.agent import storage
+    from app.sign_in import SIGN_OUT
+    control = page.get_by_role("button", name=SIGN_OUT).or_(page.get_by_role("link", name=SIGN_OUT)).first
+    if not await control.count() or not await control.is_visible():
+        return
+    name = re.sub(r"\s+", " ", (await control.inner_text(timeout=2_000)).strip())[:40] or "Sign out"
+    before = await storage.snapshot(page)
+    await control.click(timeout=5_000)
+    await signals.settle(timeout_ms=5_000)
+    after = await storage.snapshot(page)
+    left = storage.after_sign_out(before, after)
+    history.append({"n": len(history) + 1, "thought": "Mirmera signs out at the end of the run and reads what the app "
+                    "left in the browser (local storage, session storage, cookies).",
+                    "action": f'click "{name}"', "kind": "signout", "status": "ok", "by": "Mirmera", "url": page.url,
+                    "detail": f"left behind: {len(left)}" if left else "nothing of the session or the customer's details left behind",
+                    "storage": storage.changes(before, after)})
+    _save(run_id, steps=list(history))
+    for c in left:
+        if c["key"] not in noted:
+            noted.add(c["key"])
+            _note(session_id, "issue", f"Curio: {c['what']} (seen on {urlsplit_path(page.url)}). "
+                                       "On a shared phone, the next person finds it: worth a look.")
+
+
 def display_mismatches(found: list[dict]) -> list[schemas.ExploreProblem]:
     """Bug drafts for values the page shows that its own JSON contradicts (app/agent/datacheck.py)."""
     from urllib.parse import urlsplit
@@ -2042,6 +2069,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                 asked: set[str] = set()  # questions already noted
                 tried_values: dict[str, set[str]] = {}  # field label -> values submitted (for the test ideas)
                 curios_noted: set[str] = set()  # display versus data: each curio once a run
+                stored: dict = {"local": {}, "session": {}, "cookies": {}}  # browser storage after the last step
                 last_fields: list[dict] = []  # the last form seen, for the ideas tally at the end
                 toured: set[str] = set()  # forms whose flow was toured after an accepted submit
                 tour_due = None
@@ -2290,6 +2318,20 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                 curios_noted.add(c["key"])
                                 _note(session_id, "issue", f"Curio: {c['what']} ({c['method']} {urlsplit_path(c['url'])}). "
                                                            "Mirmera can't tell if this is wrong: worth a look.")
+                    if in_app(page.url, origins):  # what the app keeps in the browser (app/agent/storage.py)
+                        from app.agent import storage
+                        now_stored = await storage.snapshot(page)
+                        if changed := storage.changes(stored, now_stored):
+                            entry["storage"] = changed
+                        found = storage.curios(now_stored, page.url.startswith("https:"))
+                        if storage.is_sign_out(describe(a), page.url):
+                            found = storage.after_sign_out(stored, now_stored) + found
+                        for c in found:
+                            if c["key"] not in curios_noted:
+                                curios_noted.add(c["key"])
+                                _note(session_id, "issue", f"Curio: {c['what']} (seen on {urlsplit_path(page.url)}). "
+                                                           "Mirmera can't tell if this is wrong: worth a look.")
+                        stored = now_stored
                     said: list[str] = []  # what the app answered this step
                     after = FormState()
                     toggled = False
@@ -2634,6 +2676,11 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                               + (f" Bug Magnet values tried: {m_done} of {m_total}." if m_total else ""))
                         ideas_seen.update(done=done, total=total, left=left)
             finally:
+                try:  # what signing out leaves in the browser: Mirmera signs out itself, last (the agent never does)
+                    if not page.is_closed() and in_app(page.url, origins):
+                        await _sign_out_check(page, signals, history, session_id, run_id, curios_noted)
+                except Exception as err:  # extra: it never fails the run
+                    logger.info("No sign-out check: %s", _first_line(err))
                 video = await _keep_recording(context, folder, run_id)
                 try:
                     known = secrets_of(sign_in_cfg) + [v for k, v in os.environ.items() if k.startswith("MIRMERA_SECRET_") and v]
