@@ -980,3 +980,89 @@ def test_a_photo_served_without_its_location_is_fine(client, project, monkeypatc
     run, bugs = explore_selfie(client, project, monkeypatch, strips=True)
     assert run["status"] == "finished"
     assert not [b for b in bugs if "GPS" in b["title"] or "EXIF" in b["title"]]
+
+
+RESULT = """<!doctype html><title>Verification result</title><h1>Verification result</h1><dl id=out></dl>
+<h2>Recent applications</h2><ul id=apps></ul>
+<script>
+const show = (k, v) => { document.getElementById('out').insertAdjacentHTML('beforeend', `<dt>${k}</dt><dd>${v}</dd>`) }
+fetch('/api/verification/42').then(r => r.json()).then(v => {
+  const BUGGY = %s
+  show('Status', BUGGY ? (v.status === 'rejected' ? 'Verified' : 'Rejected') : v.status)  // the bug: the label is inverted
+  const [y, m, d] = v.expiryDate.split('-').map(Number)
+  show('Expiry date', `${String(BUGGY ? d - 1 : d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`)  // and a day off
+  show('Document type', v.documentType === 'PASSPORT' ? 'Passport' : v.documentType)
+  show('Full name', v.fullName)
+})
+fetch('/api/applications').then(r => r.json()).then(list => {
+  document.getElementById('apps').innerHTML = list.map(a => `<li>#${a.id} ${a.status}</li>`).join('')
+})
+</script>"""
+
+
+def result_app(buggy: bool):
+    """A KYC result page drawn from its JSON: with buggy=True it inverts the status and shows the expiry a day early."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    apps = [{"id": i, "status": "verified", "expiryDate": "2027-06-01"} for i in range(1, 11)]
+    apps[3]["expiryDate"] = None  # the data's own oddity: a curio, whatever the page does
+
+    class App(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/api/verification/42":
+                body, kind = json.dumps({"id": 42, "status": "rejected", "expiryDate": "2026-11-30", "documentType": "PASSPORT",
+                                         "fullName": "Abebe Kebede"}).encode(), "application/json"
+            elif self.path == "/api/applications":
+                body, kind = json.dumps(apps).encode(), "application/json"
+            else:
+                body, kind = (RESULT % ("true" if buggy else "false")).encode(), "text/html"
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), App)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def explore_result(client, project, monkeypatch, buggy: bool):
+    server = result_app(buggy)
+    url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        client.patch(f"/projects/{project['id']}", json={"app_url": url})
+        charter = client.post(f"/projects/{project['id']}/charters", json={"mission_statement": "Explore the verification result to discover if it shows the truth"}).json()
+        scripted(monkeypatch, [step("The result", kind="goto", url=f"{url}/"), step("Look", kind="wait"),
+                               step("Done", kind="done", summary="Looked at the result.")])
+        run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 5}).json())
+        notes = [n["content"] for n in client.get(f"/sessions/{run['session_id']}/notes").json()]
+        return run, client.get(f"/sessions/{run['session_id']}/bugs").json(), notes
+    finally:
+        server.shutdown()
+
+
+@pytest.mark.confirm
+def test_the_page_contradicting_its_own_data_is_a_bug(client, project, monkeypatch, chromium_available):  # noqa: F811
+    """Display versus data: the API says rejected, the page says Verified; the expiry is shown a day early."""
+    run, bugs, notes = explore_result(client, project, monkeypatch, buggy=True)
+    titles = {b["title"]: b for b in bugs}
+    status = titles["Status shown differs from the app's own data"]
+    assert status["severity"] == "high"
+    assert 'The page shows "Status: Verified"; GET /api/verification/42 answered status: "rejected"' in status["actual"]
+    assert "the data says negative, the page says positive" in status["actual"]
+    expiry = titles["Expiry date shown differs from the app's own data"]
+    assert expiry["severity"] == "medium"
+    assert '"Expiry date: 29/11/2026"' in expiry["actual"] and 'expiryDate: "2026-11-30"' in expiry["actual"]
+    assert "one day earlier" in expiry["actual"]
+    assert status["confirmation"]["runs"] == 3 and status["confirmation"]["reproduced"] == 3  # compared again in fresh browsers
+    assert not [t for t in titles if t.startswith("Document type") or t.startswith("Full name")]  # Passport is PASSPORT
+    assert any(n.startswith("Curio: 1 of 10 records in (the answer) have no expiryDate (GET /api/applications)") for n in notes)
+
+
+def test_a_page_true_to_its_data_is_quiet(client, project, monkeypatch, chromium_available):  # noqa: F811
+    run, bugs, notes = explore_result(client, project, monkeypatch, buggy=False)
+    assert not [b for b in bugs if "own data" in b["title"]]
+    assert len([n for n in notes if n.startswith("Curio: ")]) == 1  # the data's own oddity, noted once

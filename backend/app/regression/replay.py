@@ -151,6 +151,8 @@ class Signals:
         self.in_flight = 0  # requests sent and not yet answered
         self.requested: list[str] = []  # every request URL, to check a test reaches the bug
         self.exif_leaks: list[dict] = []  # images the app served with a GPS location still in them (app/agent/exif.py)
+        self.json_answers: list[dict] = []  # JSON the app answered with, to compare with the page (app/agent/datacheck.py)
+        self.json_count = 0  # answers read so far; each answer's "n" says which it was
         self._reading: set = set()  # image bodies still being read
 
     def attach(self, page) -> None:
@@ -162,6 +164,7 @@ class Signals:
         page.on("pageerror", lambda e: self.page_errors.append(str(e)))
         page.on("response", lambda r: r.status >= 400 and self._failed(r))
         page.on("response", self._image)
+        page.on("response", self._json)
         page.on("requestfailed", lambda r: "ERR_ABORTED" not in (r.failure or "")
                 and self.failed.append(f"{r.method} {r.url} -> {r.failure}"))
 
@@ -183,6 +186,28 @@ class Signals:
         task = asyncio.ensure_future(self._read_image(r))
         self._reading.add(task)
         task.add_done_callback(self._reading.discard)
+
+    def _json(self, r) -> None:
+        """A JSON answer: kept (in the background) to compare with what the page shows."""
+        kind = (r.headers.get("content-type") or "").lower()
+        if r.status >= 300 or "json" not in kind or r.request.method == "OPTIONS":
+            return
+        task = asyncio.ensure_future(self._read_json(r, kind))
+        self._reading.add(task)
+        task.add_done_callback(self._reading.discard)
+
+    async def _read_json(self, r, kind: str) -> None:
+        from app.agent.datacheck import answer_of
+        try:
+            body = await r.body()
+        except Exception:
+            return
+        a = answer_of(r.url, r.request.method, body, kind)
+        if a:
+            self.json_count += 1
+            a["n"] = self.json_count
+            self.json_answers.append(a)
+            del self.json_answers[:-200]  # the latest 200: enough for any step
 
     async def _read_image(self, r) -> None:
         from app.agent.exif import gps_of

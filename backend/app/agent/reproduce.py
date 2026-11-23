@@ -164,6 +164,16 @@ async def verify(page, symptom: schemas.Symptom | dict, signals: Signals) -> tup
         return (True, hits[0]) if hits else (False, f"no {kind.replace('_', ' ')} containing '{value}' was seen")
     if kind == "url":
         return (value in page.url, f"URL is {page.url}")
+    if kind == "mismatch":  # the page against its JSON, compared again
+        from app.agent.datacheck import mismatches
+        try:
+            text = await page.locator("body").inner_text(timeout=3_000)
+        except Exception:
+            text = ""
+        hit = next((m for m in mismatches(signals.json_answers[-40:], text) if m["label"].lower() == value.lower()), None)
+        if hit:
+            return True, f"{hit['label']}: the page shows {hit['shown']}; the data says {hit['key']}: {hit['value']}"
+        return False, f"{value}: the page and its data agree now"
     if kind == "privacy":  # an image served with a GPS location in it, seen again
         from app.agent.exif import place
         if signals.exif_leaks:
