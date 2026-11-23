@@ -1645,7 +1645,7 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
             steps_to_reproduce=([clock_line()] if CLOCK_AT.get() else []) + ([first_step(p.fault)] if p.fault else []) + [s["action"]["summary"] if s["type"] == "action"
                                                        else f"open {s['url']}" for s in (edited or [])],
             reproduction_trail=trail, edited_steps=edited,
-            environment={"browser": f"{_engine_label()} (headless)", "url": page_url, "found_by": TESTER,
+            environment={"browser": f"{_engine_label()} (headless)", "url": page_url, "found_by": TESTER, "judged_by": p.found_by,
                          **({"engine": ENGINE.get()} if ENGINE.get() != "chromium" else {}),
                          **({"injected_failure": p.fault} if p.fault else {}),
                          **({"clock": clock_line().removeprefix("Set the computer's clock to "),
@@ -2220,6 +2220,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         continue
                     if a.kind == "problem":
                         a.problem.same_as = a.problem.fault = None  # Mirmera's own, never the AI's
+                        a.problem.found_by = "ai"  # the AI decided this is a problem (Mirmera checked the claim)
                         key = (a.problem.symptom.kind, a.problem.symptom.value)
                         if key in reported:
                             entry["status"], entry["detail"] = "refused", "already reported in this session"
@@ -2387,6 +2388,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                 if key not in reported and not broke and not own:  # a crash is drafted below, once
                                     must = "refused" if j.rule_expects == "refuse" else "accepted"
                                     problem = schemas.ExploreProblem(
+                                        found_by="ai",  # the AI read the answer and judged the rule broken
                                         title=(j.title or f"{j.answer_means.capitalize()} although {rule_id} says it must be {must}")[:200],
                                         expected=f"Per {rule_id} (\"{rule_text[:300]}\"), this must be {must}. {j.because}"[:600],
                                         actual=f"With {sent_text(before)[:300]}, the app answered: \"{quote[:200]}\"."[:600],
@@ -2881,6 +2883,13 @@ def _wrap_up(session_id: str, final: dict, history: list[dict], bug_ids: list[st
     with SessionLocal() as db:
         db.add(models.Note(session_id=session_id, tag="setup", content=text[:4000]))
         s = db.get(models.Session, session_id)
+        try:  # how far to trust the drafts: what testers made of the agent's drafts so far (app/agent/record.py)
+            from app.agent.record import line, record
+            charter = db.get(models.Charter, s.charter_id) if s else None
+            if charter and (said := line(record(db, charter.project_id))):
+                db.add(models.Note(session_id=session_id, tag="setup", content=said))
+        except Exception:
+            logger.info("No track record for this run", exc_info=True)
         if s and not s.ended_at and not s.paused_at:
             s.paused_at = utcnow()  # the clock stops; testing time is the agent's own
         db.commit()

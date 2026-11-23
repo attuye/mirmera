@@ -1301,6 +1301,8 @@ class ExploreProblem(BaseModel):
     same_as: SkipJsonSchema[Optional[str]] = None
     # The failed request as a curl command (app/curl.py), for the report. Mirmera's own, never the AI's.
     reproduce: SkipJsonSchema[Optional[str]] = None
+    # who decided it is a problem: "mirmera" (its own checks, plain code) or "ai" (the AI judged a rule broken)
+    found_by: SkipJsonSchema[str] = "mirmera"
     # The failure Mirmera made happen to show it ("POST /api/verify answering 500"): its replays
     # can't make it happen again, so it isn't replayed. Mirmera's own, never the AI's.
     fault: SkipJsonSchema[Optional[str]] = None

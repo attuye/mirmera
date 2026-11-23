@@ -1,3 +1,4 @@
+import AgentRecord from '../components/AgentRecord'
 import { useEffect, useState } from 'react'
 import Sidebar from '../components/Sidebar'
 import { ErrorLine, errorText, fieldLabel, input, primaryButton, quietButton, ConfirmDelete } from '../components/ui'
@@ -68,6 +69,8 @@ export default function Bugs() {
           Bugs logged during sessions wait here for review. Draft a report with AI or write it yourself,
           then save it as a bug, which needs the oracle that makes it a problem, or as a question for the team.
         </p>
+
+        <AgentRecord projectId={project.id} refresh={bugs.filter((b) => kindOf(b) !== 'unreviewed').length} />
 
         <div role="tablist" aria-label="Filter bugs" style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
           {(['all', 'unreviewed', 'bug', 'question', 'dismissed'] as Filter[]).map((f) => (

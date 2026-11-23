@@ -81,6 +81,7 @@ def test_it_explores_and_drafts_a_checked_bug(client, kyc, monkeypatch, chromium
     bug = client.get(f"/sessions/{run['session_id']}/bugs").json()[0]
     assert bug["id"] == bug_id and bug["kind"] is None  # a draft: the tester reviews it
     assert bug["severity"] == "high" and bug["title"] == "POST /api/verify fails with 500"
+    assert bug["environment"]["judged_by"] == "mirmera"  # a failing request: Mirmera's own check (app/agent/record.py)
     steps = client.get(f"/bugs/{bug_id}/steps").json()
     assert steps["source"] == "edited"
     assert [s["type"] for s in steps["steps"]] == ["goto", "action", "action"]
@@ -1120,3 +1121,22 @@ def test_what_the_app_keeps_in_the_browser(client, project, monkeypatch, chromiu
     assert signed_out["by"] == "Mirmera" and signed_out["action"] == 'click "Sign out"'  # Mirmera signs out, last
     assert signed_out["storage"] == ["- local: auth"] and signed_out["detail"] == "left behind: 1"
     assert JWT not in json.dumps(run["steps"]) and "Abebe" not in json.dumps(run["steps"])
+
+
+def test_a_problem_the_ai_reports_is_marked_as_its_judgement(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """The track record tells the two apart: what the AI decided is a problem, and what Mirmera's checks found."""
+    project, charter = kyc
+    scripted(monkeypatch, [
+        step("Pick the national ID", kind="select", locator={"method": "label", "value": "Document type"}, value="National ID"),
+        step("Submit", kind="click", locator=VERIFY),
+        step("It says verified without checking the photo", kind="problem", problem={
+            "title": "Verified without a photo check", "expected": "The photo is checked first", "actual": "Verified at once",
+            "symptom": {"kind": "text_visible", "value": "Verified", "explanation": "the page says so"}}),
+        step("Covered", kind="done", summary="National ID verified at once.")])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 6}).json())
+    bug = next(b for b in client.get(f"/sessions/{run['session_id']}/bugs").json() if b["title"] == "Verified without a photo check")
+    assert bug["environment"]["judged_by"] == "ai"
+    record = client.get(f"/projects/{project['id']}/agent-record").json()
+    assert [j["judge"] for j in record["by_judge"]] == ["ai"] and record["overall"]["waiting"] == 1
+    notes = [n["content"] for n in client.get(f"/sessions/{run['session_id']}/notes").json()]
+    assert "The agent's drafts in this project so far: 0 saved as bugs, 0 as questions, 0 dismissed, 1 waiting for review." in notes
