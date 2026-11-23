@@ -164,6 +164,12 @@ async def verify(page, symptom: schemas.Symptom | dict, signals: Signals) -> tup
         return (True, hits[0]) if hits else (False, f"no {kind.replace('_', ' ')} containing '{value}' was seen")
     if kind == "url":
         return (value in page.url, f"URL is {page.url}")
+    if kind == "privacy":  # an image served with a GPS location in it, seen again
+        from app.agent.exif import place
+        if signals.exif_leaks:
+            g = signals.exif_leaks[-1]
+            return True, f"{g['url']} was served with GPS {place(g)}" + (f" (camera: {g['camera']})" if g["camera"] else "")
+        return False, "no image was served with a GPS location in it"
     if kind == "layout":  # look at the page at phone width again
         from app.agent.layout import check_symptom as layout_symptom
         return await layout_symptom(page, value)

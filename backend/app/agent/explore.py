@@ -741,7 +741,10 @@ def ideas_for(f: dict, today, rules: dict[str, str] | None = None) -> list[tuple
     from app.agent import ethiopia
     first += [(w, v) for w, v in ethiopia.ideas(f) if v not in {x for _, x in first}]  # how people here write it
     have = {v for _, v in first}
-    return first + [(w, v) for w, v in _type_ideas(f, today) if v not in have]
+    rest = [(w, v) for w, v in _type_ideas(f, today) if v not in have]
+    have |= {v for _, v in rest}
+    from app.agent import magnet  # Bug Magnet's lists: once the obvious ideas are done
+    return first + rest + [(w, v) for w, v in magnet.ideas(f) if v not in have]
 
 
 def _type_ideas(f: dict, today) -> list[tuple[str, str]]:
@@ -838,15 +841,25 @@ def is_tried(f: dict, value: str, tried: dict[str, set[str]]) -> bool:
     return value in done or expand(value, f) in done
 
 
+MAGNET = "Bug Magnet: "
+
+
+def magnet_tally(fields: list[dict], tried: dict[str, set[str]], today) -> tuple[int, int]:
+    """Bug Magnet values tried, of those offered for these fields."""
+    pairs = [(f, v) for f in fields for w, v in ideas_for(f, today) if w.startswith(MAGNET)]
+    return sum(1 for f, v in pairs if is_tried(f, v, tried)), len(pairs)
+
+
 def ideas_text(fields: list[dict], tried: dict[str, set[str]], today, limit_fields: int = 6,
                rules: dict[str, str] | None = None) -> tuple[str, int, int]:
     """The ideas not tried yet for the fields on this page (a few per field), and the tally."""
     lines, total, done = [], 0, 0
     for f in fields[:limit_fields]:
         ideas = ideas_for(f, today, rules)
-        total += len(ideas)
+        main = [(w, v) for w, v in ideas if not w.startswith(MAGNET)]  # Bug Magnet's are extra: counted apart
+        total += len(main)
+        done += sum(1 for _, v in main if is_tried(f, v, tried))
         left = [(w, v) for w, v in ideas if not is_tried(f, v, tried)]
-        done += len(ideas) - len(left)
         if left:
             lines.append(f'- {f["label"]}: ' + "; ".join(f'{w} ("{v[:40]}")' for w, v in left[:3]))
     head = (f"Test ideas not tried yet ({done} of {total} tried), each with the rest of the form valid "
@@ -1129,6 +1142,30 @@ def crashes(failed: list[str], page_errors: list[str], requests: list[dict] | No
             symptom=schemas.Symptom(kind="page_error", value=first[:120],
                                     explanation="An uncaught error in the page, seen by Mirmera.")))
     return out
+
+
+def exif_leaks(leaks: list[dict], origins: set[str]) -> list[schemas.ExploreProblem]:
+    """A bug draft when the app served an image that still says where it was taken (EXIF GPS).
+    No rule needed: a customer's photo must never give away their location. One draft per run."""
+    from urllib.parse import urlsplit
+    from app.agent.exif import place
+    mine = [g for g in leaks if in_app(g["url"], origins)]
+    if not mine:
+        return []
+    g = next((x for x in mine if x["probe"]), mine[0])
+    path = urlsplit(g["url"]).path or "/"
+    whose = ("the location and camera Mirmera put in the photo it uploaded, so the upload is stored and served untouched"
+             if g["probe"] else "a location Mirmera didn't put there: someone's photo, served with where it was taken")
+    return [schemas.ExploreProblem(
+        title="Uploaded photo is served back with its GPS location (EXIF)" if g["probe"]
+        else "A photo is served with a GPS location in it (EXIF)", severity="high",
+        expected="Photos are stripped of their EXIF data (GPS location, camera) when uploaded, or at least before "
+                 "they are shown again: a customer's photo must not tell anyone where they live.",
+        actual=f"{path} was served with GPS {place(g)}" + (f" and camera \"{g['camera']}\"" if g["camera"] else "")
+               + f": {whose}.",
+        symptom=schemas.Symptom(kind="privacy", value="gps",
+                                explanation="Mirmera read the EXIF of every image the app sent to the browser."),
+        same_as="exif-gps")]
 
 
 GAP_WORDS = ("required", "missing", "empty", "please enter", "please fill", "please provide", "can't be blank",
@@ -2177,6 +2214,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     if a.kind == "try" and not a.values:
                         tried[baseline_key(page.url)] = entry["n"]
                     failed_before, page_errors_before = len(signals.failed), len(signals.page_errors)
+                    leaks_before = len(signals.exif_leaks)
                     acted_at = time.monotonic()
                     bugs_before = len(bug_ids)
                     changed = (list((a.values or {}).keys()) if a.kind == "try"
@@ -2218,6 +2256,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             f"that left the app ({origin(left)}), so the browser went back"
                     broke = crashes(signals.failed[failed_before:], signals.page_errors[page_errors_before:],
                                     signals.failed_requests, secrets_of(sign_in_cfg))
+                    broke += exif_leaks(signals.exif_leaks[leaks_before:], origins)
                     said: list[str] = []  # what the app answered this step
                     after = FormState()
                     toggled = False
@@ -2555,9 +2594,11 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     _, done, total = ideas_text(last_fields, tried_values, utcnow().date(), limit_fields=20, rules=rules_of(ctx))
                     if total:
                         left = [f'{f["label"]}: {w}' for f in last_fields for w, v in ideas_for(f, utcnow().date(), rules_of(ctx))
-                                if not is_tried(f, v, tried_values)]
+                                if not is_tried(f, v, tried_values) and not w.startswith(MAGNET)]
+                        m_done, m_total = magnet_tally(last_fields[:20], tried_values, utcnow().date())
                         _note(session_id, "setup", f"Test ideas tried: {done} of {total}."
-                              + (f" Not tried: {'; '.join(left[:8])}" + ("…" if len(left) > 8 else "") if left else ""))
+                              + (f" Not tried: {'; '.join(left[:8])}" + ("…" if len(left) > 8 else "") if left else "")
+                              + (f" Bug Magnet values tried: {m_done} of {m_total}." if m_total else ""))
                         ideas_seen.update(done=done, total=total, left=left)
             finally:
                 video = await _keep_recording(context, folder, run_id)

@@ -150,6 +150,8 @@ class Signals:
         self.failed_requests: list[dict] = []  # each failed answer's request (method, url, status, headers, body): "copy as curl"
         self.in_flight = 0  # requests sent and not yet answered
         self.requested: list[str] = []  # every request URL, to check a test reaches the bug
+        self.exif_leaks: list[dict] = []  # images the app served with a GPS location still in them (app/agent/exif.py)
+        self._reading: set = set()  # image bodies still being read
 
     def attach(self, page) -> None:
         page.on("request", lambda r: (self._count(+1), self.requested.append(r.url)))
@@ -159,6 +161,7 @@ class Signals:
                 and self.console_errors.append(m.text))
         page.on("pageerror", lambda e: self.page_errors.append(str(e)))
         page.on("response", lambda r: r.status >= 400 and self._failed(r))
+        page.on("response", self._image)
         page.on("requestfailed", lambda r: "ERR_ABORTED" not in (r.failure or "")
                 and self.failed.append(f"{r.method} {r.url} -> {r.failure}"))
 
@@ -171,6 +174,26 @@ class Signals:
         self.failed_requests.append({"method": r.request.method, "url": r.url, "status": r.status,
                                      "headers": headers, "body": body})
 
+    def _image(self, r) -> None:
+        """An image the app sent: read it (in the background) for a GPS location still inside."""
+        from app.agent.exif import IMAGE_TYPES
+        kind = (r.headers.get("content-type") or "").split(";")[0].strip().lower()
+        if r.status != 200 or kind not in IMAGE_TYPES:
+            return
+        task = asyncio.ensure_future(self._read_image(r))
+        self._reading.add(task)
+        task.add_done_callback(self._reading.discard)
+
+    async def _read_image(self, r) -> None:
+        from app.agent.exif import gps_of
+        try:
+            body = await r.body()
+        except Exception:  # the page moved on before the body could be read
+            return
+        g = gps_of(body)
+        if g:
+            self.exif_leaks.append({"url": r.url, **g})
+
     def _count(self, change: int) -> None:
         self.in_flight = max(0, self.in_flight + change)
 
@@ -180,6 +203,8 @@ class Signals:
         page that never goes quiet (polling) only costs that.
         (Playwright's "networkidle" can't do this: once a page has reached it on load,
         it returns at once, even with a request just sent.)"""
+        if self._reading:  # images still being read for a GPS location
+            await asyncio.wait(set(self._reading), timeout=timeout_ms / 1000)
         deadline = time.monotonic() + timeout_ms / 1000
         quiet_since = None
         while time.monotonic() < deadline:

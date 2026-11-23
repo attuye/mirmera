@@ -27,6 +27,7 @@ test('charters: suggest from a pull request, keep where it came from, start a se
     await first.getByRole('button', { name: 'Accept' }).click()
     const charter = yours.getByRole('listitem', { name: mission })
     await expect(charter.getByRole('link', { name: /from PR #42/ })).toHaveAttribute('href', 'https://mock-github.local/addisverify/charters/pull/42')
+    await expect(suggestions.getByRole('listitem', { name: mission })).toHaveCount(0)  // gone from the suggestions before they're counted
   })
 
   await test.step('suggestions are still there after leaving the page; one is dropped', async () => {

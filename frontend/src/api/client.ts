@@ -1086,6 +1086,13 @@ export const reportUrl = (projectId: string, kind: 'md' | 'html', since?: string
 
 export const suiteExportUrl = (projectId: string) => `${BASE_URL}/projects/${projectId}/regression-tests/export`
 
+/** One of Bug Magnet's lists: values that tend to break forms, each typed out as the app will get it. */
+export interface BugMagnetList {
+  key: string
+  title: string
+  values: { what: string; value: string; code: string | null }[]
+}
+
 export const api = {
   listRegressionTests: (projectId: string) => request<SuiteTest[]>(`/projects/${projectId}/regression-tests`),
   runSuite: (projectId: string, base_url?: string, browser?: BrowserEngine) =>
@@ -1166,6 +1173,7 @@ export const api = {
   exploreCharter: (charterId: string, body: { max_steps?: number; base_url?: string; conditions?: ExploreConditions } = {}) =>
     request<ExplorationRun>(`/charters/${charterId}/explore`, { method: 'POST', body: JSON.stringify(body) }),
   charterExploration: (charterId: string) => request<ExplorationRun | null>(`/charters/${charterId}/exploration`),
+  bugMagnet: () => request<BugMagnetList[]>('/bug-magnet'),
   sessionExploration: (sessionId: string) => request<ExplorationRun | null>(`/sessions/${sessionId}/exploration`),
   explorationRun: (runId: string) => request<ExplorationRun>(`/exploration-runs/${runId}`),
   cancelExploration: (runId: string) => request<ExplorationRun>(`/exploration-runs/${runId}/cancel`, { method: 'POST' }),

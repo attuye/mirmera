@@ -128,6 +128,13 @@ def latest(charter_id: str, db: DBSession = Depends(get_db)):
     return _run_or_404(db, run.id) if run else None
 
 
+@router.get("/bug-magnet")
+def bug_magnet():
+    """Bug Magnet's lists of values that tend to break forms, for the session's tool."""
+    from app.agent import magnet
+    return magnet.catalog()
+
+
 @router.get("/sessions/{session_id}/exploration", response_model=schemas.ExplorationRunOut | None)
 def session_latest(session_id: str, db: DBSession = Depends(get_db)):
     """The agent's latest run in this session (a later run of the same charter is in another session)."""
