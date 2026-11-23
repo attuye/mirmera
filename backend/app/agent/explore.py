@@ -1168,6 +1168,33 @@ def exif_leaks(leaks: list[dict], origins: set[str]) -> list[schemas.ExploreProb
         same_as="exif-gps")]
 
 
+async def _sign_out_check(page, signals, history: list, session_id: str, run_id: str, noted: set) -> None:
+    """At the end of a run, Mirmera clicks the app's sign-out (when the page has one) and reads what the
+    browser still holds: a customer's details or session left behind for the next person on that phone."""
+    from app.agent import storage
+    from app.sign_in import SIGN_OUT
+    control = page.get_by_role("button", name=SIGN_OUT).or_(page.get_by_role("link", name=SIGN_OUT)).first
+    if not await control.count() or not await control.is_visible():
+        return
+    name = re.sub(r"\s+", " ", (await control.inner_text(timeout=2_000)).strip())[:40] or "Sign out"
+    before = await storage.snapshot(page)
+    await control.click(timeout=5_000)
+    await signals.settle(timeout_ms=5_000)
+    after = await storage.snapshot(page)
+    left = storage.after_sign_out(before, after)
+    history.append({"n": len(history) + 1, "thought": "Mirmera signs out at the end of the run and reads what the app "
+                    "left in the browser (local storage, session storage, cookies).",
+                    "action": f'click "{name}"', "kind": "signout", "status": "ok", "by": "Mirmera", "url": page.url,
+                    "detail": f"left behind: {len(left)}" if left else "nothing of the session or the customer's details left behind",
+                    "storage": storage.changes(before, after)})
+    _save(run_id, steps=list(history))
+    for c in left:
+        if c["key"] not in noted:
+            noted.add(c["key"])
+            _note(session_id, "issue", f"Curio: {c['what']} (seen on {urlsplit_path(page.url)}). "
+                                       "On a shared phone, the next person finds it: worth a look.")
+
+
 def display_mismatches(found: list[dict]) -> list[schemas.ExploreProblem]:
     """Bug drafts for values the page shows that its own JSON contradicts (app/agent/datacheck.py)."""
     from urllib.parse import urlsplit
@@ -1618,7 +1645,7 @@ def _draft_bug(session_id: str, charter_id: str, p: schemas.ExploreProblem, evid
             steps_to_reproduce=([clock_line()] if CLOCK_AT.get() else []) + ([first_step(p.fault)] if p.fault else []) + [s["action"]["summary"] if s["type"] == "action"
                                                        else f"open {s['url']}" for s in (edited or [])],
             reproduction_trail=trail, edited_steps=edited,
-            environment={"browser": f"{_engine_label()} (headless)", "url": page_url, "found_by": TESTER,
+            environment={"browser": f"{_engine_label()} (headless)", "url": page_url, "found_by": TESTER, "judged_by": p.found_by,
                          **({"engine": ENGINE.get()} if ENGINE.get() != "chromium" else {}),
                          **({"injected_failure": p.fault} if p.fault else {}),
                          **({"clock": clock_line().removeprefix("Set the computer's clock to "),
@@ -2042,6 +2069,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                 asked: set[str] = set()  # questions already noted
                 tried_values: dict[str, set[str]] = {}  # field label -> values submitted (for the test ideas)
                 curios_noted: set[str] = set()  # display versus data: each curio once a run
+                stored: dict = {"local": {}, "session": {}, "cookies": {}}  # browser storage after the last step
                 last_fields: list[dict] = []  # the last form seen, for the ideas tally at the end
                 toured: set[str] = set()  # forms whose flow was toured after an accepted submit
                 tour_due = None
@@ -2192,6 +2220,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                         continue
                     if a.kind == "problem":
                         a.problem.same_as = a.problem.fault = None  # Mirmera's own, never the AI's
+                        a.problem.found_by = "ai"  # the AI decided this is a problem (Mirmera checked the claim)
                         key = (a.problem.symptom.kind, a.problem.symptom.value)
                         if key in reported:
                             entry["status"], entry["detail"] = "refused", "already reported in this session"
@@ -2290,6 +2319,20 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                 curios_noted.add(c["key"])
                                 _note(session_id, "issue", f"Curio: {c['what']} ({c['method']} {urlsplit_path(c['url'])}). "
                                                            "Mirmera can't tell if this is wrong: worth a look.")
+                    if in_app(page.url, origins):  # what the app keeps in the browser (app/agent/storage.py)
+                        from app.agent import storage
+                        now_stored = await storage.snapshot(page)
+                        if kept := storage.changes(stored, now_stored):  # not "changed": that's the fields this step changed
+                            entry["storage"] = kept
+                        found = storage.curios(now_stored, page.url.startswith("https:"))
+                        if storage.is_sign_out(describe(a), page.url):
+                            found = storage.after_sign_out(stored, now_stored) + found
+                        for c in found:
+                            if c["key"] not in curios_noted:
+                                curios_noted.add(c["key"])
+                                _note(session_id, "issue", f"Curio: {c['what']} (seen on {urlsplit_path(page.url)}). "
+                                                           "Mirmera can't tell if this is wrong: worth a look.")
+                        stored = now_stored
                     said: list[str] = []  # what the app answered this step
                     after = FormState()
                     toggled = False
@@ -2345,6 +2388,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                                 if key not in reported and not broke and not own:  # a crash is drafted below, once
                                     must = "refused" if j.rule_expects == "refuse" else "accepted"
                                     problem = schemas.ExploreProblem(
+                                        found_by="ai",  # the AI read the answer and judged the rule broken
                                         title=(j.title or f"{j.answer_means.capitalize()} although {rule_id} says it must be {must}")[:200],
                                         expected=f"Per {rule_id} (\"{rule_text[:300]}\"), this must be {must}. {j.because}"[:600],
                                         actual=f"With {sent_text(before)[:300]}, the app answered: \"{quote[:200]}\"."[:600],
@@ -2634,6 +2678,11 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                               + (f" Bug Magnet values tried: {m_done} of {m_total}." if m_total else ""))
                         ideas_seen.update(done=done, total=total, left=left)
             finally:
+                try:  # what signing out leaves in the browser: Mirmera signs out itself, last (the agent never does)
+                    if not page.is_closed() and in_app(page.url, origins):
+                        await _sign_out_check(page, signals, history, session_id, run_id, curios_noted)
+                except Exception as err:  # extra: it never fails the run
+                    logger.info("No sign-out check: %s", _first_line(err))
                 video = await _keep_recording(context, folder, run_id)
                 try:
                     known = secrets_of(sign_in_cfg) + [v for k, v in os.environ.items() if k.startswith("MIRMERA_SECRET_") and v]
@@ -2834,6 +2883,13 @@ def _wrap_up(session_id: str, final: dict, history: list[dict], bug_ids: list[st
     with SessionLocal() as db:
         db.add(models.Note(session_id=session_id, tag="setup", content=text[:4000]))
         s = db.get(models.Session, session_id)
+        try:  # how far to trust the drafts: what testers made of the agent's drafts so far (app/agent/record.py)
+            from app.agent.record import line, record
+            charter = db.get(models.Charter, s.charter_id) if s else None
+            if charter and (said := line(record(db, charter.project_id))):
+                db.add(models.Note(session_id=session_id, tag="setup", content=said))
+        except Exception:
+            logger.info("No track record for this run", exc_info=True)
         if s and not s.ended_at and not s.paused_at:
             s.paused_at = utcnow()  # the clock stops; testing time is the agent's own
         db.commit()

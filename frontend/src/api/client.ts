@@ -839,7 +839,9 @@ export interface ExplorationRun {
   steps: { n: number; thought: string; action: string; kind: string; status: string; detail: string; url: string
     frame?: string; box?: [number, number, number, number]; t?: number
     /** "Mirmera" when Mirmera took this step itself because the AI was stuck */
-    by?: string }[]
+    by?: string
+    storage?: string[]  // what the app kept in the browser after this step, values masked
+  }[]
   bug_ids: string[]; summary: string | null; detail: string | null; started_by: string | null
   ai_provider: string | null; ai_model: string | null; created_at: string; finished_at: string | null
   video?: string | null
@@ -1093,6 +1095,17 @@ export interface BugMagnetList {
   values: { what: string; value: string; code: string | null }[]
 }
 
+/** What testers made of the agent's drafts (app/agent/record.py). */
+export interface AgentTally {
+  drafts: number; bugs: number; questions: number; dismissed: number; waiting: number; kept_share: number | null
+  dismissed_for: Record<string, number>; replayed: number; every_time: number; never_again: number
+}
+export interface AgentRecord {
+  overall: AgentTally
+  by_judge: (AgentTally & { judge: string; label: string })[]
+  runs: (AgentTally & { run_id: string; session_id: string | null; at: string | null; mission: string })[]
+}
+
 export const api = {
   listRegressionTests: (projectId: string) => request<SuiteTest[]>(`/projects/${projectId}/regression-tests`),
   runSuite: (projectId: string, base_url?: string, browser?: BrowserEngine) =>
@@ -1174,6 +1187,7 @@ export const api = {
     request<ExplorationRun>(`/charters/${charterId}/explore`, { method: 'POST', body: JSON.stringify(body) }),
   charterExploration: (charterId: string) => request<ExplorationRun | null>(`/charters/${charterId}/exploration`),
   bugMagnet: () => request<BugMagnetList[]>('/bug-magnet'),
+  agentRecord: (projectId: string) => request<AgentRecord>(`/projects/${projectId}/agent-record`),
   sessionExploration: (sessionId: string) => request<ExplorationRun | null>(`/sessions/${sessionId}/exploration`),
   explorationRun: (runId: string) => request<ExplorationRun>(`/exploration-runs/${runId}`),
   cancelExploration: (runId: string) => request<ExplorationRun>(`/exploration-runs/${runId}/cancel`, { method: 'POST' }),

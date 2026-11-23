@@ -162,11 +162,17 @@ export default function AgentBrowser({ run, compact = false }: { run: Exploratio
       {step && !compact && (
         <div aria-label="Step on screen" style={{ padding: '7px 10px', borderTop: '1px solid var(--border)', fontSize: 12 }}>
           <span className="mono" style={{ fontSize: 11, color: 'var(--text-quiet)', marginRight: 8 }}>Step {step.n}</span>
-          {step.by === 'Mirmera' && <span title={step.kind === 'tour' ? 'After an accepted submit, Mirmera opened the answer page directly, refreshed it, went back, sent the form twice quickly, made its request fail, and did it with the keyboard only' : step.kind === 'confirm' ? "When the run ended, Mirmera replayed each new draft's steps in fresh browsers" : step.kind === 'access' ? "Mirmera opened this user's own pages signed out and as the second user" : 'The AI was stuck, so Mirmera took this step itself'} style={{ fontSize: 10.5, marginRight: 6, padding: '1px 6px', borderRadius: 8, background: 'var(--accent-bg)', color: 'var(--accent)' }}>{step.kind === 'tour' ? "Mirmera's flow tour" : step.kind === 'confirm' ? "Mirmera's replay" : step.kind === 'access' ? "Mirmera: who sees what" : 'Mirmera stepped in'}</span>}
+          {step.by === 'Mirmera' && <span title={step.kind === 'tour' ? 'After an accepted submit, Mirmera opened the answer page directly, refreshed it, went back, sent the form twice quickly, made its request fail, and did it with the keyboard only' : step.kind === 'confirm' ? "When the run ended, Mirmera replayed each new draft's steps in fresh browsers" : step.kind === 'access' ? "Mirmera opened this user's own pages signed out and as the second user" : step.kind === 'signout' ? 'At the end of the run, Mirmera signed out and read what the app left in the browser' : 'The AI was stuck, so Mirmera took this step itself'} style={{ fontSize: 10.5, marginRight: 6, padding: '1px 6px', borderRadius: 8, background: 'var(--accent-bg)', color: 'var(--accent)' }}>{step.kind === 'tour' ? "Mirmera's flow tour" : step.kind === 'confirm' ? "Mirmera's replay" : step.kind === 'access' ? "Mirmera: who sees what" : step.kind === 'signout' ? 'Mirmera signed out' : 'Mirmera stepped in'}</span>}
           <span>{step.action}</span>
           {step.status !== 'ok' && <span style={{ color: 'var(--warning)' }}> ({step.status})</span>}
           {step.detail && <span style={{ color: 'var(--text-secondary)' }}> → {step.detail}</span>}
           {step.thought && <div style={{ color: 'var(--text-tertiary)', fontSize: 12, marginTop: 3 }}>{step.thought}</div>}
+          {step.storage && step.storage.length > 0 && (
+            <div aria-label="Browser storage" title="What the app kept in the browser after this step: local storage, session storage and cookies. Tokens and personal details are masked."
+              className="mono" style={{ fontSize: 10.5, color: 'var(--text-tertiary)', marginTop: 4 }}>
+              Storage: {step.storage.join(' · ')}
+            </div>
+          )}
         </div>
       )}
 

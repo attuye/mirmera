@@ -191,6 +191,13 @@ def list_all_bugs(project_id: str, db: DBSession = Depends(get_db)):
         for b, c in rows
     ]
 
+@bugs_list_router.get("/projects/{project_id}/agent-record")
+def agent_record(project_id: str, db: DBSession = Depends(get_db)):
+    """What testers made of the exploration agent's drafts: overall, by who judged them, and per run."""
+    from app.agent.record import record
+    return record(db, project_id)
+
+
 @router.post("/{session_id}/end", response_model=schemas.DebriefOut)
 async def end_session(session_id: str, background: BackgroundTasks, db: DBSession = Depends(get_db)):
     """Ends the session at once and answers with its debrief, still being written: the AI
