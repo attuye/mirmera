@@ -2321,8 +2321,8 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     if in_app(page.url, origins):  # what the app keeps in the browser (app/agent/storage.py)
                         from app.agent import storage
                         now_stored = await storage.snapshot(page)
-                        if changed := storage.changes(stored, now_stored):
-                            entry["storage"] = changed
+                        if kept := storage.changes(stored, now_stored):  # not "changed": that's the fields this step changed
+                            entry["storage"] = kept
                         found = storage.curios(now_stored, page.url.startswith("https:"))
                         if storage.is_sign_out(describe(a), page.url):
                             found = storage.after_sign_out(stored, now_stored) + found
