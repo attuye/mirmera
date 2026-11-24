@@ -84,3 +84,11 @@ def test_curious_things_inside_the_data():
 def test_nothing_curious_in_ordinary_data():
     apps = [{"id": i, "status": "verified", "expiryDate": "2027-01-01", "note": None} for i in range(10)]
     assert curios([answer(apps), answer({"status": "rejected", "expiryDate": "2020-01-01"})], TODAY) == []
+
+
+def test_a_forms_own_label_is_not_the_value_shown():
+    """The practice app: the form's "Expiry date" label (followed by "I accept the terms") comes before the result's."""
+    page = "Expiry date\nI accept the terms\nVerify\nYour verification\nStatus\nVerified\nExpiry date\n31/12/2019"
+    found = {m["label"]: m for m in mismatches([answer({"status": "rejected", "expiryDate": "2020-01-01"})], page)}
+    assert set(found) == {"Status", "Expiry date"}
+    assert found["Expiry date"]["shown"] == "31/12/2019" and found["Expiry date"]["why"].startswith("one day earlier")

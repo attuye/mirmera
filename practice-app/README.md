@@ -8,6 +8,9 @@ node practice-app/server.mjs        # http://localhost:4000
 ```
 
 - `spec.md`: the requirements, to paste into Mirmera as an artifact.
+- It has nine planted bugs. `PLANTED=classic node practice-app/server.mjs` runs it with
+  the first four only, as the agent evals do (PowerShell: `$env:PLANTED="classic"; node practice-app/server.mjs`,
+  cmd: `set "PLANTED=classic" && node practice-app/server.mjs`).
 - `ANSWERS.md`: the planted bugs. Read it after your sessions, not before.
 
 Data is kept in memory and resets when you restart the server.

@@ -15,6 +15,10 @@ customers are in Ethiopia; many have names written in Amharic (Ge'ez script).
 5. The customer must accept the terms before verification.
 6. After verification, **My documents** lists every verified document, with
    the total count.
+7. After verification, the customer sees **their result**: the verification
+   status and the document's details as recorded.
+8. **Signing out removes the customer's session and details** from the device.
+   Many customers verify on a shared phone at an agent's shop.
 
 ## Out of scope for v1.4
 Selfie and liveness checks; document photo upload.

@@ -245,6 +245,19 @@ def compare(key: str, value, shown: str) -> str | None:
     return None
 
 
+def comparable(key: str, value, shown: str) -> bool:
+    """Whether a shown value reads as the same kind as the data's: a date, a number, a status, or text."""
+    if value is None or value == "":
+        return False
+    if as_date(value):
+        return bool(shown_dates(shown))
+    if STATUS_KEYS.search(key) or isinstance(value, bool):
+        return shown_polarity(shown) is not None
+    if isinstance(value, (int, float)):
+        return bool(shown_numbers(shown))
+    return isinstance(value, str)
+
+
 def mismatches(answers: list[dict], page_text: str) -> list[dict]:
     """Shown values that contradict the JSON answers: {label, shown, key, value, why, url, method}."""
     pairs = labelled(page_text)
@@ -255,8 +268,8 @@ def mismatches(answers: list[dict], page_text: str) -> list[dict]:
                 continue
             kw = words(key)
             for label, shown in pairs:
-                if not label_matches(label, kw):
-                    continue
+                if not label_matches(label, kw) or not comparable(key, value, shown):
+                    continue  # a form's own label ("Expiry date" above its date picker) is not a value shown
                 why = compare(key, value, shown)
                 if why and label.lower() not in seen:
                     seen.add(label.lower())
