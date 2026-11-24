@@ -2286,6 +2286,13 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             entry["status"], entry["detail"] = await act(page, a.as_browser_action(), origins)
                     except Exception as err:
                         entry["status"], entry["detail"] = "failed", _first_line(err)
+                        if "Malformed value" in str(err):  # a date picker refuses an impossible date: nothing to send
+                            for label, v in (a.values or {}).items() if a.kind == "try" else [(field_name(a), a.value)]:
+                                if label and v is not None:
+                                    tried_values.setdefault(label, set()).add(v)  # not offered again
+                            entry["status"] = "refused"
+                            entry["detail"] = ("not sent: the field is the browser's date picker, which only holds real dates "
+                                               "(YYYY-MM-DD), so the app can't receive this value. Try a real date at an edge instead.")
                     if picked:
                         entry["detail"] = picked + ("; " + entry["detail"] if entry["detail"] else "")
                     if a.kind in SUBMITS and entry["status"] == "ok":
