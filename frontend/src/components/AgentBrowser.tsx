@@ -4,7 +4,6 @@
  *    the caption follows the step on screen, with a box on the element it was about to use.
  *  - Runs without a recording (older ones), and looking back while it works, play the
  *    step pictures one after another instead. */
-import TakeOver from './TakeOver'
 import { useEffect, useRef, useState } from 'react'
 import { Bot, ChevronLeft, ChevronRight, Download, Pause, Play } from 'lucide-react'
 import { api, ExplorationRun, explorationLiveUrl, explorationHarUrl, explorationStepFrameUrl, explorationVideoUrl } from '../api/client'
@@ -179,7 +178,6 @@ export default function AgentBrowser({ run, compact = false }: { run: Exploratio
         </div>
       )}
 
-      {!compact && running && run.with_me && <div style={{ padding: '8px 10px', borderTop: '1px solid var(--border)' }}><TakeOver run={run} /></div>}
       {!compact && running && <PairBox run={run} />}
 
       {!compact && (mode === 'video' || framed.length > 0) && (

@@ -54,6 +54,7 @@ def exploration(run: models.ExplorationRun | None, db: DBSession) -> dict | None
         "recent": [{k: s.get(k) for k in ("n", "thought", "action", "kind", "status", "detail", "by")} for s in steps[-RECENT_STEPS:]],
         "bugs": [{"id": b.id, "title": b.title, "severity": b.severity} for b in bugs if b],
         "summary": run.summary, "detail": run.detail,
+        "with_me": bool(run.with_me), "takeover": run.takeover,  # "Explore with me": take over from here too
     }
 
 

@@ -9,6 +9,7 @@ import ApiPanel from '../components/ApiPanel'
 import { Screenshot, clock } from '../components/Evidence'
 import TestIdeas from '../components/TestIdeas'
 import AgentBrowser from '../components/AgentBrowser'
+import TakeOver from '../components/TakeOver'
 import BugMagnetPanel from '../components/BugMagnetPanel'
 import ComparePanel from '../components/ComparePanel'
 import HeuristicChips from '../components/HeuristicChips'
@@ -56,7 +57,7 @@ function AgentAtWork({ run }: { run: ExplorationRun }) {
   return (
     <div role="status" aria-label="Mirmera at work" title={last ? `Last step: ${last.action}` : undefined} style={{
       display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '6px 10px', borderRadius: 8,
-      border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--info)', maxWidth: 320,
+      border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--info)', maxWidth: run.with_me ? 560 : 320, flexWrap: 'wrap',
     }}>
       <Bot size={14} aria-hidden className="mm-pulse" style={{ flexShrink: 0 }} />
       <span style={{ minWidth: 0 }}>
@@ -69,6 +70,7 @@ function AgentAtWork({ run }: { run: ExplorationRun }) {
           Stop
         </button>
       )}
+      {!stopping && <TakeOver run={run} />}
     </div>
   )
 }

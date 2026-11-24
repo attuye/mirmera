@@ -8,6 +8,7 @@ import { Bot, Check, CircleDashed, Loader2, X } from 'lucide-react'
 import { AgentActivity, AgentActivityList, AgentStage } from '../api/client'
 import { utcDate } from './Evidence'
 import AgentBrowser from './AgentBrowser'
+import TakeOver from './TakeOver'
 
 const FAST_MS = 2000
 const SLOW_MS = 15000
@@ -101,6 +102,16 @@ export default function AgentProgress({ item, showTitle = true }: { item: AgentA
             {ex.steps_used} of {ex.max_steps} steps · {ex.actions} action{ex.actions === 1 ? '' : 's'} in the app ·{' '}
             <span style={{ color: ex.bugs.length ? 'var(--danger)' : undefined }}>{ex.bugs.length} bug draft{ex.bugs.length === 1 ? '' : 's'}</span>
           </div>
+          {running && ex.status === 'running' && ex.with_me && (
+            <div style={{ marginTop: 8 }}>
+              <TakeOver run={{
+                id: ex.run_id, project_id: item.project_id ?? '', charter_id: ex.charter_id, session_id: ex.session_id,
+                status: 'running', start_url: '', max_steps: ex.max_steps, steps: [], bug_ids: [], summary: null, detail: null,
+                started_by: item.started_by, ai_provider: null, ai_model: null, created_at: item.started_at, finished_at: null,
+                with_me: true, takeover: ex.takeover ?? null,
+              }} />
+            </div>
+          )}
           {running && ex.status === 'running' && (
             <Link to={base && ex.session_id ? `${base}/sessions/${ex.session_id}` : '#'} title="Watch Mirmera in its session"
               style={{ display: 'block', marginTop: 10, maxWidth: 360 }}>
@@ -119,6 +130,7 @@ export default function AgentProgress({ item, showTitle = true }: { item: AgentA
                   <span style={{ width: 7, height: 7, borderRadius: 4, flexShrink: 0, alignSelf: 'center', background: STEP_COLOR[s.status] ?? 'var(--text-quiet)' }} aria-hidden />
                   <span style={{ minWidth: 0 }}>
                     {s.by === 'Mirmera' && <span title={s.kind === 'tour' ? 'After an accepted submit, Mirmera opened the answer page directly, refreshed it, went back, sent the form twice quickly, made its request fail, and did it with the keyboard only' : s.kind === 'confirm' ? "When the run ended, Mirmera replayed each new draft's steps in fresh browsers" : s.kind === 'access' ? "Mirmera opened this user's own pages signed out and as the second user" : 'The AI was stuck, so Mirmera took this step itself'} style={{ fontSize: 10.5, marginRight: 6, padding: '1px 6px', borderRadius: 8, background: 'var(--accent-bg)', color: 'var(--accent)' }}>{s.kind === 'tour' ? "Mirmera's flow tour" : s.kind === 'confirm' ? "Mirmera's replay" : s.kind === 'access' ? "Mirmera: who sees what" : 'Mirmera stepped in'}</span>}
+                    {s.by && s.by !== 'Mirmera' && <span title="The tester did this, in the same browser" style={{ fontSize: 10.5, marginRight: 6, padding: '1px 6px', borderRadius: 8, border: '1px solid var(--border)', color: 'var(--text)' }}>{s.by}</span>}
                     <span>{s.action}</span>
                     {s.status !== 'ok' && <span style={{ color: STEP_COLOR[s.status] ?? 'var(--text-tertiary)' }}> ({s.status})</span>}
                     {s.detail && <span style={{ color: 'var(--text-secondary)' }}> → {s.detail.length > 160 ? s.detail.slice(0, 157) + '…' : s.detail}</span>}

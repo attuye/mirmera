@@ -31,15 +31,44 @@ test('explore with me: take over the browser, then hand it back', async ({ page,
   })
 
   await page.goto(`/projects/${project.id}/sessions/${session.id}`)
-  const browser = page.getByRole('region', { name: "Mirmera's browser" })
-  const control = browser.getByRole('group', { name: 'Take over the browser' })
+  const atWork = page.getByRole('status', { name: 'Mirmera at work' })  // beside the session clock, next to Stop
+  const control = atWork.getByRole('group', { name: 'Take over the browser' })
   await expect(control.getByRole('status')).toHaveText('Its browser is a window on your screen.')
   await control.getByRole('button', { name: 'Take over' }).click()
   await expect(control.getByRole('status')).toContainText("It's your browser: use the Mirmera window on your screen.")
   await expect(control.getByRole('button', { name: 'Hand back' })).toBeVisible()
-  if (process.env.SHOTS) await browser.screenshot({ path: `${process.env.SHOTS}/take-over.png` })
+  if (process.env.SHOTS) await atWork.screenshot({ path: `${process.env.SHOTS}/take-over.png` })
   await control.getByRole('button', { name: 'Hand back' }).click()
   await expect(control.getByRole('button', { name: 'Take over' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Take over' })).toHaveCount(1)  // one place on the page
+})
+
+test('explore with me: take over from the Mirmera activity page', async ({ page, api }) => {
+  const project = await api.newProject('AddisVerify Activity Take Over')
+  const charter = await api.charter(project.id, 'Explore the expiry date to discover whether expired documents are rejected')
+  const session = await api.session(charter.id)
+  let takeover: { state: string; by: string } | null = null
+  const now = new Date().toISOString().replace('Z', '')
+  const item = () => ({
+    id: 'run-act', kind: 'explore', state: 'running', stage: 'explore', title: charter.id, issue_key: null,
+    project_id: project.id, story_id: null, started_by: 'Attu', message: null, started_at: now, finished_at: null,
+    stages: [{ key: 'explore', label: 'Explore in the app', status: 'active' }, { key: 'done', label: 'Done', status: 'todo' }],
+    exploration: { run_id: 'run-act', status: 'running', charter_id: charter.id, mission: 'Explore the expiry date', session_id: session.id,
+      steps_used: 3, max_steps: 25, actions: 3, bugs: [], summary: null, detail: null, with_me: true, takeover,
+      recent: [{ n: 4, thought: '', action: 'select "Passport" in label "Document type"', kind: 'you', status: 'ok', detail: '', by: 'Attu' }] },
+  })
+  await page.route('**/exploration-runs/run-act/frame?*', (route) => route.fulfill({ status: 204 }))
+  await page.route('**/workspaces/*/agent-activity*', (route) => route.fulfill({ json: { items: [item()], running: 1 } }))
+  await page.route('**/exploration-runs/run-act/take-over', (route) => {
+    takeover = { state: 'yours', by: 'Attu' }
+    return route.fulfill({ json: { id: 'run-act', project_id: project.id, charter_id: charter.id, session_id: session.id, status: 'running',
+      start_url: '', max_steps: 25, steps: [], bug_ids: [], summary: null, detail: null, created_at: now, finished_at: null, with_me: true, takeover } })
+  })
+  await page.goto(`/workspaces/${await api.workspaceId()}/activity`)
+  const card = page.getByRole('article', { name: /^Mirmera: / })
+  await expect(card.getByRole('list', { name: 'Latest steps' })).toContainText('Attu')  // the tester's step, by name
+  await card.getByRole('button', { name: 'Take over' }).click()
+  await expect(card.getByRole('button', { name: 'Hand back' })).toBeVisible()
 })
 
 test('explore with me: the option asks for a browser window', async ({ page, api, request }) => {

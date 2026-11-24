@@ -862,6 +862,7 @@ export interface AgentActivity {
     run_id: string; status: string; charter_id: string; mission: string; session_id: string | null
     steps_used: number; max_steps: number; actions: number; recent: AgentStep[]
     bugs: { id: string; title: string; severity: string }[]; summary: string | null; detail: string | null
+    with_me?: boolean; takeover?: ExplorationRun['takeover']
   } | null
 }
 export type AiJobKind = 'product_model' | 'risk_analysis' | 'charters_from_risks' | 'app_map' | 'story_risks'
