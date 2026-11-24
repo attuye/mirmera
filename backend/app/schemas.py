@@ -1521,6 +1521,7 @@ class ExploreRequest(BaseModel):
     provider: Optional[str] = None
     max_steps: int = Field(default=25, ge=3, le=60)
     conditions: Optional[ExploreConditions] = None
+    with_me: bool = False  # the browser opens as a window on this computer, so the tester can take over
 
 
 class ExplorationRunOut(BaseModel):
@@ -1542,6 +1543,8 @@ class ExplorationRunOut(BaseModel):
     video: Optional[str] = None  # set when its recording was kept: GET /exploration-runs/{id}/video
     har: Optional[str] = None  # set when its network log was kept: GET /exploration-runs/{id}/har
     hints: list[dict] = []  # what a tester (or Mirmera) asked it to try next, and the step that took it up
+    with_me: Optional[bool] = False  # null on runs from before "Explore with me"
+    takeover: Optional[dict] = None  # {"state": "asked" | "yours" | "back", "by", "at"}
     conditions: Optional[dict] = None  # device, network, locale, timezone it browsed with
     created_at: datetime
     finished_at: Optional[datetime] = None

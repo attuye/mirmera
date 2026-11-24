@@ -790,6 +790,8 @@ class ExplorationRun(Base):
     har = Column(String, nullable=True)  # its network log (HAR, secrets taken out), in the session's folder
     conditions = Column(JSON, nullable=True)  # {"device": "phone", "network": "slow", "locale", "timezone"}: how it browsed
     hints = Column(JSON, nullable=True)  # [{"id", "text", "by", "at", "step"}]: what a tester (or Mirmera) asked it to try next
+    with_me = Column(Boolean, default=False)  # "Explore with me": its browser is a window on the tester's screen
+    takeover = Column(JSON, nullable=True)  # {"state": "asked" | "yours" | "back", "by", "at"}: a tester using its browser
     journey = Column(JSON, nullable=True)  # its steps as a replay does them ({"type": "goto" | "action", ...}): to compare environments
     ai_provider = Column(String, nullable=True)
     ai_model = Column(String, nullable=True)

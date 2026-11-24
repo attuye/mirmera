@@ -14,9 +14,11 @@ The guard rails are the reproduction agent's (app/agent/reproduce.py): it stays
 inside the app, never sees secrets, every problem's symptom is checked by Mirmera
 before a draft is made, and it has a step budget, a time limit and can be cancelled.
 """
+import asyncio
 import json
 import logging
 import os
+import sys
 import re
 import time
 from contextvars import ContextVar
@@ -70,8 +72,9 @@ SLOW_NETWORK = {"offline": False, "latency": 400, "downloadThroughput": 50 * 102
 
 def steps_used(steps: list[dict]) -> int:
     """The steps that count against the budget: a refused step was never run, and a flow tour is
-    Mirmera's own, so they cost none."""
-    return sum(1 for s in steps if s.get("status") != "refused" and s.get("kind") not in ("tour", "confirm", "access"))
+    Mirmera's own, so they cost none. Neither do a tester's, after taking over the browser."""
+    return sum(1 for s in steps if s.get("status") != "refused"
+               and s.get("kind") not in ("tour", "confirm", "access", "takeover", "you", "handback"))
 
 
 def context_options(conditions: dict | None) -> dict:
@@ -341,6 +344,32 @@ def _save(run_id: str, **fields) -> None:
         for k, v in fields.items():
             setattr(run, k, v)
         db.commit()
+
+
+TAKEOVER_LIMIT_S = 30 * 60  # a forgotten take-over hands the browser back by itself
+TAKEOVER_TEST_HOOK = None  # tests only: an async fn(page) standing in for the tester's hands on the window
+
+
+def can_show_window() -> bool:
+    """Whether a browser window can open on this computer ("Explore with me"). Windows and macOS always
+    can; Linux needs a display (a server or CI has none, so the run is headless and still recorded)."""
+    if sys.platform.startswith("linux"):
+        return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    return True
+
+
+def _takeover(run_id: str) -> dict:
+    with SessionLocal() as db:
+        run = db.get(models.ExplorationRun, run_id)
+        return dict(run.takeover or {}) if run else {}
+
+
+def _set_takeover(run_id: str, state: str) -> None:
+    with SessionLocal() as db:
+        run = db.get(models.ExplorationRun, run_id)
+        if run:
+            run.takeover = {**(run.takeover or {}), "state": state, f"{state}_at": utcnow().isoformat()}
+            db.commit()
 
 
 def _cancelled(run_id: str) -> bool:
@@ -2008,7 +2037,7 @@ async def confirm_drafts(pw, bug_ids: list[str], session_id: str, headless: bool
 async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, session_id: str, charter_id: str,
                     start_url: str, origins: set[str], max_steps: int, headless: bool, executable_path: str | None,
                     folder: Path, checker: LLMProvider | None = None, conditions: dict | None = None,
-                    sign_in_cfg: dict | None = None) -> None:
+                    sign_in_cfg: dict | None = None, with_me: bool = False) -> None:
     from playwright.async_api import async_playwright
 
     ACTIVE.add(run_id)
@@ -2054,6 +2083,16 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                              if (conditions or {}).get("network") == "slow" else "."))
                 from app import test_data as _td
                 _td.TODAY.set(run_today())  # {today} is the user's today, by the run's clock when it has one
+                yours_queue: list[dict] = []  # what the tester does after taking over (recorder.js)
+                taking = {"on": False}
+                if with_me:  # "Explore with me": the tester's actions are recorded only while the browser is theirs
+                    from app.runner import RECORDER_JS, sanitize_action
+
+                    def _on_yours(source, payload):
+                        if taking["on"] and (act := sanitize_action(payload)):
+                            yours_queue.append({**act, "url": str((payload or {}).get("url") or "")[:500]})
+                    await context.expose_binding("__mirmeraRecord", _on_yours)
+                    await context.add_init_script(RECORDER_JS)
                 page = await context.new_page()
                 live = LIVE[run_id] = Live()
                 await _start_screencast(page, live, options["viewport"], slow=(conditions or {}).get("network") == "slow")
@@ -2100,10 +2139,126 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     if out:
                         _record(session_id, out)
 
+                async def yours() -> bool:
+                    """The tester took over: the browser is theirs until they hand it back. Their actions join
+                    the trail (and the steps a bug draft replays), with Mirmera's own checks after each one that
+                    sends something. True when the run was stopped meanwhile."""
+                    nonlocal stored, started
+                    by = _takeover(run_id).get("by") or "The tester"
+                    _set_takeover(run_id, "yours")
+                    began = time.monotonic()
+                    history.append({"n": len(history) + 1, "thought": "", "action": f"{by} took over the browser",
+                                    "kind": "takeover", "status": "ok", "by": by, "url": page.url,
+                                    "detail": "the agent stopped after its step; the browser is theirs until they hand it back",
+                                    "t": round(began - filmed_from, 2)})
+                    _save(run_id, steps=list(history))
+                    yours_queue.clear()
+                    taking["on"] = True
+                    if TAKEOVER_TEST_HOOK:
+                        asyncio.ensure_future(TAKEOVER_TEST_HOOK(page))
+                    did: list[str] = []
+                    marks = [len(signals.failed), len(signals.page_errors), len(signals.exif_leaks), signals.json_count]
+                    try:
+                        while True:
+                            await asyncio.sleep(0.4)
+                            if _cancelled(run_id):
+                                return True
+                            back = _takeover(run_id).get("state") == "back"
+                            while yours_queue:
+                                act = yours_queue.pop(0)
+                                url = act.pop("url", "") or page.url
+                                said = describe_action(act)
+                                did.append(said)
+                                ent = {"n": len(history) + 1, "thought": "", "action": said, "kind": "you", "status": "ok",
+                                       "by": by, "url": url, "detail": "", "t": round(time.monotonic() - filmed_from, 2)}
+                                steps.append({"type": "action", "action": act, "url": url})
+                                _record(session_id, [Signal("action", said, url, now(), act)])
+                                loc = act.get("locator") or {}
+                                if act["action"] in ("fill", "select") and loc.get("method") == "label" and act.get("value") is not None:
+                                    tried_values.setdefault(loc["value"], set()).add(act["value"])
+                                if act["action"] in ("click", "press"):  # it may have sent something: Mirmera's checks
+                                    await signals.settle(timeout_ms=5_000)
+                                    found = crashes(signals.failed[marks[0]:], signals.page_errors[marks[1]:],
+                                                    signals.failed_requests, secrets_of(sign_in_cfg))
+                                    found += exif_leaks(signals.exif_leaks[marks[2]:], origins)
+                                    answers = [x for x in signals.json_answers if x["n"] > marks[3] and in_app(x["url"], origins)]
+                                    if answers:
+                                        from app.agent import datacheck
+                                        try:
+                                            shown = await page.locator("body").inner_text(timeout=3_000)
+                                        except Exception:
+                                            shown = ""
+                                        found += display_mismatches(datacheck.mismatches(answers, shown))
+                                        for c in datacheck.curios(answers, utcnow().date()):
+                                            if c["key"] not in curios_noted:
+                                                curios_noted.add(c["key"])
+                                                _note(session_id, "issue", f"Curio: {c['what']} ({c['method']} {urlsplit_path(c['url'])}). "
+                                                                           "Mirmera can't tell if this is wrong: worth a look.")
+                                    marks = [len(signals.failed), len(signals.page_errors), len(signals.exif_leaks), signals.json_count]
+                                    for p in found:
+                                        key = (p.symptom.kind, p.symptom.value)
+                                        if key in reported:
+                                            continue
+                                        ok, evidence = await verify(page, p.symptom, signals)
+                                        if not ok:
+                                            continue
+                                        p.actual = f"After {by} did: {said}: {p.actual}"[:600]
+                                        shot = folder / f"explore-{run_id[:8]}-{len(bug_ids) + 1}.png"
+                                        try:
+                                            await page.screenshot(path=str(shot))
+                                        except Exception:
+                                            shot = None
+                                        bid, _ = _draft_bug(session_id, charter_id, p, evidence, list(steps), page.url, shot, provider)
+                                        reported.add(key)
+                                        if bid:
+                                            if bid not in bug_ids:
+                                                bug_ids.append(bid)
+                                            ent["status"] = "drafted"
+                                            ent["detail"] = (ent["detail"] + "; " if ent["detail"] else "") + p.title
+                                if in_app(page.url, origins):  # what the app keeps in the browser, as after the agent's steps
+                                    from app.agent import storage
+                                    now_stored = await storage.snapshot(page)
+                                    if kept := storage.changes(stored, now_stored):
+                                        ent["storage"] = kept
+                                    for c in storage.curios(now_stored, page.url.startswith("https:")):
+                                        if c["key"] not in curios_noted:
+                                            curios_noted.add(c["key"])
+                                            _note(session_id, "issue", f"Curio: {c['what']} (seen on {urlsplit_path(page.url)}). "
+                                                                       "Mirmera can't tell if this is wrong: worth a look.")
+                                    stored = now_stored
+                                history.append(ent)
+                                _save(run_id, steps=list(history), bug_ids=list(bug_ids))
+                            if back or time.monotonic() - began > TAKEOVER_LIMIT_S:
+                                break
+                    finally:
+                        taking["on"] = False
+                    late = time.monotonic() - began > TAKEOVER_LIMIT_S
+                    if late:
+                        _set_takeover(run_id, "back")
+                    started += time.monotonic() - began  # the tester's time isn't the agent's
+                    history.append({"n": len(history) + 1, "thought": "", "kind": "handback", "status": "ok", "by": by,
+                                    "action": "handed the browser back to the agent", "url": page.url,
+                                    "detail": f"{len(did)} action{'' if len(did) == 1 else 's'} by {by}"
+                                              + (f" (handed back after {TAKEOVER_LIMIT_S // 60} minutes)" if late else ""),
+                                    "t": round(time.monotonic() - filmed_from, 2)})
+                    if did:  # the agent picks up from here, knowing what the tester did
+                        with SessionLocal() as db:
+                            r = db.get(models.ExplorationRun, run_id)
+                            add_hint(db, r, f"I took over the browser and did: {'; '.join(did[:12])}"
+                                            f"{'…' if len(did) > 12 else ''}. Carry on from this page: build on what "
+                                            "that showed, and don't repeat it.", by=by)
+                    _save(run_id, steps=list(history), bug_ids=list(bug_ids))
+                    return False
+
                 for _ in range(max_steps * REPLIES_PER_STEP):
                     if _cancelled(run_id):
                         final = {"status": "cancelled", "detail": "Stopped by a tester."}
                         break
+                    if with_me and _takeover(run_id).get("state") == "asked":
+                        if await yours():
+                            final = {"status": "cancelled", "detail": "Stopped by a tester."}
+                            break
+                        continue
                     used = steps_used(history)
                     if used >= max_steps:
                         final = {"status": "finished", "detail": f"Used all {max_steps} steps."}
@@ -2298,6 +2453,9 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     if a.kind in SUBMITS and entry["status"] == "ok":
                         for f in before.fields:  # a value counts as tried once it has been submitted
                             tried_values.setdefault(f["label"], set()).add(f["value"])
+                        for name, v in (a.values or {}).items():  # and as asked: a text box drops a line break,
+                            if fld := find_field(before, name):   # so "a\nb" is held as "ab", yet "a\nb" was tried
+                                tried_values.setdefault(fld["label"], set()).add(v)
                     # A submit's answer can take a while (a document check, a slow API): wait for what
                     # it sent to come back, up to 10 s, so the answer is read, not "Checking…".
                     await signals.settle(timeout_ms=10_000 if a.kind in SUBMITS else 3_000)
@@ -2728,7 +2886,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                 try:
                     urls = [h["url"] for h in history if h.get("url")] + sorted(visited)
                     access["detail"] = await access_check(pw, urls, sign_in_cfg, second(sign_in_cfg), start_url,
-                                                          executable_path, headless, draft_access)
+                                                          executable_path, True, draft_access)  # fresh browsers stay hidden, even "with me"
                 except Exception as err:  # extra: it never fails the run
                     access["detail"] = f"could not check: {_first_line(err)}"
                 if access["detail"]:
@@ -2750,7 +2908,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             if not ok:
                                 raise RuntimeError(f"couldn't sign in: {how}")
                     zone = {k: v for k, v in context_options(conditions).items() if k in ("timezone_id", "locale")}
-                    confirm["detail"] = await confirm_drafts(pw, bug_ids, session_id, headless, executable_path,
+                    confirm["detail"] = await confirm_drafts(pw, bug_ids, session_id, True, executable_path,
                                                              prepare=as_the_run if sign_in_cfg or CLOCK_AT.get() else None,
                                                              context_options=zone)
                 except Exception as err:  # confirming is extra: it never fails the run
