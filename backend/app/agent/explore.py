@@ -2298,6 +2298,9 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     if a.kind in SUBMITS and entry["status"] == "ok":
                         for f in before.fields:  # a value counts as tried once it has been submitted
                             tried_values.setdefault(f["label"], set()).add(f["value"])
+                        for name, v in (a.values or {}).items():  # and as asked: a text box drops a line break,
+                            if fld := find_field(before, name):   # so "a\nb" is held as "ab", yet "a\nb" was tried
+                                tried_values.setdefault(fld["label"], set()).add(v)
                     # A submit's answer can take a while (a document check, a slow API): wait for what
                     # it sent to come back, up to 10 s, so the answer is read, not "Checking…".
                     await signals.settle(timeout_ms=10_000 if a.kind in SUBMITS else 3_000)

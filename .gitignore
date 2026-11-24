@@ -27,3 +27,5 @@ e2e/.generated/
 # Build output
 dist/
 *.tsbuildinfo
+# backend/latest_run.py writes this: a run's dump, to read or share, not to commit
+backend/latest_run.txt
