@@ -2312,7 +2312,9 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             f"that left the app ({origin(left)}), so the browser went back"
                     broke = crashes(signals.failed[failed_before:], signals.page_errors[page_errors_before:],
                                     signals.failed_requests, secrets_of(sign_in_cfg))
-                    broke += exif_leaks(signals.exif_leaks[leaks_before:], origins)
+                    # What Mirmera noticed besides a crash: drafted like one, but the step didn't break, so the
+                    # rule checks and the outcome ("accepted") still count (a page can be accepted and misshown).
+                    noticed = exif_leaks(signals.exif_leaks[leaks_before:], origins)
                     answers = [a for a in signals.json_answers if a["n"] > answers_before and in_app(a["url"], origins)]
                     if answers:  # display versus data: the page against the JSON it was drawn from
                         from app.agent import datacheck
@@ -2320,7 +2322,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                             shown = await page.locator("body").inner_text(timeout=3_000)
                         except Exception:
                             shown = ""
-                        broke += display_mismatches(datacheck.mismatches(answers, shown))
+                        noticed += display_mismatches(datacheck.mismatches(answers, shown))
                         for c in datacheck.curios(answers, utcnow().date()):
                             if c["key"] not in curios_noted:
                                 curios_noted.add(c["key"])
@@ -2460,7 +2462,7 @@ async def run_agent(run_id: str, ctx: CharterContext, provider: LLMProvider, *, 
                     sent = f" (sent: {sent_text(before)[:300]})" if submitted and before.fields else ""
                     # Crashes need no rule: a server error or an uncaught page error after this step
                     # is a bug draft whatever the story says (Mirmera saw it itself; no AI involved).
-                    for crash in broke:
+                    for crash in broke + noticed:
                         crash.actual = (f"After {entry['action']}{sent}"
                                         + f": {crash.actual}" + (f' The page said: "{said[0][:160]}".' if said else ""))[:600]
                         if await keep(crash, (crash.symptom.kind, crash.symptom.value)) and submitted \
