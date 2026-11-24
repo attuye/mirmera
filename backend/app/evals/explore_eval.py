@@ -319,10 +319,13 @@ def main(argv: list[str] | None = None) -> int:
     os.environ["DATABASE_URL"] = f"sqlite:///{(folder / 'eval.db').as_posix()}"  # before the app is imported
     os.environ["EVIDENCE_DIR"] = str(folder / "evidence")
     app_proc = None
+    if pa.server == "server.mjs" and _answers(args.app_url.rstrip("/") + "/api/verification/1"):
+        raise SystemExit(f"The practice app at {args.app_url} runs with all its bugs (1 to 9). The eval scores the "
+                         "first four: stop it, or start it with PLANTED=classic, then run the eval again.")
     if not _answers(args.app_url):
         server = Path(__file__).resolve().parents[3] / "practice-app" / pa.server
         port = args.app_url.rsplit(":", 1)[-1].strip("/")
-        app_proc = subprocess.Popen(["node", str(server)], env={**os.environ, "PORT": port},
+        app_proc = subprocess.Popen(["node", str(server)], env={**os.environ, "PORT": port, "PLANTED": "classic"},
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(50):
             if _answers(args.app_url):

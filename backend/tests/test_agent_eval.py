@@ -40,7 +40,27 @@ def practice_app():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    proc = subprocess.Popen(["node", str(SERVER)], env={**os.environ, "PORT": str(port)},
+    proc = subprocess.Popen(["node", str(SERVER)], env={**os.environ, "PORT": str(port), "PLANTED": "classic"},  # the four scored bugs
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    url = f"http://127.0.0.1:{port}"
+    for _ in range(100):
+        try:
+            urllib.request.urlopen(url, timeout=1)
+            break
+        except Exception:
+            time.sleep(0.1)
+    yield url
+    proc.terminate()
+
+
+@pytest.fixture
+def full_practice_app():
+    """The practice app with all nine bugs, as a tester runs it (node practice-app/server.mjs)."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    env = {k: v for k, v in os.environ.items() if k != "PLANTED"}
+    proc = subprocess.Popen(["node", str(SERVER)], env={**env, "PORT": str(port)},
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     url = f"http://127.0.0.1:{port}"
     for _ in range(100):
@@ -1619,3 +1639,35 @@ def test_saved_text_comes_back_as_typed_or_is_drafted(client, guestbook_app, mon
     assert bugs[0].severity == "high" and "UTF-8 read as" in bugs[0].actual
     assert bugs[1].steps_to_reproduce[-1].startswith("open ") and bugs[1].steps_to_reproduce[-1].endswith("/entries")
     assert [b.reproducibility for b in bugs] == ["always", "always"], [b.confirmation for b in bugs]
+
+
+def test_the_full_practice_app_shows_its_browser_result_and_data_bugs(client, full_practice_app, monkeypatch, chromium_available):  # noqa: F811
+    """Bugs 5 to 9 (practice-app/ANSWERS.md): what the app keeps in the browser and after signing out,
+    the result page against its data, and curios in the data. Each is found by Mirmera's own checks."""
+    from tests.test_explore import finished
+    app = full_practice_app
+    project = client.post("/projects", json={"name": "Practice"}).json()
+    client.patch(f"/projects/{project['id']}", json={"app_url": app})
+    charter = client.post(f"/projects/{project['id']}/charters", json={"mission_statement": "Explore verification with an expired document to discover what the customer is told"}).json()
+    provider = Scripted([step("Open", kind="goto", url=f"{app}/verify"),
+                         step("Expired", kind="try", values={"Expiry date": "2020-01-01"}),
+                         step("My documents", kind="goto", url=f"{app}/documents"),
+                         step("Done", kind="done", summary="Verified with an expired document.")])
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 6}).json())
+    titles = {b["title"]: b for b in client.get(f"/sessions/{run['session_id']}/bugs").json()}
+    status = titles["Status shown differs from the app's own data"]  # bug 5
+    assert 'The page shows "Status: Verified"; GET /api/verification/' in status["actual"] and 'status: "rejected"' in status["actual"]
+    assert "Expiry date shown differs from the app's own data" in titles  # bug 6: a day early
+    assert "one day earlier" in titles["Expiry date shown differs from the app's own data"]["actual"]
+    notes = [n["content"] for n in client.get(f"/sessions/{run['session_id']}/notes").json() if n["content"].startswith("Curio: ")]
+    said = "\n".join(notes)
+    assert 'holds a token (JWT) under "auth"' in said  # bug 8
+    assert 'the session cookie "sid" has no HttpOnly' in said  # bug 8
+    assert 'under "kyc_draft"' in said and "personal details" in said  # bug 7
+    assert 'after signing out, local storage still holds personal details' in said  # bug 7
+    assert 'after signing out, the session cookie "sid" is still set' in said  # bug 8
+    assert '"verified" but expiryDate 2025-03-01 has passed' in said  # bug 9
+    assert "have no expiryDate (GET /api/documents)" in said  # bug 9
+    signout = next(s for s in run["steps"] if s["kind"] == "signout")
+    assert signout["by"] == "Mirmera" and signout["detail"].startswith("left behind: ")
