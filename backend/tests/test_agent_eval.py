@@ -1646,16 +1646,26 @@ def test_the_full_practice_app_shows_its_browser_result_and_data_bugs(client, fu
     the result page against its data, and curios in the data. Each is found by Mirmera's own checks."""
     from tests.test_explore import finished
     app = full_practice_app
+    from app import models
+    from app.database import SessionLocal
     project = client.post("/projects", json={"name": "Practice"}).json()
     client.patch(f"/projects/{project['id']}", json={"app_url": app})
-    charter = client.post(f"/projects/{project['id']}/charters", json={"mission_statement": "Explore verification with an expired document to discover what the customer is told"}).json()
+    charter_id = client.post(f"/projects/{project['id']}/charters", json={"mission_statement": "Explore verification with an expired document to discover what the customer is told"}).json()["id"]
+    with SessionLocal() as db:  # the story with the spec's rules: AC3 is "expired documents are rejected"
+        story = models.Story(project_id=project["id"], title="Verify my identity", description=explore_eval.STORY)
+        db.add(story)
+        db.get(models.Charter, charter_id).stories = [story]
+        db.commit()
+    accepted = '{"answer_means": "accepted", "answer_quote": "Verified. Welcome to AddisVerify!", "rule": "AC3", "rule_expects": "refused"}'
     provider = Scripted([step("Open", kind="goto", url=f"{app}/verify"),
                          step("Expired", kind="try", values={"Expiry date": "2020-01-01"}),
                          step("My documents", kind="goto", url=f"{app}/documents"),
-                         step("Done", kind="done", summary="Verified with an expired document.")])
+                         step("Done", kind="done", summary="Verified with an expired document.")], judge=lambda user: accepted)
     monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
-    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 6}).json())
+    run = finished(client, client.post(f"/charters/{charter_id}/explore", json={"max_steps": 6}).json())
     titles = {b["title"]: b for b in client.get(f"/sessions/{run['session_id']}/bugs").json()}
+    # Bug 2 too, in the same step as bug 5: the page being misshown doesn't hide that it accepted the expired date
+    assert "An expiry date in the past is accepted although AC3 says it is refused" in titles, list(titles)
     status = titles["Status shown differs from the app's own data"]  # bug 5
     assert 'The page shows "Status: Verified"; GET /api/verification/' in status["actual"] and 'status: "rejected"' in status["actual"]
     assert "Expiry date shown differs from the app's own data" in titles  # bug 6: a day early

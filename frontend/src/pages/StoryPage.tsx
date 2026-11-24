@@ -11,6 +11,7 @@ import SuggestedRisks from '../components/SuggestedRisks'
 import SuggestionSkeleton from '../components/SuggestionSkeleton'
 import CharterDrafts from '../components/CharterDrafts'
 import MissionEditor from '../components/MissionEditor'
+import StoryEditor from '../components/StoryEditor'
 import { useAiJob } from '../components/useAiJob'
 import { utcDate } from '../components/Evidence'
 import { ConfirmDelete, ErrorLine, errorText, input, quietButton } from '../components/ui'
@@ -86,6 +87,7 @@ export default function StoryPage() {
   const [sprintNote, setSprintNote] = useState<string | null>((state as { sprintNote?: string } | null)?.sprintNote ?? null)
   const [addingRisk, setAddingRisk] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
+  const [editing, setEditing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [watch, setWatch] = useState(0)  // bumped when an exploration starts here: look again at once
   const activity = useAgentActivity(() => api.storyActivity(storyId), `${storyId}-${watch}`)
@@ -180,6 +182,7 @@ export default function StoryPage() {
             <h1 style={{ fontSize: 21, fontWeight: 600, margin: '6px 0 0', lineHeight: 1.35 }}>{story.title}</h1>
           </div>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {!editing && <button disabled={!!busy} onClick={() => setEditing(true)} style={quietButton}>Edit story</button>}
             {trackerName
               ? <button disabled={!!busy} onClick={() => act('refresh', () => api.refreshStory(story.id))} style={{ ...quietButton, display: 'inline-flex', gap: 6, alignItems: 'center' }}>
                   <RefreshCw size={13} aria-hidden /> {busy === 'refresh' ? 'Reading…' : `Refresh from ${trackerName}`}</button>
@@ -205,6 +208,10 @@ export default function StoryPage() {
           )}
         </div>
         <ErrorLine message={error} />
+        {editing && (
+          <StoryEditor story={story} trackerName={trackerName}
+            onSaved={(s) => { setStory(s); setEditing(false) }} onCancel={() => setEditing(false)} />
+        )}
         {sprintNote && (
           <p role="status" aria-label="Sprint from Jira" style={{ margin: '12px 0 0', fontSize: 12.5, color: 'var(--text-secondary)', padding: '7px 12px', borderLeft: '3px solid var(--info)', background: 'var(--panel)', borderRadius: 6, maxWidth: 820 }}>
             {sprintNote}</p>
