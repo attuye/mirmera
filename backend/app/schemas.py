@@ -2455,6 +2455,8 @@ class AgentExploration(BaseModel):
     bugs: list[dict]  # bug drafts: id, title, severity
     summary: Optional[str] = None
     detail: Optional[str] = None
+    with_me: bool = False  # "Explore with me": the activity page offers Take over too
+    takeover: Optional[dict] = None
 
 
 class AgentActivity(BaseModel):
