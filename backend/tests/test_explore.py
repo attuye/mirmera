@@ -1207,6 +1207,10 @@ def test_a_tester_takes_over_the_browser_and_hands_it_back(client, kyc, monkeypa
     assert "POST /api/verify fails with 500" in mine[1]["detail"]  # Mirmera's checks ran on the tester's submit
     assert run["steps"][took + 3]["detail"] == "2 actions by Attu"
     assert run["takeover"]["state"] == "back"
+    workspace = client.get("/auth/me").json()["workspaces"][0]["id"]  # the activity page gets it too (not just its mock)
+    activity = client.get(f"/workspaces/{workspace}/agent-activity").json()["items"]
+    mine = next(i["exploration"] for i in activity if i["exploration"] and i["exploration"]["run_id"] == run["id"])
+    assert mine["with_me"] is True and mine["takeover"]["state"] == "back"
     bug = next(b for b in client.get(f"/sessions/{run['session_id']}/bugs").json() if "500" in b["title"])
     assert bug["actual"].startswith('After Attu did: click button "Verify": ')
     assert 'select "Passport" in label "Document type"' in bug["steps_to_reproduce"]  # replayable: the tester's steps too
