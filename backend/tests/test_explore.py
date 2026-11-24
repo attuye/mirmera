@@ -1169,3 +1169,55 @@ def test_latest_run_writes_the_steps_storage_curios_and_drafts(client, kyc, monk
     assert out.startswith("Charter: Explore identity verification")
     assert '1. [try] try Document type = "Passport", then submit -> drafted' in out
     assert "\nCurios (" in out and "\nBug drafts:\n- [high] POST /api/verify fails with 500 (judged by: mirmera" in out
+
+
+def test_a_tester_takes_over_the_browser_and_hands_it_back(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    """Explore with me: the agent stops after its step, the tester uses the same browser (recorded, with
+    Mirmera's checks), hands it back, and the agent carries on knowing what they did."""
+    from app.agent import explore
+    project, charter = kyc
+    run_id = {}
+
+    class Agent(Scripted):
+        async def complete(self, system, user, **kwargs):
+            if kwargs.get("task") != "explore_judge" and len(self.users) == 1:  # the tester clicks Take over now
+                client.post(f"/exploration-runs/{run_id['id']}/take-over")
+            return await super().complete(system, user, **kwargs)
+
+    async def hands(page):  # the tester, in the window: picks Passport, sends it, hands back
+        await page.get_by_label("Document type").focus()  # real keys, as a person: the recorder takes only trusted events
+        await page.keyboard.press("ArrowDown")
+        await page.get_by_role("button", name="Verify").click()
+        await page.wait_for_timeout(1500)
+        client.post(f"/exploration-runs/{run_id['id']}/hand-back")
+
+    provider = Agent([step("Look", kind="wait"), step("Carry on", kind="wait"), step("Done", kind="done", summary="Done.")])
+    monkeypatch.setattr("app.ai.routing.get_provider", lambda name, keys=None: provider)
+    monkeypatch.setattr(explore, "TAKEOVER_TEST_HOOK", hands)
+    started = client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 5, "with_me": True}).json()
+    run_id["id"] = started["id"]
+    assert started["with_me"] is True
+    run = finished(client, started)
+    kinds = [(s["kind"], s.get("by")) for s in run["steps"]]
+    took = kinds.index(("takeover", "Attu"))
+    assert kinds[took + 1:took + 3] == [("you", "Attu"), ("you", "Attu")] and kinds[took + 3] == ("handback", "Attu")
+    mine = run["steps"][took + 1:took + 3]
+    assert mine[0]["action"] == 'select "Passport" in label "Document type"'
+    assert mine[1]["action"] == 'click button "Verify"' and mine[1]["status"] == "drafted"
+    assert "POST /api/verify fails with 500" in mine[1]["detail"]  # Mirmera's checks ran on the tester's submit
+    assert run["steps"][took + 3]["detail"] == "2 actions by Attu"
+    assert run["takeover"]["state"] == "back"
+    bug = next(b for b in client.get(f"/sessions/{run['session_id']}/bugs").json() if "500" in b["title"])
+    assert bug["actual"].startswith('After Attu did: click button "Verify": ')
+    assert 'select "Passport" in label "Document type"' in bug["steps_to_reproduce"]  # replayable: the tester's steps too
+    # the agent's next step knew: the hand-back is a hint in its prompt
+    assert any("I took over the browser and did: select \"Passport\" in label \"Document type\"; click button \"Verify\"" in u
+               for u in provider.users[1:])
+
+
+def test_take_over_needs_a_running_run_with_me(client, kyc, monkeypatch, chromium_available):  # noqa: F811
+    project, charter = kyc
+    scripted(monkeypatch, [step("Done", kind="done", summary="Done.")])
+    run = finished(client, client.post(f"/charters/{charter['id']}/explore", json={"max_steps": 3}).json())
+    r = client.post(f"/exploration-runs/{run['id']}/take-over")
+    assert r.status_code == 409 and "has finished" in r.json()["detail"]

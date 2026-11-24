@@ -1,6 +1,7 @@
 /** "Let Mirmera explore": the exploration agent works through a charter in a headless
  *  browser on the project's app, records a session and drafts bugs for a tester to review.
  *  Shows its progress while it runs and what it left behind when it's done. */
+import TakeOver from './TakeOver'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Bot } from 'lucide-react'
@@ -46,12 +47,13 @@ export default function ExploreButton({ charterId, onStarted, onFinished }: { ch
   const [as, setAs] = useState<'desktop' | 'phone' | 'phone-slow'>('desktop')
   const [clock, setClock] = useState('')
   const [engine, setEngine] = useState<BrowserEngine>('chromium')
+  const [withMe, setWithMe] = useState(false)
   async function start() {
     setBusy(true); setError(null)
     const device = as === 'desktop' ? {} : { device: 'phone' as const, network: as === 'phone-slow' ? 'slow' as const : 'normal' as const }
     const conditions = as === 'desktop' && !clock && engine === 'chromium' ? undefined
       : { ...device, ...(clock ? { clock } : {}), ...(engine !== 'chromium' ? { browser: engine } : {}) }
-    try { setRun(await api.exploreCharter(charterId, conditions ? { conditions } : {})); onStarted?.() } catch (e) { setError(errorText(e)) } finally { setBusy(false) }
+    try { setRun(await api.exploreCharter(charterId, { ...(conditions ? { conditions } : {}), ...(withMe ? { with_me: true } : {}) })); onStarted?.() } catch (e) { setError(errorText(e)) } finally { setBusy(false) }
   }
 
   const actions = run ? run.steps.filter((s) => !['note', 'problem', 'done', 'invalid'].includes(s.kind)).length : 0
@@ -63,6 +65,7 @@ export default function ExploreButton({ charterId, onStarted, onFinished }: { ch
           <Bot size={13} aria-hidden style={{ color: 'var(--info)' }} />
           <span role="status" style={{ color: 'var(--info)' }}>Mirmera is exploring… {actions} action{actions === 1 ? '' : 's'}{last ? `, last: ${last.action}` : ''}</span>
           <button style={small} onClick={async () => { try { setRun(await api.cancelExploration(run.id)) } catch (e) { setError(errorText(e)) } }}>Stop</button>
+          <TakeOver run={run} onChange={setRun} />
         </>
       ) : (
         <>
@@ -87,6 +90,10 @@ export default function ExploreButton({ charterId, onStarted, onFinished }: { ch
             style={{ fontSize: 11.5, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)' }}>
             {(Object.keys(BROWSER_LABEL) as BrowserEngine[]).map((b) => <option key={b} value={b}>in {BROWSER_LABEL[b]}</option>)}
           </select>
+          <label title="Its browser opens as a window on your screen: watch it work, take it over, hand it back"
+            style={{ display: 'inline-flex', gap: 4, alignItems: 'center', cursor: 'pointer' }}>
+            <input type="checkbox" checked={withMe} onChange={(e) => setWithMe(e.target.checked)} />with me
+          </label>
           {run && (
             <span role="status">
               {run.status === 'finished' ? 'Explored' : run.status === 'cancelled' ? 'Stopped' : 'Failed'}: {actions} actions,{' '}

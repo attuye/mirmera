@@ -46,7 +46,7 @@ def app_map_text(db: DBSession, project_id: str) -> str | None:
 
 def start_exploration(db: DBSession, charter: models.Charter, *, started_by: str, base_url: str | None = None,
                       provider_name: str | None = None, max_steps: int = 25,
-                      conditions: dict | None = None) -> models.ExplorationRun:
+                      conditions: dict | None = None, with_me: bool = False) -> models.ExplorationRun:
     """Opens a session for the agent on the charter and starts it on the runner's loop."""
     project = charter.project
     base = (base_url or project.app_url or "").strip().rstrip("/")
@@ -90,7 +90,7 @@ def start_exploration(db: DBSession, charter: models.Charter, *, started_by: str
     db.flush()
     run = models.ExplorationRun(project_id=project.id, charter_id=charter.id, session_id=session.id, status="running",
                                 start_url=base + "/", max_steps=max_steps, steps=[], bug_ids=[], started_by=started_by,
-                                conditions=conditions or None,
+                                conditions=conditions or None, with_me=with_me,
                                 ai_provider=provider.name, ai_model=provider.model, prompt_version=agent.PROMPT_VERSION)
     db.add(run)
     db.commit()
@@ -99,7 +99,8 @@ def start_exploration(db: DBSession, charter: models.Charter, *, started_by: str
     agent.ACTIVE.add(run.id)  # before scheduling, so a status read right away doesn't see an orphan
     asyncio.run_coroutine_threadsafe(
         agent.run_agent(run.id, ctx, provider, session_id=session.id, charter_id=charter.id, start_url=run.start_url,
-                        origins={origin(base)}, max_steps=max_steps, headless=True,
+                        origins={origin(base)}, max_steps=max_steps, headless=not (with_me and agent.can_show_window()),
+                        with_me=with_me,
                         executable_path=settings.runner_chromium_path, folder=runner_api.session_folder(session.id),
                         checker=checker, conditions=conditions, sign_in_cfg=sign_cfg),
         manager.loop._get(),
@@ -116,7 +117,8 @@ def explore(charter_id: str, payload: schemas.ExploreRequest, user: models.User 
     try:
         return start_exploration(db, charter, started_by=user.name, base_url=payload.base_url,
                                  provider_name=payload.provider, max_steps=payload.max_steps,
-                                 conditions=payload.conditions.model_dump(exclude_none=True) if payload.conditions else None)
+                                 conditions=payload.conditions.model_dump(exclude_none=True) if payload.conditions else None,
+                                 with_me=payload.with_me)
     except ExploreProblem as err:
         raise HTTPException(409, str(err))
 
@@ -126,6 +128,30 @@ def latest(charter_id: str, db: DBSession = Depends(get_db)):
     run = (db.query(models.ExplorationRun).filter(models.ExplorationRun.charter_id == charter_id)
            .order_by(models.ExplorationRun.created_at.desc()).first())
     return _run_or_404(db, run.id) if run else None
+
+
+@router.post("/exploration-runs/{run_id}/take-over", response_model=schemas.ExplorationRunOut)
+def take_over(run_id: str, user: models.User = Depends(current_user), db: DBSession = Depends(get_db)):
+    """The tester asks for the agent's browser: it stops after its current step, and the browser is theirs."""
+    run = _run_or_404(db, run_id)
+    if run.status != "running":
+        raise HTTPException(409, "The run has finished: there is no browser to take over")
+    if not run.with_me:
+        raise HTTPException(409, "This run's browser isn't on your screen. Start it with \"Explore with me\" to take over.")
+    if (run.takeover or {}).get("state") not in ("asked", "yours"):
+        run.takeover = {"state": "asked", "by": user.name, "at": utcnow().isoformat()}
+        db.commit()
+    return run
+
+
+@router.post("/exploration-runs/{run_id}/hand-back", response_model=schemas.ExplorationRunOut)
+def hand_back(run_id: str, user: models.User = Depends(current_user), db: DBSession = Depends(get_db)):
+    """The tester gives the browser back: the agent carries on from where they left it."""
+    run = _run_or_404(db, run_id)
+    if (run.takeover or {}).get("state") in ("asked", "yours"):
+        run.takeover = {**run.takeover, "state": "back", "back_at": utcnow().isoformat()}
+        db.commit()
+    return run
 
 
 @router.get("/bug-magnet")

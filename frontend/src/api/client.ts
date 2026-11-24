@@ -849,6 +849,8 @@ export interface ExplorationRun {
   /** What a tester (or Mirmera) asked it to try next; step = the step that took it up. */
   hints?: { id: string; text: string; by: string; at: string; step: number | null }[]
   conditions?: ExploreConditions | null
+  with_me?: boolean | null  // "Explore with me": its browser is a window on the tester's screen
+  takeover?: { state: 'asked' | 'yours' | 'back'; by?: string } | null
 }
 export interface AgentStage { key: string; label: string; status: 'done' | 'active' | 'todo' | 'skipped' | 'failed' | 'cancelled' }
 export interface AgentStep { n: number; thought: string; action: string; kind: string; status: string; detail: string }
@@ -1183,10 +1185,12 @@ export const api = {
   comparisons: (sessionId: string) => request<Comparison[]>(`/sessions/${sessionId}/comparisons`),
   comparisonBug: (comparisonId: string, n: number, right: 'a' | 'b') =>
     request<Comparison>(`/comparisons/${comparisonId}/steps/${n}/bug`, { method: 'POST', body: JSON.stringify({ right }) }),
-  exploreCharter: (charterId: string, body: { max_steps?: number; base_url?: string; conditions?: ExploreConditions } = {}) =>
+  exploreCharter: (charterId: string, body: { max_steps?: number; base_url?: string; conditions?: ExploreConditions; with_me?: boolean } = {}) =>
     request<ExplorationRun>(`/charters/${charterId}/explore`, { method: 'POST', body: JSON.stringify(body) }),
   charterExploration: (charterId: string) => request<ExplorationRun | null>(`/charters/${charterId}/exploration`),
   bugMagnet: () => request<BugMagnetList[]>('/bug-magnet'),
+  takeOver: (runId: string) => request<ExplorationRun>(`/exploration-runs/${runId}/take-over`, { method: 'POST' }),
+  handBack: (runId: string) => request<ExplorationRun>(`/exploration-runs/${runId}/hand-back`, { method: 'POST' }),
   agentRecord: (projectId: string) => request<AgentRecord>(`/projects/${projectId}/agent-record`),
   sessionExploration: (sessionId: string) => request<ExplorationRun | null>(`/sessions/${sessionId}/exploration`),
   explorationRun: (runId: string) => request<ExplorationRun>(`/exploration-runs/${runId}`),

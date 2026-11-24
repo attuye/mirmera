@@ -4,6 +4,7 @@
  *    the caption follows the step on screen, with a box on the element it was about to use.
  *  - Runs without a recording (older ones), and looking back while it works, play the
  *    step pictures one after another instead. */
+import TakeOver from './TakeOver'
 import { useEffect, useRef, useState } from 'react'
 import { Bot, ChevronLeft, ChevronRight, Download, Pause, Play } from 'lucide-react'
 import { api, ExplorationRun, explorationLiveUrl, explorationHarUrl, explorationStepFrameUrl, explorationVideoUrl } from '../api/client'
@@ -163,6 +164,8 @@ export default function AgentBrowser({ run, compact = false }: { run: Exploratio
         <div aria-label="Step on screen" style={{ padding: '7px 10px', borderTop: '1px solid var(--border)', fontSize: 12 }}>
           <span className="mono" style={{ fontSize: 11, color: 'var(--text-quiet)', marginRight: 8 }}>Step {step.n}</span>
           {step.by === 'Mirmera' && <span title={step.kind === 'tour' ? 'After an accepted submit, Mirmera opened the answer page directly, refreshed it, went back, sent the form twice quickly, made its request fail, and did it with the keyboard only' : step.kind === 'confirm' ? "When the run ended, Mirmera replayed each new draft's steps in fresh browsers" : step.kind === 'access' ? "Mirmera opened this user's own pages signed out and as the second user" : step.kind === 'signout' ? 'At the end of the run, Mirmera signed out and read what the app left in the browser' : 'The AI was stuck, so Mirmera took this step itself'} style={{ fontSize: 10.5, marginRight: 6, padding: '1px 6px', borderRadius: 8, background: 'var(--accent-bg)', color: 'var(--accent)' }}>{step.kind === 'tour' ? "Mirmera's flow tour" : step.kind === 'confirm' ? "Mirmera's replay" : step.kind === 'access' ? "Mirmera: who sees what" : step.kind === 'signout' ? 'Mirmera signed out' : 'Mirmera stepped in'}</span>}
+          {step.by && step.by !== 'Mirmera' && <span title={step.kind === 'takeover' ? 'The tester took the browser; the agent waited' : step.kind === 'handback' ? 'The tester gave the browser back; the agent carried on from here' : 'The tester did this, in the same browser'}
+            style={{ fontSize: 10.5, marginRight: 6, padding: '1px 6px', borderRadius: 8, background: 'var(--panel-alt)', color: 'var(--text)', border: '1px solid var(--border)' }}>{step.by}</span>}
           <span>{step.action}</span>
           {step.status !== 'ok' && <span style={{ color: 'var(--warning)' }}> ({step.status})</span>}
           {step.detail && <span style={{ color: 'var(--text-secondary)' }}> → {step.detail}</span>}
@@ -176,6 +179,7 @@ export default function AgentBrowser({ run, compact = false }: { run: Exploratio
         </div>
       )}
 
+      {!compact && running && run.with_me && <div style={{ padding: '8px 10px', borderTop: '1px solid var(--border)' }}><TakeOver run={run} /></div>}
       {!compact && running && <PairBox run={run} />}
 
       {!compact && (mode === 'video' || framed.length > 0) && (
